@@ -4,9 +4,10 @@ An ESP32-C6 Zigbee coordinator that drives 4 Zigbee bulbs through a daylight
 simulation and responds to one physical button controller:
 
 - **3 "wall" bulbs** fade through a warm-to-cool, dim-to-bright curve
-  between a configurable sunrise and sunset, simulating local daylight.
-- **1 "work" bulb** holds a fixed cool-neutral "focus" spectrum during a
-  configurable work window (default 08:00-18:00), off outside it.
+  between the real local sunrise and sunset, simulating daylight.
+- **1 "work" bulb** holds a fixed cool-neutral "focus" spectrum.
+- All bulbs only run inside an **active window** (default Mon-Fri,
+  08:00-19:00, 10 min fade at each edge) and are off outside it.
 - **1 button controller** (any simple single-button Zigbee switch):
   - single press -> resume the daylight program
   - long press (Off) -> all lights off until pressed again
@@ -39,6 +40,18 @@ idf.py -p /dev/ttyACM0 flash monitor   # builds too; Ctrl+] quits the monitor
 
 The VS Code ESP-IDF extension's Build/Flash/Monitor buttons do the same
 without the `export.sh` step.
+
+## Active hours
+
+```
+sunsim> config                       # show current settings
+sunsim> config hours 08:00-19:00
+sunsim> config fade 10               # minutes to fade in/out at each edge (0 = hard on/off)
+sunsim> config days mon-fri          # or: all, or a list like mon,tue,thu
+```
+
+Settings are stored on the device and survive reflashing; changes apply
+on the next update.
 
 ## Wi-Fi (clock sync)
 
@@ -131,8 +144,10 @@ To bench-test the daylight curve without waiting for a real sunrise/sunset,
 enable `SUNSIM_DEBUG_FAST_DAY` in menuconfig (and tune
 `SUNSIM_DEBUG_DAY_SECONDS`, default 120). This:
 
-- replaces the wall-clock time source with a synthetic clock that loops a
-  full 24h day every `SUNSIM_DEBUG_DAY_SECONDS` of real time
+- replaces the wall-clock time source with a synthetic clock that loops
+  the active window (`config hours`, e.g. 08:00-19:00) every
+  `SUNSIM_DEBUG_DAY_SECONDS` of real time, stepping through the active
+  days only - the off hours and weekends are skipped
 - updates lights every second instead of every minute, so the gradient is
   visibly animated
 - skips the Wi-Fi/SNTP time sync at boot
@@ -157,7 +172,8 @@ tick to catch up.
 - `main/bulb_endpoint.*` - a Zigbee light endpoint's address, with `turnOn/turnOff/setLevel/setColorTemperature/setHueSaturation`.
 - `main/role_manifest.json` - `ext_addr -> Role` table, filled in from device labels; `main/gen_role_manifest.py` turns it into a C++ header at build time.
 - `main/roles_store.*` - persisted role -> device address/endpoint mapping.
-- `main/pairing_console.*` - serial REPL: `pair`/`unpair`/`roles`/`open`/`wifi`/`restart`/`factory_reset`.
+- `main/pairing_console.*` - serial REPL: `pair`/`unpair`/`roles`/`open`/`config`/`wifi`/`restart`/`factory_reset`.
+- `main/schedule_settings.*` - persists the `config` settings (active hours, fade, days) in NVS.
 - `main/light_rig.*` - owns the 5 paired devices, discovery/binding, and applies the daylight program.
 - `main/button_controller.*` - single/double/long-press state machine, decoupled from Zigbee via callbacks.
 - `main/wifi_time_sync.*` - one-shot Wi-Fi connect + SNTP sync, then Wi-Fi off (keeps the 802.15.4 radio clear).

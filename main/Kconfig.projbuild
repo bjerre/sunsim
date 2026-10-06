@@ -51,8 +51,10 @@ menu "Sunsim Configuration"
         default n
         help
             For bench-testing without waiting for a real sunrise/sunset: the
-            daylight program runs a full 24h cycle every
-            SUNSIM_DEBUG_DAY_SECONDS of real time, looping continuously, and
+            daylight program runs one active window (the `config hours`,
+            e.g. 08:00-19:00, on the next active day - off hours and
+            weekends are skipped) every SUNSIM_DEBUG_DAY_SECONDS of real
+            time, looping continuously, and
             updates lights every second instead of every minute so the
             gradient is visibly animated. Skips the Wi-Fi/SNTP time sync.
             Works fine with only some of the 5 devices paired - whichever

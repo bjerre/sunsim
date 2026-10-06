@@ -1,7 +1,9 @@
 #include "pairing_console.h"
 
 #include <cstdio>
+#include <cmath>
 #include <cstdlib>
+#include <optional>
 #include <string_view>
 
 #include "esp_console.h"
@@ -11,6 +13,7 @@
 #include "freertos/FreeRTOS.h"
 
 #include "light_rig.h"
+#include "schedule_settings.h"
 #include "wifi_time_sync.h"
 
 namespace sunsim {
@@ -170,6 +173,114 @@ int cmdWifi(void *, int argc, char **argv)
     return 0;
 }
 
+constexpr std::string_view kDayNames[] = {"sun", "mon", "tue", "wed", "thu", "fri", "sat"};
+
+void printClock(double hours)
+{
+    const long minutes = std::lround(hours * 60.0);
+    std::printf("%02ld:%02ld", minutes / 60, minutes % 60);
+}
+
+void printSchedule(const DaylightSchedule::Config &c)
+{
+    std::printf("hours ");
+    printClock(c.active_start_hour);
+    std::printf("-");
+    printClock(c.active_end_hour);
+    std::printf("\nfade  %.0f min\ndays ", c.fade_minutes);
+    for (int d = 0; d < 7; ++d) {
+        const int day = (d + 1) % 7; // list Monday first
+        if ((c.active_days >> day) & 1U) {
+            std::printf(" %s", kDayNames[day].data());
+        }
+    }
+    std::printf("\n");
+}
+
+// "mon-fri", "all", or a comma list like "mon,wed,sat".
+std::optional<uint8_t> parseDays(std::string_view arg)
+{
+    if (arg == "mon-fri") {
+        return DaylightSchedule::kMondayToFriday;
+    }
+    if (arg == "all") {
+        return DaylightSchedule::kEveryDay;
+    }
+    uint8_t mask = 0;
+    while (!arg.empty()) {
+        const auto comma = arg.find(',');
+        const auto name  = arg.substr(0, comma);
+        bool       found = false;
+        for (int day = 0; day < 7; ++day) {
+            if (kDayNames[day] == name) {
+                mask |= 1U << day;
+                found = true;
+            }
+        }
+        if (!found) {
+            return std::nullopt;
+        }
+        arg = comma == std::string_view::npos ? std::string_view{} : arg.substr(comma + 1);
+    }
+    return mask ? std::optional<uint8_t>{mask} : std::nullopt;
+}
+
+int cmdConfig(void *ctx, int argc, char **argv)
+{
+    auto &rig = *static_cast<LightRig *>(ctx);
+
+    ZigbeeLock               lock;
+    DaylightSchedule::Config c = rig.scheduleConfig();
+    if (argc == 1) {
+        printSchedule(c);
+        return 0;
+    }
+    const std::string_view key{argv[1]};
+    if (argc != 3) {
+        std::printf("usage: config [hours HH:MM-HH:MM | fade <minutes> | days mon-fri|all|mon,tue,...]\n");
+        return 1;
+    }
+
+    if (key == "hours") {
+        int sh = 0, sm = 0, eh = 0, em = 0;
+        if (std::sscanf(argv[2], "%d:%d-%d:%d", &sh, &sm, &eh, &em) != 4 || sm < 0 || sm > 59 || em < 0 ||
+            em > 59) {
+            std::printf("expected HH:MM-HH:MM, e.g. 08:00-19:00\n");
+            return 1;
+        }
+        const double start = sh + sm / 60.0;
+        const double end   = eh + em / 60.0;
+        if (start < 0.0 || end > 24.0 || start >= end) {
+            std::printf("start must be before end, within 00:00-24:00\n");
+            return 1;
+        }
+        c.active_start_hour = start;
+        c.active_end_hour   = end;
+    } else if (key == "fade") {
+        const int minutes = std::atoi(argv[2]);
+        if (minutes < 0 || minutes > 180) {
+            std::printf("fade must be 0-180 minutes\n");
+            return 1;
+        }
+        c.fade_minutes = minutes;
+    } else if (key == "days") {
+        const auto days = parseDays(argv[2]);
+        if (!days) {
+            std::printf("expected mon-fri, all, or a list like mon,tue,wed\n");
+            return 1;
+        }
+        c.active_days = *days;
+    } else {
+        std::printf("unknown setting '%s' (hours, fade, days)\n", argv[1]);
+        return 1;
+    }
+
+    rig.setScheduleConfig(c);
+    saveScheduleSettings(c);
+    printSchedule(c);
+    return 0;
+}
+
 int cmdRestart(void *, int, char **)
 {
     esp_restart();
@@ -213,6 +324,8 @@ void startPairingConsole(LightRig &rig)
                     "<WallA|WallB|WallC|Work|Button|cancel>", &cmdPair, rig);
     registerCommand("unpair", "Forget a role's device (it can then be re-paired)", "<role|all>", &cmdUnpair, rig);
     registerCommand("open", "Open the network for joining", "[seconds]", &cmdOpen, rig);
+    registerCommand("config", "Show or change the lights' active hours, edge fade and work days",
+                    "[hours HH:MM-HH:MM | fade <min> | days mon-fri|all|mon,tue,...]", &cmdConfig, rig);
     registerCommand("wifi", "Show, set or clear the Wi-Fi network used for the boot-time clock sync",
                     "[<ssid> [password]] | clear", &cmdWifi, rig);
     registerCommand("restart", "Reboot (keeps roles, network and Wi-Fi settings)", nullptr, &cmdRestart, rig);

@@ -49,6 +49,11 @@ public:
     // both this and the simulated day length, keeping the ramp smooth.
     void setTickInterval(std::chrono::seconds interval) noexcept;
 
+    // The live schedule (active window, fade, work days). Changes apply from
+    // the next update; caller must hold the Zigbee lock if the stack is up.
+    [[nodiscard]] const DaylightSchedule::Config &scheduleConfig() const noexcept { return schedule_.config(); }
+    void setScheduleConfig(const DaylightSchedule::Config &config) noexcept { schedule_.setConfig(config); }
+
     // Smooth, continuous update for the periodic heartbeat tick: bulbs
     // ramp from their current level/color to the new target over the tick
     // interval set above.

@@ -178,14 +178,31 @@ Defaults: `warm_mireds=370` (~2700K), `cool_mireds=153` (~6500K),
 
 ### Work bulb (`DaylightSchedule::workState`)
 
-A plain step function, no curve, and deliberately **not** tied to the sun
-— it's a work schedule, not a daylight simulation:
+A fixed light, no curve, and deliberately **not** tied to the sun — it's
+a work light, not a daylight simulation:
 
 ```
-on between [work_start_hour, work_end_hour], off outside
-level  = work_level   (fixed, default 230/254)
-mireds = work_mireds  (fixed, default 200 ≈ 5000K cool-neutral)
+level  = gate · work_level   (default 230/254)
+mireds = work_mireds         (fixed, default 200 ≈ 5000K cool-neutral)
 ```
+
+### Active window (`DaylightSchedule::activeGate`)
+
+Both bulb types are gated by one shared window, set with the `config`
+console command and persisted in NVS (`main/schedule_settings.*`):
+on only on `active_days` (default Mon–Fri) between `active_start_hour` and
+`active_end_hour` (default 08:00–19:00), off otherwise. Inside it, a gate
+factor ramps over `fade_minutes` (default 10) at each edge:
+
+```
+gate = 0                                               outside days/hours
+gate = min(1, (h - start)/fade, (end - h)/fade)        inside
+level_out = round(gate · level), floored to min_level while gate > 0
+```
+
+Only brightness is scaled; color temperature still follows the sun. The
+sun curve still applies inside the window, so in winter the wall bulbs go
+dark at real sunset even before `active_end_hour`.
 
 ## 5. How location is provided
 

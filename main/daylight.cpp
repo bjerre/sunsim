@@ -13,8 +13,31 @@ double hourOfDay(const std::tm &t) noexcept
 }
 } // namespace
 
+double DaylightSchedule::activeGate(const std::tm &local_time) const noexcept
+{
+    if (((config_.active_days >> local_time.tm_wday) & 1U) == 0) {
+        return 0.0;
+    }
+    const double hour = hourOfDay(local_time);
+    if (hour < config_.active_start_hour || hour >= config_.active_end_hour) {
+        return 0.0;
+    }
+    if (config_.fade_minutes <= 0.0) {
+        return 1.0;
+    }
+    const double fade_hours = config_.fade_minutes / 60.0;
+    const double fade_in    = (hour - config_.active_start_hour) / fade_hours;
+    const double fade_out   = (config_.active_end_hour - hour) / fade_hours;
+    return std::fmin(1.0, std::fmin(fade_in, fade_out));
+}
+
 LightState DaylightSchedule::wallState(const std::tm &local_time, double utc_offset_hours) const noexcept
 {
+    const double gate = activeGate(local_time);
+    if (gate <= 0.0) {
+        return {.on = false, .level = 0, .mireds = config_.warm_mireds};
+    }
+
     const double hour        = hourOfDay(local_time);
     const int    day_of_year = local_time.tm_yday + 1;
     const SunTimes sun =
@@ -40,7 +63,7 @@ LightState DaylightSchedule::wallState(const std::tm &local_time, double utc_off
     const double day_progress = (hour_adj - sunrise) / (sunset - sunrise);
     const double brightness   = std::sin(M_PI * day_progress); // 0 at edges, 1 at solar noon
 
-    uint8_t level = static_cast<uint8_t>(std::lround(brightness * config_.max_level));
+    uint8_t level = static_cast<uint8_t>(std::lround(gate * brightness * config_.max_level));
     if (level < config_.min_level) {
         level = config_.min_level;
     }
@@ -53,11 +76,15 @@ LightState DaylightSchedule::wallState(const std::tm &local_time, double utc_off
 
 LightState DaylightSchedule::workState(const std::tm &local_time) const noexcept
 {
-    const double hour = hourOfDay(local_time);
-    if (hour < config_.work_start_hour || hour > config_.work_end_hour) {
+    const double gate = activeGate(local_time);
+    if (gate <= 0.0) {
         return {.on = false, .level = 0, .mireds = config_.work_mireds};
     }
-    return {.on = true, .level = config_.work_level, .mireds = config_.work_mireds};
+    uint8_t level = static_cast<uint8_t>(std::lround(gate * config_.work_level));
+    if (level < config_.min_level) {
+        level = config_.min_level;
+    }
+    return {.on = true, .level = level, .mireds = config_.work_mireds};
 }
 
 } // namespace sunsim

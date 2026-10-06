@@ -9,6 +9,7 @@
 
 #include "fast_day_clock.h"
 #include "pairing_console.h"
+#include "schedule_settings.h"
 #include "sunsim_config.h"
 #include "wifi_time_sync.h"
 
@@ -44,10 +45,15 @@ void SunsimApp::run()
 {
     light_rig_.load();
 
+    DaylightSchedule::Config schedule = light_rig_.scheduleConfig();
+    loadScheduleSettings(schedule);
+    light_rig_.setScheduleConfig(schedule);
+
 #if CONFIG_SUNSIM_DEBUG_FAST_DAY
-    ESP_LOGW(kTag, "DEBUG FAST DAY MODE: simulating a full day every %d seconds", CONFIG_SUNSIM_DEBUG_DAY_SECONDS);
-    light_rig_.setClock(
-        [clock = FastDayClock{std::chrono::seconds{CONFIG_SUNSIM_DEBUG_DAY_SECONDS}}] { return clock.now(); });
+    ESP_LOGW(kTag, "DEBUG FAST DAY MODE: simulating one active window (work day) every %d seconds", CONFIG_SUNSIM_DEBUG_DAY_SECONDS);
+    light_rig_.setClock([this, clock = FastDayClock{std::chrono::seconds{CONFIG_SUNSIM_DEBUG_DAY_SECONDS}}] {
+        return clock.now(light_rig_.scheduleConfig());
+    });
     daylight_tick_seconds_ = 1;
 #endif
     light_rig_.setTickInterval(std::chrono::seconds{daylight_tick_seconds_});
