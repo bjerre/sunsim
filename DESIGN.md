@@ -186,7 +186,7 @@ al., PLOS Biology 2022). With `p` the progress through the active window:
 
 ```
 p      = clamp((h - start) / (end - start), 0, 1)
-level  = gate · work_level                                   (default 230/254)
+level  = gate · max_level
 mireds = work_cool_mireds + p² · (work_warm_mireds - work_cool_mireds)
 ```
 
@@ -195,6 +195,20 @@ Defaults: `work_cool_mireds=167` (~6000K), `work_warm_mireds=333`
 (~5300K at noon on 08:00-19:00) and warms most steeply in the late
 afternoon (~3700K at 16:45). Interpolating in mireds rather than kelvin
 keeps the steps perceptually closer to even.
+
+### Per-light peak intensity (`LightRig::setPeakPercent`)
+
+After the schedule computes a bulb's level, `LightRig` scales it by that
+light's peak percentage (`intensity` console command, NVS key
+`<role>.peak`, defaults walls 100 / work 90):
+
+```
+level_out = max(1, round(level · peak / 100))
+```
+
+So `peak` is the brightness at the curve's maximum (solar noon for wall
+bulbs, mid-window for the work bulb), and every other point scales in
+proportion. Colour temperature is untouched; red alert is not scaled.
 
 ### Active window (`DaylightSchedule::activeGate`)
 

@@ -54,6 +54,19 @@ sunsim> config days mon-fri          # or: all, or a list like mon,tue,thu
 Settings are stored on the device and survive reflashing; changes apply
 on the next update.
 
+## Light intensity
+
+Each light has a peak intensity, 1-100% of the bulb's full brightness,
+for balancing the lights in your scene. It scales that light's whole
+program (not red alert), is stored on the device, and is kept across
+reflashing and re-pairing:
+
+```
+sunsim> intensity              # list (defaults: walls 100, work 90)
+sunsim> intensity WallA 80     # applies within 2s
+sunsim> intensity all 75
+```
+
 ## Status display
 
 The board's LCD (Waveshare ESP32-C6-GEEK, 1.14" ST7789) shows:
@@ -198,7 +211,7 @@ tick to catch up.
 - `main/bulb_endpoint.*` - a Zigbee light endpoint's address, with `turnOn/turnOff/setLevel/setColorTemperature/setHueSaturation`.
 - `main/role_manifest.json` - `ext_addr -> Role` table, filled in from device labels; `main/gen_role_manifest.py` turns it into a C++ header at build time.
 - `main/roles_store.*` - persisted role -> device address/endpoint mapping.
-- `main/pairing_console.*` - serial REPL: `pair`/`unpair`/`roles`/`open`/`status`/`config`/`press`/`wifi`/`restart`/`factory_reset`.
+- `main/pairing_console.*` - serial REPL: `pair`/`unpair`/`roles`/`open`/`status`/`config`/`intensity`/`press`/`wifi`/`restart`/`factory_reset`.
 - `main/day_info.*` - day length and next sunrise/sunset, pure math like `solar.*`.
 - `main/status.*` - one status snapshot shared by the `status` command and the display.
 - `main/status_display.*` - LVGL screen on the on-board LCD.

@@ -385,6 +385,55 @@ int cmdStatus(void *ctx, int, char **)
     return 0;
 }
 
+void printPeaks(const LightRig &rig)
+{
+    for (std::size_t i = 0; i < kRoleCount; ++i) {
+        if (static_cast<Role>(i) == Role::Button) {
+            continue;
+        }
+        std::printf("  %-6s %3u%%\n", roleName(i).data(), rig.peakPercent(static_cast<Role>(i)));
+    }
+}
+
+int cmdIntensity(void *ctx, int argc, char **argv)
+{
+    const auto &c = *static_cast<StatusContext *>(ctx);
+    if (argc == 1) {
+        ZigbeeLock lock;
+        printPeaks(*c.rig);
+        return 0;
+    }
+    const int percent = argc == 3 ? std::atoi(argv[2]) : 0;
+    if (argc != 3 || percent < 1 || percent > 100) {
+        std::printf("usage: intensity [<WallA|WallB|WallC|Work|all> <1-100>]\n");
+        return 1;
+    }
+
+    std::optional<Role> only;
+    if (std::string_view{argv[1]} != "all") {
+        only = parseRole(argv[1]);
+        if (!only || *only == Role::Button) {
+            std::printf("unknown light '%s' (WallA, WallB, WallC, Work or all)\n", argv[1]);
+            return 1;
+        }
+    }
+
+    ZigbeeLock lock;
+    for (std::size_t i = 0; i < kRoleCount; ++i) {
+        const auto role = static_cast<Role>(i);
+        if (role == Role::Button || (only && *only != role)) {
+            continue;
+        }
+        c.rig->setPeakPercent(role, static_cast<uint8_t>(percent));
+        savePeakPercent(role, static_cast<uint8_t>(percent));
+        if (c.button->mode() == LightingMode::Auto) {
+            c.rig->snapRole(role); // show the change now, not at the next tick
+        }
+    }
+    printPeaks(*c.rig);
+    return 0;
+}
+
 int cmdRestart(void *, int, char **)
 {
     esp_restart();
@@ -433,6 +482,8 @@ void startPairingConsole(LightRig &rig, ButtonController &button)
     static StatusContext status_ctx{&rig, &button};
     registerCommand("status", "Time, day length, next sunrise/sunset, mode and device links", nullptr, &cmdStatus,
                     &status_ctx);
+    registerCommand("intensity", "Show or set each light's peak brightness, 1-100%", "[<light|all> <1-100>]",
+                    &cmdIntensity, &status_ctx);
     registerCommand("press", "Simulate the button: single = resume daylight, double = red alert, hold = all off",
                     "single|double|hold", &cmdPress, &button);
     registerCommand("wifi", "Show, set or clear the Wi-Fi network used for the boot-time clock sync",

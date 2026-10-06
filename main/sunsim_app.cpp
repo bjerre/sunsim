@@ -56,6 +56,10 @@ void SunsimApp::run()
     loadScheduleSettings(schedule);
     light_rig_.setScheduleConfig(schedule);
 
+    auto peaks = light_rig_.peakPercents();
+    loadPeakPercents(peaks);
+    light_rig_.setPeakPercents(peaks);
+
 #if CONFIG_SUNSIM_DEBUG_FAST_DAY
     ESP_LOGW(kTag, "DEBUG FAST DAY MODE: simulating one active window (work day) every %d seconds", CONFIG_SUNSIM_DEBUG_DAY_SECONDS);
     light_rig_.setClock([this, clock = FastDayClock{std::chrono::seconds{CONFIG_SUNSIM_DEBUG_DAY_SECONDS}}] {

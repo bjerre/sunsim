@@ -16,6 +16,7 @@ class LightRig;
 //   factory_reset         forget all roles AND the Zigbee network, then restart
 //   config                show active hours, edge fade and work days
 //   config hours|fade|days <value>   change one (see `help config`)
+//   intensity [<light|all> <1-100>]   per-light peak brightness, saved
 //   press single|double|hold   simulate the button (resume / red alert / all off)
 //   wifi [<ssid> [pw]]    show / set the Wi-Fi used for the boot-time clock sync
 //   wifi clear            forget it, falling back to menuconfig's

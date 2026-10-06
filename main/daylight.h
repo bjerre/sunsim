@@ -48,7 +48,6 @@ public:
         // morning. Interpolated in mireds (perceptually closer to even).
         uint16_t work_cool_mireds = 167; // ~6000K at active_start_hour
         uint16_t work_warm_mireds = 333; // ~3000K at active_end_hour
-        uint8_t  work_level      = 230; // bright but not maxed
     };
 
     constexpr DaylightSchedule() noexcept : config_{} {}

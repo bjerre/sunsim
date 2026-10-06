@@ -80,7 +80,7 @@ LightState DaylightSchedule::workState(const std::tm &local_time) const noexcept
     if (gate <= 0.0) {
         return {.on = false, .level = 0, .mireds = config_.work_warm_mireds};
     }
-    uint8_t level = static_cast<uint8_t>(std::lround(gate * config_.work_level));
+    uint8_t level = static_cast<uint8_t>(std::lround(gate * config_.max_level));
     if (level < config_.min_level) {
         level = config_.min_level;
     }

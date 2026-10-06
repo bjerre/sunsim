@@ -1,6 +1,7 @@
 #include "light_rig.h"
 
 #include <chrono>
+#include <cmath>
 #include <ctime>
 #include <limits>
 
@@ -173,6 +174,10 @@ void LightRig::applyRoleWithTransition(Role role, BulbEndpoint::TransitionTime t
         clock_warned_ = true;
         ESP_LOGW(kTag, "Clock not set yet (no time sync) - holding lights off");
     }
+    if (desired.on) {
+        const long scaled = std::lround(desired.level * peaks_[idx] / 100.0);
+        desired.level     = static_cast<uint8_t>(scaled < 1 ? 1 : scaled);
+    }
     AppliedState &cache = applied_[idx];
 
     if (desired.on) {
@@ -185,6 +190,11 @@ void LightRig::applyRoleWithTransition(Role role, BulbEndpoint::TransitionTime t
         bulb->turnOff();
     }
     cache = {.valid = true, .on = desired.on, .level = desired.level};
+}
+
+void LightRig::setPeakPercent(Role role, uint8_t percent) noexcept
+{
+    peaks_[static_cast<std::size_t>(role)] = percent < 1 ? 1 : (percent > 100 ? 100 : percent);
 }
 
 void LightRig::applyRole(Role role)

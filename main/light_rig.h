@@ -65,6 +65,14 @@ public:
     [[nodiscard]] const DaylightSchedule::Config &scheduleConfig() const noexcept { return schedule_.config(); }
     void setScheduleConfig(const DaylightSchedule::Config &config) noexcept { schedule_.setConfig(config); }
 
+    // Per-light peak intensity, 1-100 (% of full brightness): scales that
+    // light's whole program (red alert excepted). Defaults: walls 100,
+    // work 90. Caller must hold the Zigbee lock if the stack is up.
+    [[nodiscard]] uint8_t peakPercent(Role role) const noexcept { return peaks_[static_cast<std::size_t>(role)]; }
+    void setPeakPercent(Role role, uint8_t percent) noexcept;
+    void setPeakPercents(const std::array<uint8_t, kRoleCount> &peaks) noexcept { peaks_ = peaks; }
+    [[nodiscard]] const std::array<uint8_t, kRoleCount> &peakPercents() const noexcept { return peaks_; }
+
     // Smooth, continuous update for the periodic heartbeat tick: bulbs
     // ramp from their current level/color to the new target over the tick
     // interval set above.
@@ -153,6 +161,7 @@ private:
     bool                        red_alert_bright_ = false;
     std::optional<Role>         armed_role_;
     std::array<Liveness, kRoleCount> liveness_{};
+    std::array<uint8_t, kRoleCount>  peaks_{100, 100, 100, 90, 100};
     bool                        require_synced_clock_ = true;
     bool                        clock_warned_         = false;
 
