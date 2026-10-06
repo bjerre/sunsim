@@ -1,0 +1,7 @@
+{
+    "idf.currentSetup": "/home/bjerre/project/esp-idf",
+    "cmake.configureOnOpen": false,
+    "cmake.configureEnvironment": {
+        "IDF_PATH": "/home/bjerre/project/esp-idf"
+    }
+}

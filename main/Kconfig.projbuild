@@ -1,0 +1,82 @@
+menu "Sunsim Configuration"
+
+    config SUNSIM_PRIMARY_CHANNEL
+        int "Zigbee primary channel"
+        range 11 26
+        default 13
+        help
+            Zigbee channel sunsim forms its network on.
+
+    config SUNSIM_SECONDARY_CHANNEL_MASK
+        hex "Zigbee secondary channel mask"
+        default 0x07FFF800
+        help
+            Fallback channel mask used if the primary channel is unusable.
+
+    config SUNSIM_WIFI_SSID
+        string "Wi-Fi SSID (used once at boot to sync time over SNTP)"
+        default ""
+
+    config SUNSIM_WIFI_PASSWORD
+        string "Wi-Fi password"
+        default ""
+
+    config SUNSIM_TZ
+        string "POSIX TZ string for local time"
+        default "UTC0"
+        help
+            Determines the local time the daylight/work-light schedule runs on.
+            Examples: "UTC0", "EST5EDT,M3.2.0/2,M11.1.0/2" (US Eastern, with DST),
+            "CET-1CEST,M3.5.0,M10.5.0/3" (Central Europe, with DST).
+
+    config SUNSIM_LATITUDE_DEG
+        string "Latitude in decimal degrees (positive = North)"
+        default "0.0"
+        help
+            Used to compute real sunrise/sunset times for the wall bulbs'
+            daylight curve. Left at 0.0 (the equator), sunrise/sunset land
+            close to 06:00/18:00 year-round. Example: "55.6761" for Copenhagen.
+
+    config SUNSIM_LONGITUDE_DEG
+        string "Longitude in decimal degrees (positive = East)"
+        default "0.0"
+        help
+            Used together with SUNSIM_TZ to compute real sunrise/sunset
+            times. Left at 0.0 (the Greenwich meridian), only the UTC offset
+            from SUNSIM_TZ affects the result. Example: "12.5683" for
+            Copenhagen.
+
+    config SUNSIM_DEBUG_FAST_DAY
+        bool "Debug: compress a full day into a short demo loop"
+        default n
+        help
+            For bench-testing without waiting for a real sunrise/sunset: the
+            daylight program runs a full 24h cycle every
+            SUNSIM_DEBUG_DAY_SECONDS of real time, looping continuously, and
+            updates lights every second instead of every minute so the
+            gradient is visibly animated. Skips the Wi-Fi/SNTP time sync.
+            Works fine with only some of the 5 devices paired - whichever
+            bulbs you've joined will still run the sped-up program.
+
+    config SUNSIM_DEBUG_DAY_SECONDS
+        int "Debug: real seconds per simulated day"
+        depends on SUNSIM_DEBUG_FAST_DAY
+        range 10 3600
+        default 120
+
+    config SUNSIM_TOUCHLINK_RESET_TOOL
+        bool "Build as a Touchlink factory-reset tool (replaces the sunsim app)"
+        default n
+        help
+            Replaces the normal sunsim app with a standalone tool: hold the
+            board within a few cm of a Zigbee bulb and it is factory-reset
+            over Touchlink (no power-cycling dance needed). Runs forever,
+            re-scanning every few seconds so you can walk the board from
+            bulb to bulb. Flash this, reset your bulbs, then reflash the
+            normal sunsim firmware (with this disabled) to actually pair
+            them. Only works on Touchlink/ZLL-capable bulbs held very close
+            (Touchlink intentionally uses reduced TX power) - untested
+            against real hardware, so verify on one bulb before relying on
+            it for all of them.
+
+endmenu

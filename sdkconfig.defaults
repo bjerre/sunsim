@@ -1,0 +1,22 @@
+#
+# Partition Table
+#
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+# end of Partition Table
+
+#
+# Zigbee
+#
+CONFIG_ZB_ENABLED=y
+# end of Zigbee
+
+#
+# Wi-Fi (used once at boot to sync time over SNTP)
+#
+CONFIG_ESP_WIFI_ENABLED=y
+# end of Wi-Fi
+
+#
+# C++ exceptions (off by default in ESP-IDF; not needed here, kept minimal)
+#

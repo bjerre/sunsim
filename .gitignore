@@ -1,0 +1,10 @@
+build/
+managed_components/
+sdkconfig
+sdkconfig.old
+.vscode/.ropeproject
+*.o
+*.obj
+.DS_Store
+*.swp
+.claude/
