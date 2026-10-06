@@ -41,11 +41,15 @@ public:
         double   fade_minutes      = 10.0;
         uint8_t  active_days       = kMondayToFriday; // bit n = tm_wday n (0 = Sunday)
 
-        // Work light runs cool -> warm across the active window: cool,
-        // alerting light in the morning, warming steeply through the
-        // afternoon to cut melatonin-suppressing blue light in the evening.
-        // Ease-in (progress squared), so it stays near cool for most of the
-        // morning. Interpolated in mireds (perceptually closer to even).
+        // Work light runs cool -> warm across the core work hours (inside
+        // the longer active window it's on for): cool, alerting light in the
+        // morning, warming steeply through the afternoon to cut
+        // melatonin-suppressing blue light in the evening, then holding warm
+        // after work_end_hour. Ease-in (progress squared), so it stays near
+        // cool for most of the morning. Interpolated in mireds (perceptually
+        // closer to even).
+        double   work_start_hour  = 8.5;  // 08:30: cool until here
+        double   work_end_hour    = 17.5; // 17:30: fully warm from here
         uint16_t work_cool_mireds = 167; // ~6000K at active_start_hour
         uint16_t work_warm_mireds = 333; // ~3000K at active_end_hour
     };

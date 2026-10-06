@@ -6,7 +6,8 @@ simulation and responds to one physical button controller:
 - **3 "wall" bulbs** fade through a warm-to-cool, dim-to-bright curve
   between the real local sunrise and sunset, simulating daylight.
 - **1 "work" bulb** stays bright and shifts cool to warm across the work
-  day (~6000K in the morning to ~3000K by evening).
+  hours (default 08:30-17:30: ~6000K in the morning to ~3000K by
+  17:30, then holds warm).
 - All bulbs only run inside an **active window** (default Mon-Fri,
   08:00-19:00, 10 min fade at each edge) and are off outside it.
 - **1 button controller** (any simple single-button Zigbee switch):
@@ -47,6 +48,7 @@ without the `export.sh` step.
 ```
 sunsim> config                       # show current settings
 sunsim> config hours 08:00-19:00
+sunsim> config workhours 08:30-17:30   # work light's cool -> warm span
 sunsim> config fade 10               # minutes to fade in/out at each edge (0 = hard on/off)
 sunsim> config days mon-fri          # or: all, or a list like mon,tue,thu
 ```

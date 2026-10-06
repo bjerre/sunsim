@@ -85,8 +85,8 @@ LightState DaylightSchedule::workState(const std::tm &local_time) const noexcept
         level = config_.min_level;
     }
 
-    const double window   = config_.active_end_hour - config_.active_start_hour;
-    const double progress = std::fmin(1.0, std::fmax(0.0, (hourOfDay(local_time) - config_.active_start_hour) / window));
+    const double window   = config_.work_end_hour - config_.work_start_hour;
+    const double progress = std::fmin(1.0, std::fmax(0.0, (hourOfDay(local_time) - config_.work_start_hour) / window));
     const double warmth   = progress * progress; // ease-in: stays cool through the morning
     const auto   mireds   = static_cast<uint16_t>(
         std::lround(config_.work_cool_mireds + warmth * (config_.work_warm_mireds - config_.work_cool_mireds)));

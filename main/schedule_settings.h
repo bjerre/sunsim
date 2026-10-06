@@ -9,7 +9,7 @@
 namespace sunsim {
 
 // Persists the user-tunable parts of DaylightSchedule::Config (active
-// window hours, fade, work days) in NVS, set from the `config` console
+// window hours, fade, work days, work-light colour hours) in NVS, set from the `config` console
 // command. Each setting is its own key, so ones never saved - or added in a
 // later firmware - keep the built-in default from Config.
 

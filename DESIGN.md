@@ -178,22 +178,25 @@ Defaults: `warm_mireds=370` (~2700K), `cool_mireds=153` (~6500K),
 
 ### Work bulb (`DaylightSchedule::workState`)
 
-Bright, and **cool to warm** across the active window rather than tied to
-the sun: cool, blue-rich light in the morning supports alertness and
+Bright, and **cool to warm** across the core work hours (`work_start_hour`
+to `work_end_hour`, default 08:30-17:30, inside the longer 08:00-19:00
+active window it's on for) rather than tied to the sun: cool, blue-rich light in the morning supports alertness and
 circadian entrainment, while blue-rich light in the evening suppresses
 melatonin and delays sleep (cf. the evening-light guidance in Brown et
-al., PLOS Biology 2022). With `p` the progress through the active window:
+al., PLOS Biology 2022). With `p` the progress through the work hours (so it holds cool before
+them and warm after):
 
 ```
-p      = clamp((h - start) / (end - start), 0, 1)
+p      = clamp((h - work_start) / (work_end - work_start), 0, 1)
 level  = gate · max_level
 mireds = work_cool_mireds + p² · (work_warm_mireds - work_cool_mireds)
 ```
 
 Defaults: `work_cool_mireds=167` (~6000K), `work_warm_mireds=333`
 (~3000K). The ease-in (`p²`) keeps it near-cool through the morning
-(~5300K at noon on 08:00-19:00) and warms most steeply in the late
-afternoon (~3700K at 16:45). Interpolating in mireds rather than kelvin
+(~5200K at noon) and warms most steeply in the afternoon (~3900K at
+15:00), reaching ~3000K at 17:30 and holding there until the light turns
+off. Interpolating in mireds rather than kelvin
 keeps the steps perceptually closer to even.
 
 ### Per-light peak intensity (`LightRig::setPeakPercent`)

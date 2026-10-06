@@ -190,7 +190,11 @@ void printSchedule(const DaylightSchedule::Config &c)
     printClock(c.active_start_hour);
     std::printf("-");
     printClock(c.active_end_hour);
-    std::printf("\nfade  %.0f min\ndays ", c.fade_minutes);
+    std::printf("\nfade  %.0f min\nwork  ", c.fade_minutes);
+    printClock(c.work_start_hour);
+    std::printf("-");
+    printClock(c.work_end_hour);
+    std::printf("  (work light cool -> warm)\ndays ");
     for (int d = 0; d < 7; ++d) {
         const int day = (d + 1) % 7; // list Monday first
         if ((c.active_days >> day) & 1U) {
@@ -240,11 +244,12 @@ int cmdConfig(void *ctx, int argc, char **argv)
     }
     const std::string_view key{argv[1]};
     if (argc != 3) {
-        std::printf("usage: config [hours HH:MM-HH:MM | fade <minutes> | days mon-fri|all|mon,tue,...]\n");
+        std::printf("usage: config [hours HH:MM-HH:MM | workhours HH:MM-HH:MM | fade <minutes> |\n"
+                    "               days mon-fri|all|mon,tue,...]\n");
         return 1;
     }
 
-    if (key == "hours") {
+    if (key == "hours" || key == "workhours") {
         int sh = 0, sm = 0, eh = 0, em = 0;
         if (std::sscanf(argv[2], "%d:%d-%d:%d", &sh, &sm, &eh, &em) != 4 || sm < 0 || sm > 59 || em < 0 ||
             em > 59) {
@@ -257,8 +262,13 @@ int cmdConfig(void *ctx, int argc, char **argv)
             std::printf("start must be before end, within 00:00-24:00\n");
             return 1;
         }
-        c.active_start_hour = start;
-        c.active_end_hour   = end;
+        if (key == "hours") {
+            c.active_start_hour = start;
+            c.active_end_hour   = end;
+        } else {
+            c.work_start_hour = start;
+            c.work_end_hour   = end;
+        }
     } else if (key == "fade") {
         const int minutes = std::atoi(argv[2]);
         if (minutes < 0 || minutes > 180) {
@@ -274,7 +284,7 @@ int cmdConfig(void *ctx, int argc, char **argv)
         }
         c.active_days = *days;
     } else {
-        std::printf("unknown setting '%s' (hours, fade, days)\n", argv[1]);
+        std::printf("unknown setting '%s' (hours, workhours, fade, days)\n", argv[1]);
         return 1;
     }
 
@@ -477,8 +487,8 @@ void startPairingConsole(LightRig &rig, ButtonController &button)
                     "<WallA|WallB|WallC|Work|Button|cancel>", &cmdPair, &rig);
     registerCommand("unpair", "Forget a role's device (it can then be re-paired)", "<role|all>", &cmdUnpair, &rig);
     registerCommand("open", "Open the network for joining", "[seconds]", &cmdOpen, &rig);
-    registerCommand("config", "Show or change the lights' active hours, edge fade and work days",
-                    "[hours HH:MM-HH:MM | fade <min> | days mon-fri|all|mon,tue,...]", &cmdConfig, &rig);
+    registerCommand("config", "Show or change active hours, work-light colour hours, edge fade and work days",
+                    "[hours|workhours HH:MM-HH:MM | fade <min> | days mon-fri|all|mon,tue,...]", &cmdConfig, &rig);
     static StatusContext status_ctx{&rig, &button};
     registerCommand("status", "Time, day length, next sunrise/sunset, mode and device links", nullptr, &cmdStatus,
                     &status_ctx);

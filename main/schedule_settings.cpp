@@ -17,6 +17,8 @@ constexpr const char *kStartKey = "act.start";
 constexpr const char *kEndKey   = "act.end";
 constexpr const char *kFadeKey  = "act.fade";
 constexpr const char *kDaysKey  = "act.days";
+constexpr const char *kWorkStartKey = "work.start";
+constexpr const char *kWorkEndKey   = "work.end";
 
 uint16_t toMinutes(double hours) noexcept
 {
@@ -46,6 +48,12 @@ void loadScheduleSettings(DaylightSchedule::Config &config)
     if (nvs_get_u16(handle, kFadeKey, &minutes) == ESP_OK) {
         config.fade_minutes = minutes;
     }
+    if (nvs_get_u16(handle, kWorkStartKey, &minutes) == ESP_OK) {
+        config.work_start_hour = minutes / 60.0;
+    }
+    if (nvs_get_u16(handle, kWorkEndKey, &minutes) == ESP_OK) {
+        config.work_end_hour = minutes / 60.0;
+    }
     uint8_t days = 0;
     if (nvs_get_u8(handle, kDaysKey, &days) == ESP_OK) {
         config.active_days = days;
@@ -69,6 +77,12 @@ void saveScheduleSettings(const DaylightSchedule::Config &config)
     }
     if (err == ESP_OK) {
         err = nvs_set_u8(handle, kDaysKey, config.active_days);
+    }
+    if (err == ESP_OK) {
+        err = nvs_set_u16(handle, kWorkStartKey, toMinutes(config.work_start_hour));
+    }
+    if (err == ESP_OK) {
+        err = nvs_set_u16(handle, kWorkEndKey, toMinutes(config.work_end_hour));
     }
     if (err == ESP_OK) {
         err = nvs_commit(handle);
