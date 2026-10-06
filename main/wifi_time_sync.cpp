@@ -7,6 +7,7 @@
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
 #include "esp_wifi.h"
+#include "nvs.h"
 
 namespace sunsim {
 
@@ -17,6 +18,28 @@ constexpr const char *kTag = "WIFI_TIME";
 constexpr int kGotIpBit   = BIT0;
 constexpr int kFailBit    = BIT1;
 constexpr int kMaxRetries = 5;
+
+constexpr const char *kNamespace   = "sunsim";
+constexpr const char *kSsidKey     = "wifi.ssid";
+constexpr const char *kPasswordKey = "wifi.pass";
+
+// Sizes of wifi_sta_config_t's ssid/password fields, less the terminator.
+constexpr std::size_t kMaxSsidLen     = sizeof(wifi_sta_config_t::ssid) - 1;
+constexpr std::size_t kMaxPasswordLen = sizeof(wifi_sta_config_t::password) - 1;
+
+bool readNvsString(nvs_handle_t handle, const char *key, std::string &out)
+{
+    std::size_t len = 0;
+    if (nvs_get_str(handle, key, nullptr, &len) != ESP_OK || len == 0) {
+        return false;
+    }
+    out.resize(len);
+    if (nvs_get_str(handle, key, out.data(), &len) != ESP_OK) {
+        return false;
+    }
+    out.resize(len - 1); // drop the terminator nvs_get_str counts
+    return true;
+}
 
 bool ensureWifiStackInitialized()
 {
@@ -44,6 +67,56 @@ bool ensureWifiStackInitialized()
 
 } // namespace
 
+WifiCredentials loadWifiCredentials()
+{
+    nvs_handle_t handle;
+    if (nvs_open(kNamespace, NVS_READONLY, &handle) == ESP_OK) {
+        WifiCredentials creds;
+        creds.from_nvs = true;
+        const bool      found = readNvsString(handle, kSsidKey, creds.ssid);
+        if (found) {
+            readNvsString(handle, kPasswordKey, creds.password); // absent = open network
+        }
+        nvs_close(handle);
+        if (found) {
+            return creds;
+        }
+    }
+    return {.ssid = CONFIG_SUNSIM_WIFI_SSID, .password = CONFIG_SUNSIM_WIFI_PASSWORD, .from_nvs = false};
+}
+
+bool saveWifiCredentials(std::string_view ssid, std::string_view password)
+{
+    if (ssid.empty() || ssid.size() > kMaxSsidLen || password.size() > kMaxPasswordLen) {
+        return false;
+    }
+    nvs_handle_t handle;
+    if (nvs_open(kNamespace, NVS_READWRITE, &handle) != ESP_OK) {
+        return false;
+    }
+    esp_err_t err = nvs_set_str(handle, kSsidKey, std::string{ssid}.c_str());
+    if (err == ESP_OK) {
+        err = nvs_set_str(handle, kPasswordKey, std::string{password}.c_str());
+    }
+    if (err == ESP_OK) {
+        err = nvs_commit(handle);
+    }
+    nvs_close(handle);
+    return err == ESP_OK;
+}
+
+void clearWifiCredentials()
+{
+    nvs_handle_t handle;
+    if (nvs_open(kNamespace, NVS_READWRITE, &handle) != ESP_OK) {
+        return;
+    }
+    nvs_erase_key(handle, kSsidKey);
+    nvs_erase_key(handle, kPasswordKey);
+    nvs_commit(handle);
+    nvs_close(handle);
+}
+
 void WifiTimeSync::onWifiEvent(void *arg, esp_event_base_t event_base, int32_t event_id, void *)
 {
     auto *self = static_cast<WifiTimeSync *>(arg);
@@ -65,10 +138,12 @@ void WifiTimeSync::onWifiEvent(void *arg, esp_event_base_t event_base, int32_t e
 
 bool WifiTimeSync::run(std::chrono::milliseconds connect_timeout, std::chrono::milliseconds sntp_timeout)
 {
-    if (std::strlen(CONFIG_SUNSIM_WIFI_SSID) == 0) {
-        ESP_LOGW(kTag, "No Wi-Fi SSID configured, skipping time sync");
+    const WifiCredentials creds = loadWifiCredentials();
+    if (creds.ssid.empty()) {
+        ESP_LOGW(kTag, "No Wi-Fi SSID configured (use the `wifi` console command), skipping time sync");
         return false;
     }
+    ESP_LOGI(kTag, "Connecting to \"%s\" (from %s)", creds.ssid.c_str(), creds.from_nvs ? "console" : "menuconfig");
     if (!ensureWifiStackInitialized()) {
         ESP_LOGE(kTag, "Failed to bring up Wi-Fi netif");
         return false;
@@ -85,10 +160,8 @@ bool WifiTimeSync::run(std::chrono::milliseconds connect_timeout, std::chrono::m
                                          &ip_handler_instance);
 
     wifi_config_t wifi_config{};
-    std::strncpy(reinterpret_cast<char *>(wifi_config.sta.ssid), CONFIG_SUNSIM_WIFI_SSID,
-                 sizeof(wifi_config.sta.ssid) - 1);
-    std::strncpy(reinterpret_cast<char *>(wifi_config.sta.password), CONFIG_SUNSIM_WIFI_PASSWORD,
-                 sizeof(wifi_config.sta.password) - 1);
+    std::strncpy(reinterpret_cast<char *>(wifi_config.sta.ssid), creds.ssid.c_str(), kMaxSsidLen);
+    std::strncpy(reinterpret_cast<char *>(wifi_config.sta.password), creds.password.c_str(), kMaxPasswordLen);
 
     esp_wifi_set_mode(WIFI_MODE_STA);
     esp_wifi_set_config(WIFI_IF_STA, &wifi_config);

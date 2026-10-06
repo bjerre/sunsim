@@ -76,6 +76,11 @@ public:
     void cancelPairing() noexcept;
     [[nodiscard]] bool isAssigned(Role role) const noexcept { return roles_.at(role).valid; }
 
+    // Re-sends endpoint discovery for every assigned device whose endpoint
+    // is still unknown (e.g. its Match_Desc went unanswered right after
+    // joining). Caller must hold the Zigbee lock.
+    void retryMissingEndpoints();
+
     void unpair(Role role);
     void unpairAll();
     void logRoles() const;

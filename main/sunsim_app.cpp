@@ -16,6 +16,8 @@ namespace sunsim {
 
 namespace {
 constexpr const char *kTag = "SUNSIM";
+
+constexpr int kDiscoveryRetrySeconds = 15;
 } // namespace
 
 SunsimApp &SunsimApp::instance()
@@ -84,6 +86,11 @@ void SunsimApp::heartbeatTick()
     esp_zigbee_lock_acquire(portMAX_DELAY);
 
     button_.tick();
+
+    if (++discovery_retry_ticks_ >= kDiscoveryRetrySeconds) {
+        discovery_retry_ticks_ = 0;
+        light_rig_.retryMissingEndpoints();
+    }
 
     if (++heartbeat_ticks_ >= daylight_tick_seconds_) {
         heartbeat_ticks_ = 0;
@@ -234,7 +241,9 @@ void SunsimApp::handleZclAction(ezb_zcl_core_action_callback_id_t callback_id, v
     } break;
     case EZB_ZCL_CORE_DEFAULT_RSP_CB_ID: {
         auto *rsp = static_cast<ezb_zcl_cmd_default_rsp_message_t *>(message);
-        ESP_LOGD(kTag, "Default response status(0x%02x)", rsp->in.status_code);
+        if (rsp->in.status_code != 0) { // success acks arrive several times a second; only failures matter
+            ESP_LOGW(kTag, "Default response status(0x%02x)", rsp->in.status_code);
+        }
     } break;
     default:
         break;

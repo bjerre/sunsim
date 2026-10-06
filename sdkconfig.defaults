@@ -3,6 +3,7 @@
 #
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 # end of Partition Table
 
 #
@@ -20,3 +21,11 @@ CONFIG_ESP_WIFI_ENABLED=y
 #
 # C++ exceptions (off by default in ESP-IDF; not needed here, kept minimal)
 #
+
+#
+# Console on the C6's built-in USB-Serial-JTAG port (/dev/ttyACM0), so the
+# sunsim> REPL takes input over the same USB cable used for flashing
+#
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# end of Console
+

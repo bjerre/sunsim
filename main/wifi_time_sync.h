@@ -1,12 +1,28 @@
 #pragma once
 
 #include <chrono>
+#include <string>
+#include <string_view>
 
 #include "esp_event.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 
 namespace sunsim {
+
+// Wi-Fi credentials for the boot-time SNTP sync. Ones saved from the console
+// (`wifi <ssid> <password>`, stored in NVS so they survive reflashing) take
+// precedence over the menuconfig CONFIG_SUNSIM_WIFI_* fallback.
+struct WifiCredentials {
+    std::string ssid;
+    std::string password;
+    bool        from_nvs = false;
+};
+
+[[nodiscard]] WifiCredentials loadWifiCredentials();
+// Returns false if the SSID/password is too long for Wi-Fi or NVS failed.
+bool saveWifiCredentials(std::string_view ssid, std::string_view password);
+void clearWifiCredentials();
 
 // Connects to Wi-Fi (blocking, with its own retry/timeout), syncs the clock
 // over SNTP, then disconnects and stops Wi-Fi so it doesn't contend with

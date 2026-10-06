@@ -22,12 +22,38 @@ and roles work, and the math behind the daylight curve.
 
 ## Building
 
+`idf.py` only works in a shell where ESP-IDF's environment has been loaded
+(once per terminal):
+
 ```
-idf.py set-target esp32c6
-idf.py menuconfig   # under "Sunsim Configuration": Wi-Fi SSID/password, TZ,
-                    # latitude/longitude, channel
-idf.py build flash monitor
+. ~/project/esp-idf/export.sh
 ```
+
+Then, from this directory:
+
+```
+idf.py set-target esp32c6   # first time only - it regenerates sdkconfig
+idf.py menuconfig           # "Sunsim Configuration": TZ, latitude/longitude, channel
+idf.py -p /dev/ttyACM0 flash monitor   # builds too; Ctrl+] quits the monitor
+```
+
+The VS Code ESP-IDF extension's Build/Flash/Monitor buttons do the same
+without the `export.sh` step.
+
+## Wi-Fi (clock sync)
+
+sunsim connects to Wi-Fi once at boot to set its clock over SNTP. Set the
+network from the serial console; it's stored on the device and survives
+reflashing:
+
+```
+sunsim> wifi "My Network" mypassword
+sunsim> restart
+```
+
+`wifi` alone shows the current network, `wifi clear` forgets it. The Wi-Fi
+SSID/password in menuconfig still work as a fallback when none is set from
+the console.
 
 Latitude/longitude (decimal degrees, North/East positive) drive the wall
 bulbs' sunrise/sunset calculation - see
@@ -38,7 +64,8 @@ bulbs' sunrise/sunset calculation - see
 ## Pairing
 
 Roles (`WallA`/`WallB`/`WallC`/`Work`/`Button`) are assigned from the serial
-console (`idf.py monitor`, on the UART port), one device at a time:
+console (`idf.py monitor`, over the same USB cable used for flashing), one
+device at a time:
 
 ```
 sunsim> pair WallA        # arms WallA and opens the network for 180s
@@ -130,7 +157,7 @@ tick to catch up.
 - `main/bulb_endpoint.*` - a Zigbee light endpoint's address, with `turnOn/turnOff/setLevel/setColorTemperature/setHueSaturation`.
 - `main/role_manifest.json` - `ext_addr -> Role` table, filled in from device labels; `main/gen_role_manifest.py` turns it into a C++ header at build time.
 - `main/roles_store.*` - persisted role -> device address/endpoint mapping.
-- `main/pairing_console.*` - serial REPL for `pair`/`unpair`/`roles`/`open`/`factory_reset`.
+- `main/pairing_console.*` - serial REPL: `pair`/`unpair`/`roles`/`open`/`wifi`/`restart`/`factory_reset`.
 - `main/light_rig.*` - owns the 5 paired devices, discovery/binding, and applies the daylight program.
 - `main/button_controller.*` - single/double/long-press state machine, decoupled from Zigbee via callbacks.
 - `main/wifi_time_sync.*` - one-shot Wi-Fi connect + SNTP sync, then Wi-Fi off (keeps the 802.15.4 radio clear).

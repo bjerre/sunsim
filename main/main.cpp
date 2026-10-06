@@ -4,7 +4,6 @@
 #include "nvs_flash.h"
 
 #include "sunsim_app.h"
-#include "touchlink_reset_tool.h"
 
 extern "C" void app_main(void)
 {
@@ -13,9 +12,5 @@ extern "C" void app_main(void)
     setenv("TZ", CONFIG_SUNSIM_TZ, 1);
     tzset();
 
-#if CONFIG_SUNSIM_TOUCHLINK_RESET_TOOL
-    sunsim::runTouchlinkResetTool();
-#else
     sunsim::SunsimApp::instance().run();
-#endif
 }

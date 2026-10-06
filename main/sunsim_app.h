@@ -53,6 +53,7 @@ private:
     esp_timer_handle_t retry_timer_     = nullptr;
     ezb_bdb_comm_mode_mask_t pending_retry_mode_   = 0;
     int                heartbeat_ticks_            = 0;
+    int                discovery_retry_ticks_      = 0;
     int                daylight_tick_seconds_      = 60;
 };
 

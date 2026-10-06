@@ -64,19 +64,4 @@ menu "Sunsim Configuration"
         range 10 3600
         default 120
 
-    config SUNSIM_TOUCHLINK_RESET_TOOL
-        bool "Build as a Touchlink factory-reset tool (replaces the sunsim app)"
-        default n
-        help
-            Replaces the normal sunsim app with a standalone tool: hold the
-            board within a few cm of a Zigbee bulb and it is factory-reset
-            over Touchlink (no power-cycling dance needed). Runs forever,
-            re-scanning every few seconds so you can walk the board from
-            bulb to bulb. Flash this, reset your bulbs, then reflash the
-            normal sunsim firmware (with this disabled) to actually pair
-            them. Only works on Touchlink/ZLL-capable bulbs held very close
-            (Touchlink intentionally uses reduced TX power) - untested
-            against real hardware, so verify on one bulb before relying on
-            it for all of them.
-
 endmenu

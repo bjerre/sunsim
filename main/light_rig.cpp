@@ -225,6 +225,17 @@ void LightRig::handleDeviceAnnounce(uint64_t ext_addr, uint16_t short_addr)
     discoverDevice(role_index);
 }
 
+void LightRig::retryMissingEndpoints()
+{
+    for (std::size_t i = 0; i < kRoleCount; ++i) {
+        const DeviceRole &d = roles_.at(i);
+        if (d.valid && d.endpoint == 0) {
+            ESP_LOGI(kTag, "Retrying endpoint discovery for %s (short=0x%04x)", roleName(i).data(), d.short_addr);
+            discoverDevice(i);
+        }
+    }
+}
+
 void LightRig::armPairing(Role role) noexcept
 {
     armed_role_ = role;
@@ -274,9 +285,10 @@ void LightRig::discoverDevice(std::size_t role_index)
     DeviceRole &d   = roles_.at(role_index);
     void       *ctx = reinterpret_cast<void *>(static_cast<intptr_t>(role_index));
 
-    // No Zigbee lock here: discoverDevice() only ever runs from within the
-    // ZDO signal handler, itself a Zigbee callback, where the lock is
-    // already held by the stack (see esp_zigbee_lock_acquire's doc comment).
+    // No Zigbee lock here: discoverDevice() only runs from within Zigbee
+    // callbacks, where the stack already holds the lock (see
+    // esp_zigbee_lock_acquire's doc comment), or from retryMissingEndpoints(),
+    // whose caller holds it.
     if (role_index == static_cast<std::size_t>(Role::Button)) {
         static uint16_t           out_clusters[] = {EZB_ZCL_CLUSTER_ID_ON_OFF};
         ezb_zdo_match_desc_req_t req{};
@@ -335,7 +347,10 @@ void LightRig::onMatchDescBulbResult(const ezb_zdo_match_desc_req_result_t *resu
     const auto idx = static_cast<std::size_t>(reinterpret_cast<intptr_t>(user_ctx));
     if (!result || result->error != EZB_ERR_NONE || !result->rsp ||
         result->rsp->status != EZB_ZDP_STATUS_SUCCESS || result->rsp->match_length == 0) {
-        ESP_LOGW(kTag, "Could not find light endpoint for role %u", static_cast<unsigned>(idx));
+        ESP_LOGW(kTag, "Could not find light endpoint for %s (err=0x%x status=0x%x matches=%d), will retry",
+                 roleName(idx).data(), result ? result->error : -1,
+                 (result && result->rsp) ? result->rsp->status : -1,
+                 (result && result->rsp) ? result->rsp->match_length : -1);
         return;
     }
     DeviceRole &d = s_self->roles_.at(idx);

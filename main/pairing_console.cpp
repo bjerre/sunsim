@@ -6,10 +6,12 @@
 
 #include "esp_console.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_zigbee.h"
 #include "freertos/FreeRTOS.h"
 
 #include "light_rig.h"
+#include "wifi_time_sync.h"
 
 namespace sunsim {
 
@@ -138,6 +140,41 @@ int cmdFactoryReset(void *ctx, int, char **)
     esp_zigbee_factory_reset(); // does not return
 }
 
+int cmdWifi(void *, int argc, char **argv)
+{
+    if (argc == 1) {
+        const WifiCredentials creds = loadWifiCredentials();
+        if (creds.ssid.empty()) {
+            std::printf("no Wi-Fi configured; set one with: wifi <ssid> [password]\n");
+        } else {
+            std::printf("ssid \"%s\" (%s, %s)\n", creds.ssid.c_str(),
+                        creds.from_nvs ? "set from console" : "menuconfig fallback",
+                        creds.password.empty() ? "open network" : "password set");
+        }
+        return 0;
+    }
+    if (argc == 2 && std::string_view{argv[1]} == "clear") {
+        clearWifiCredentials();
+        std::printf("cleared; falling back to menuconfig Wi-Fi settings on next boot\n");
+        return 0;
+    }
+    if (argc > 3) {
+        std::printf("usage: wifi [<ssid> [password]] | wifi clear   (quote an SSID with spaces: \"My Net\")\n");
+        return 1;
+    }
+    if (!saveWifiCredentials(argv[1], argc == 3 ? argv[2] : "")) {
+        std::printf("not saved: SSID must be 1-32 chars, password at most 64\n");
+        return 1;
+    }
+    std::printf("saved \"%s\"; type `restart` to sync time with it\n", argv[1]);
+    return 0;
+}
+
+int cmdRestart(void *, int, char **)
+{
+    esp_restart();
+}
+
 void registerCommand(const char *name, const char *help, const char *hint,
                      esp_console_cmd_func_with_context_t func, LightRig &rig)
 {
@@ -176,6 +213,9 @@ void startPairingConsole(LightRig &rig)
                     "<WallA|WallB|WallC|Work|Button|cancel>", &cmdPair, rig);
     registerCommand("unpair", "Forget a role's device (it can then be re-paired)", "<role|all>", &cmdUnpair, rig);
     registerCommand("open", "Open the network for joining", "[seconds]", &cmdOpen, rig);
+    registerCommand("wifi", "Show, set or clear the Wi-Fi network used for the boot-time clock sync",
+                    "[<ssid> [password]] | clear", &cmdWifi, rig);
+    registerCommand("restart", "Reboot (keeps roles, network and Wi-Fi settings)", nullptr, &cmdRestart, rig);
     registerCommand("factory_reset", "Forget all roles AND the Zigbee network, then restart", nullptr,
                     &cmdFactoryReset, rig);
 
