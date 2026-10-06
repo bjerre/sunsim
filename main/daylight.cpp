@@ -78,13 +78,20 @@ LightState DaylightSchedule::workState(const std::tm &local_time) const noexcept
 {
     const double gate = activeGate(local_time);
     if (gate <= 0.0) {
-        return {.on = false, .level = 0, .mireds = config_.work_mireds};
+        return {.on = false, .level = 0, .mireds = config_.work_warm_mireds};
     }
     uint8_t level = static_cast<uint8_t>(std::lround(gate * config_.work_level));
     if (level < config_.min_level) {
         level = config_.min_level;
     }
-    return {.on = true, .level = level, .mireds = config_.work_mireds};
+
+    const double window   = config_.active_end_hour - config_.active_start_hour;
+    const double progress = std::fmin(1.0, std::fmax(0.0, (hourOfDay(local_time) - config_.active_start_hour) / window));
+    const double warmth   = progress * progress; // ease-in: stays cool through the morning
+    const auto   mireds   = static_cast<uint16_t>(
+        std::lround(config_.work_cool_mireds + warmth * (config_.work_warm_mireds - config_.work_cool_mireds)));
+
+    return {.on = true, .level = level, .mireds = mireds};
 }
 
 } // namespace sunsim

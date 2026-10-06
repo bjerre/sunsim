@@ -178,13 +178,23 @@ Defaults: `warm_mireds=370` (~2700K), `cool_mireds=153` (~6500K),
 
 ### Work bulb (`DaylightSchedule::workState`)
 
-A fixed light, no curve, and deliberately **not** tied to the sun — it's
-a work light, not a daylight simulation:
+Bright, and **cool to warm** across the active window rather than tied to
+the sun: cool, blue-rich light in the morning supports alertness and
+circadian entrainment, while blue-rich light in the evening suppresses
+melatonin and delays sleep (cf. the evening-light guidance in Brown et
+al., PLOS Biology 2022). With `p` the progress through the active window:
 
 ```
-level  = gate · work_level   (default 230/254)
-mireds = work_mireds         (fixed, default 200 ≈ 5000K cool-neutral)
+p      = clamp((h - start) / (end - start), 0, 1)
+level  = gate · work_level                                   (default 230/254)
+mireds = work_cool_mireds + p² · (work_warm_mireds - work_cool_mireds)
 ```
+
+Defaults: `work_cool_mireds=167` (~6000K), `work_warm_mireds=333`
+(~3000K). The ease-in (`p²`) keeps it near-cool through the morning
+(~5300K at noon on 08:00-19:00) and warms most steeply in the late
+afternoon (~3700K at 16:45). Interpolating in mireds rather than kelvin
+keeps the steps perceptually closer to even.
 
 ### Active window (`DaylightSchedule::activeGate`)
 

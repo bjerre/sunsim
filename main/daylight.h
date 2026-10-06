@@ -13,9 +13,9 @@ struct LightState {
 
 // Astronomical daylight model for the wall bulbs: warm and dim at the real
 // sunrise/sunset for a configured location, brightest and coolest (bluest)
-// at the window's midpoint ("solar noon"); a fixed cool-neutral "focus"
-// spectrum for the work bulb, independent of the sun since it tracks a work
-// schedule rather than daylight. Both only run inside the active window
+// at the window's midpoint ("solar noon"); a cool-to-warm work light that
+// tracks the work day rather than the sun (bright and cool in the morning,
+// warm by evening). Both only run inside the active window
 // (work days and hours, see Config). See solar.h for the
 // sunrise/sunset calculation and DESIGN.md for the full math.
 class DaylightSchedule {
@@ -41,7 +41,13 @@ public:
         double   fade_minutes      = 10.0;
         uint8_t  active_days       = kMondayToFriday; // bit n = tm_wday n (0 = Sunday)
 
-        uint16_t work_mireds     = 200; // ~5000K, cool-neutral "focus" white
+        // Work light runs cool -> warm across the active window: cool,
+        // alerting light in the morning, warming steeply through the
+        // afternoon to cut melatonin-suppressing blue light in the evening.
+        // Ease-in (progress squared), so it stays near cool for most of the
+        // morning. Interpolated in mireds (perceptually closer to even).
+        uint16_t work_cool_mireds = 167; // ~6000K at active_start_hour
+        uint16_t work_warm_mireds = 333; // ~3000K at active_end_hour
         uint8_t  work_level      = 230; // bright but not maxed
     };
 
