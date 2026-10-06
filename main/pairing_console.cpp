@@ -9,11 +9,14 @@
 #include "esp_console.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "esp_zigbee.h"
 #include "freertos/FreeRTOS.h"
 
+#include "button_controller.h"
 #include "light_rig.h"
 #include "schedule_settings.h"
+#include "status.h"
 #include "wifi_time_sync.h"
 
 namespace sunsim {
@@ -281,13 +284,114 @@ int cmdConfig(void *ctx, int argc, char **argv)
     return 0;
 }
 
+// Feeds the same ButtonController entry points the real button's Zigbee
+// traffic does, so this exercises the whole press -> mode path.
+int cmdPress(void *ctx, int argc, char **argv)
+{
+    auto &button = *static_cast<ButtonController *>(ctx);
+    if (argc != 2) {
+        std::printf("usage: press single|double|hold\n");
+        return 1;
+    }
+    const std::string_view kind{argv[1]};
+
+    ZigbeeLock lock;
+    if (kind == "single") {
+        button.onOffOffCommand(true); // resolves to "resume" on the heartbeat after the double-click window
+    } else if (kind == "double") {
+        button.onSceneRecall();
+    } else if (kind == "hold") {
+        button.onOffOffCommand(false);
+    } else {
+        std::printf("usage: press single|double|hold\n");
+        return 1;
+    }
+    return 0;
+}
+
+struct StatusContext {
+    LightRig         *rig;
+    ButtonController *button;
+};
+
+void printHoursMinutes(double hours)
+{
+    const long minutes = std::lround(hours * 60.0);
+    std::printf("%ldh %02ldm", minutes / 60, minutes % 60);
+}
+
+int cmdStatus(void *ctx, int, char **)
+{
+    const auto &c = *static_cast<StatusContext *>(ctx);
+
+    StatusSnapshot st;
+    {
+        ZigbeeLock lock;
+        st = takeStatusSnapshot(*c.rig, *c.button);
+    }
+
+    static constexpr const char *kDays[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    if (st.clock_valid) {
+        std::printf("time    %s %02d:%02d%s\n", kDays[st.time.tm_wday % 7], st.time.tm_hour, st.time.tm_min,
+                    st.simulated ? "  (simulated)" : "");
+    } else {
+        std::printf("time    NOT SET - waiting for time sync (lights held off)\n");
+    }
+
+    std::printf("day     ");
+    printHoursMinutes(st.day.day_length_hours);
+    std::printf("  (sunrise ");
+    printClock(st.day.sunrise_hour);
+    std::printf(", sunset ");
+    printClock(st.day.sunset_hour);
+    std::printf(")\nnext    %s in ", st.day.next_is_sunrise ? "sunrise" : "sunset");
+    printHoursMinutes(st.day.hours_until_next);
+    std::printf(" (");
+    printClock(st.day.next_event_hour);
+    std::printf(")\n");
+
+    std::printf("mode    %s", modeName(st.mode));
+    if (st.mode == LightingMode::Auto) {
+        std::printf(" - %s", st.in_active_window ? "in active hours" : "outside active hours, lights off");
+    }
+    std::printf("\n");
+
+    const int64_t now_us = esp_timer_get_time();
+    for (std::size_t i = 0; i < kRoleCount; ++i) {
+        const auto &d = st.devices[i];
+        std::printf("  %-6s ", roleName(i).data());
+        switch (st.links[i]) {
+        case DeviceLink::Unpaired:
+            std::printf("-  not paired\n");
+            continue;
+        case DeviceLink::Silent:
+            std::printf("o  silent");
+            break;
+        case DeviceLink::Online:
+            std::printf("*  online");
+            break;
+        }
+        if (d.last_heard_us != 0) {
+            std::printf(", heard %llds ago", static_cast<long long>((now_us - d.last_heard_us) / 1'000'000));
+        }
+        if (d.rssi != 0) {
+            std::printf(", rssi %d", d.rssi);
+        }
+        if (!d.has_endpoint) {
+            std::printf(", endpoint not found yet");
+        }
+        std::printf("\n");
+    }
+    return 0;
+}
+
 int cmdRestart(void *, int, char **)
 {
     esp_restart();
 }
 
 void registerCommand(const char *name, const char *help, const char *hint,
-                     esp_console_cmd_func_with_context_t func, LightRig &rig)
+                     esp_console_cmd_func_with_context_t func, void *context)
 {
     const esp_console_cmd_t cmd{
         .command        = name,
@@ -296,13 +400,13 @@ void registerCommand(const char *name, const char *help, const char *hint,
         .func           = nullptr,
         .argtable       = nullptr,
         .func_w_context = func,
-        .context        = &rig,
+        .context        = context,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
 }
 } // namespace
 
-void startPairingConsole(LightRig &rig)
+void startPairingConsole(LightRig &rig, ButtonController &button)
 {
     esp_console_repl_t       *repl        = nullptr;
     esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
@@ -319,18 +423,23 @@ void startPairingConsole(LightRig &rig)
 #endif
 
     ESP_ERROR_CHECK(esp_console_register_help_command());
-    registerCommand("roles", "List role assignments", nullptr, &cmdRoles, rig);
+    registerCommand("roles", "List role assignments", nullptr, &cmdRoles, &rig);
     registerCommand("pair", "Give the next unassigned device to join this role, and open the network",
-                    "<WallA|WallB|WallC|Work|Button|cancel>", &cmdPair, rig);
-    registerCommand("unpair", "Forget a role's device (it can then be re-paired)", "<role|all>", &cmdUnpair, rig);
-    registerCommand("open", "Open the network for joining", "[seconds]", &cmdOpen, rig);
+                    "<WallA|WallB|WallC|Work|Button|cancel>", &cmdPair, &rig);
+    registerCommand("unpair", "Forget a role's device (it can then be re-paired)", "<role|all>", &cmdUnpair, &rig);
+    registerCommand("open", "Open the network for joining", "[seconds]", &cmdOpen, &rig);
     registerCommand("config", "Show or change the lights' active hours, edge fade and work days",
-                    "[hours HH:MM-HH:MM | fade <min> | days mon-fri|all|mon,tue,...]", &cmdConfig, rig);
+                    "[hours HH:MM-HH:MM | fade <min> | days mon-fri|all|mon,tue,...]", &cmdConfig, &rig);
+    static StatusContext status_ctx{&rig, &button};
+    registerCommand("status", "Time, day length, next sunrise/sunset, mode and device links", nullptr, &cmdStatus,
+                    &status_ctx);
+    registerCommand("press", "Simulate the button: single = resume daylight, double = red alert, hold = all off",
+                    "single|double|hold", &cmdPress, &button);
     registerCommand("wifi", "Show, set or clear the Wi-Fi network used for the boot-time clock sync",
-                    "[<ssid> [password]] | clear", &cmdWifi, rig);
-    registerCommand("restart", "Reboot (keeps roles, network and Wi-Fi settings)", nullptr, &cmdRestart, rig);
+                    "[<ssid> [password]] | clear", &cmdWifi, &rig);
+    registerCommand("restart", "Reboot (keeps roles, network and Wi-Fi settings)", nullptr, &cmdRestart, &rig);
     registerCommand("factory_reset", "Forget all roles AND the Zigbee network, then restart", nullptr,
-                    &cmdFactoryReset, rig);
+                    &cmdFactoryReset, &rig);
 
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
 }

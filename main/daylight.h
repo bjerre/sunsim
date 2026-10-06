@@ -55,6 +55,12 @@ public:
     [[nodiscard]] LightState wallState(const std::tm &local_time, double utc_offset_hours) const noexcept;
     [[nodiscard]] LightState workState(const std::tm &local_time) const noexcept;
 
+    // True inside the active window (lights may be on), including its fades.
+    [[nodiscard]] bool inActiveWindow(const std::tm &local_time) const noexcept
+    {
+        return activeGate(local_time) > 0.0;
+    }
+
     [[nodiscard]] const Config &config() const noexcept { return config_; }
     void setConfig(const Config &config) noexcept { config_ = config; }
 

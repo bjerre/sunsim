@@ -5,6 +5,7 @@
 #include <limits>
 
 #include "esp_log.h"
+#include "esp_timer.h"
 
 #include "role_manifest.h"
 #include "sunsim_config.h"
@@ -17,6 +18,12 @@ constexpr const char *kTag = "LIGHT_RIG";
 // Fixed, short transition for state changes that should feel immediate
 // rather than mid-animation (see LightRig::snapRole).
 constexpr BulbEndpoint::TransitionTime kSnapTransition{20}; // 2.0s
+
+// Red alert pulses like TNG's red-alert lighting: a slow, continuous glow
+// rather than a strobe. driveRedAlertFlash() alternates bright/dim once per
+// 1s heartbeat (a 2s cycle, ~0.5 Hz), and each fade takes nearly the whole
+// second, so the bulb is always gliding between the two.
+constexpr BulbEndpoint::TransitionTime kRedAlertFade{9}; // 0.9s
 
 std::tm localTimeNow() noexcept
 {
@@ -75,6 +82,60 @@ std::tm LightRig::now() const
     return clock_();
 }
 
+bool LightRig::clockValid() const
+{
+    // SNTP-synced time is always well past this; an unsynced clock starts at 1970.
+    constexpr int kMinValidYear = 2024;
+    return !require_synced_clock_ || now().tm_year + 1900 >= kMinValidYear;
+}
+
+LightRig::DeviceStatus LightRig::deviceStatus(Role role) const noexcept
+{
+    const DeviceRole &d = roles_.at(role);
+    const Liveness   &l = liveness_[static_cast<std::size_t>(role)];
+    return {.paired = d.valid, .has_endpoint = d.endpoint != 0, .last_heard_us = l.last_heard_us, .rssi = l.rssi};
+}
+
+void LightRig::noteHeardFrom(uint16_t short_addr, int8_t rssi) noexcept
+{
+    for (std::size_t i = 0; i < kRoleCount; ++i) {
+        if (roles_.at(i).valid && roles_.at(i).short_addr == short_addr) {
+            liveness_[i] = {.last_heard_us = esp_timer_get_time(), .rssi = rssi};
+        }
+    }
+}
+
+void LightRig::noteHeard(Role role) noexcept
+{
+    liveness_[static_cast<std::size_t>(role)].last_heard_us = esp_timer_get_time();
+}
+
+void LightRig::pingDevices()
+{
+    for (std::size_t i = 0; i < kRoleCount; ++i) {
+        const DeviceRole &d = roles_.at(i);
+        // The button is a sleepy end device that won't answer; it counts as
+        // heard when it's pressed instead.
+        if (!d.valid || i == static_cast<std::size_t>(Role::Button)) {
+            continue;
+        }
+        ezb_zdo_active_ep_req_t req{};
+        req.dst_nwk_addr               = d.short_addr;
+        req.field.nwk_addr_of_interest = d.short_addr;
+        req.cb                         = &LightRig::onPingResult;
+        req.user_ctx                   = reinterpret_cast<void *>(static_cast<intptr_t>(i));
+        ezb_zdo_active_ep_req(&req);
+    }
+}
+
+void LightRig::onPingResult(const ezb_zdo_active_ep_req_result_t *result, void *user_ctx)
+{
+    const auto idx = static_cast<std::size_t>(reinterpret_cast<intptr_t>(user_ctx));
+    if (result && result->error == EZB_ERR_NONE && result->rsp && result->rsp->status == EZB_ZDP_STATUS_SUCCESS) {
+        s_self->liveness_[idx].last_heard_us = esp_timer_get_time();
+    }
+}
+
 BulbEndpoint::TransitionTime LightRig::tickTransition() const noexcept
 {
     constexpr auto kMaxDeciseconds = std::numeric_limits<uint16_t>::max();
@@ -104,8 +165,14 @@ void LightRig::applyRoleWithTransition(Role role, BulbEndpoint::TransitionTime t
 
     const std::size_t idx    = static_cast<std::size_t>(role);
     const std::tm     now_tm = now();
-    const LightState  desired =
-        (role == Role::Work) ? schedule_.workState(now_tm) : schedule_.wallState(now_tm, utc_offset_fn_());
+    LightState        desired{};
+    if (clockValid()) {
+        clock_warned_ = false;
+        desired = (role == Role::Work) ? schedule_.workState(now_tm) : schedule_.wallState(now_tm, utc_offset_fn_());
+    } else if (!clock_warned_) {
+        clock_warned_ = true;
+        ESP_LOGW(kTag, "Clock not set yet (no time sync) - holding lights off");
+    }
     AppliedState &cache = applied_[idx];
 
     if (desired.on) {
@@ -167,7 +234,7 @@ void LightRig::driveRedAlertFlash()
             continue;
         }
         bulb->setHueSaturation(0, 254, BulbEndpoint::TransitionTime{2});
-        bulb->setLevel(red_alert_bright_ ? 254 : 30, BulbEndpoint::TransitionTime{2});
+        bulb->setLevel(red_alert_bright_ ? 254 : 30, kRedAlertFade);
         applied_[idx].valid = false; // force a clean re-sync once we leave red alert
     }
 }
@@ -181,6 +248,7 @@ void LightRig::handleDeviceAnnounce(uint64_t ext_addr, uint16_t short_addr)
             roles_.save();
         }
         ESP_LOGI(kTag, "Known device rejoined: role %u short=0x%04x", static_cast<unsigned>(*existing), short_addr);
+        noteHeard(static_cast<Role>(*existing));
         if (*existing == static_cast<std::size_t>(Role::Button) || d.endpoint == 0) {
             discoverDevice(*existing);
         } else {
@@ -197,6 +265,7 @@ void LightRig::handleDeviceAnnounce(uint64_t ext_addr, uint16_t short_addr)
             applied_[role_index] = {};
         }
         roles_.save();
+        noteHeard(static_cast<Role>(role_index));
         ESP_LOGI(kTag, "Paired ext=0x%016llx short=0x%04x -> %s", static_cast<unsigned long long>(ext_addr),
                  short_addr, roleName(role_index).data());
         discoverDevice(role_index);
@@ -219,6 +288,7 @@ void LightRig::handleDeviceAnnounce(uint64_t ext_addr, uint16_t short_addr)
 
     roles_.at(role_index) = {.valid = true, .ext_addr = ext_addr, .short_addr = short_addr, .endpoint = 0};
     roles_.save();
+    noteHeard(*role);
 
     ESP_LOGI(kTag, "New device joined -> role %u (%s)", static_cast<unsigned>(role_index),
              role_index == static_cast<std::size_t>(Role::Button) ? "button" : "bulb");

@@ -46,6 +46,7 @@ private:
     static void heartbeatTrampoline(void *arg);
     static void retryTrampoline(void *arg);
     static void zigbeeTaskTrampoline(void *arg);
+    static void timeSyncTaskTrampoline(void *arg);
 
     LightRig          light_rig_;
     ButtonController  button_;
@@ -54,6 +55,7 @@ private:
     ezb_bdb_comm_mode_mask_t pending_retry_mode_   = 0;
     int                heartbeat_ticks_            = 0;
     int                discovery_retry_ticks_      = 0;
+    int                ping_ticks_                 = 0;
     int                daylight_tick_seconds_      = 60;
 };
 

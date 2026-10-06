@@ -10,6 +10,7 @@
 #include "fast_day_clock.h"
 #include "pairing_console.h"
 #include "schedule_settings.h"
+#include "status_display.h"
 #include "sunsim_config.h"
 #include "wifi_time_sync.h"
 
@@ -19,6 +20,12 @@ namespace {
 constexpr const char *kTag = "SUNSIM";
 
 constexpr int kDiscoveryRetrySeconds = 15;
+constexpr int kPingSeconds           = 60;
+
+// Time sync: retry soon after a failure (router still booting after a power
+// cut, Wi-Fi not configured yet), otherwise resync daily to cancel drift.
+constexpr auto kSyncRetryDelay = std::chrono::minutes{10};
+constexpr auto kResyncInterval = std::chrono::hours{24};
 } // namespace
 
 SunsimApp &SunsimApp::instance()
@@ -54,13 +61,17 @@ void SunsimApp::run()
     light_rig_.setClock([this, clock = FastDayClock{std::chrono::seconds{CONFIG_SUNSIM_DEBUG_DAY_SECONDS}}] {
         return clock.now(light_rig_.scheduleConfig());
     });
+    light_rig_.setRequireSyncedClock(false);
     daylight_tick_seconds_ = 1;
 #endif
     light_rig_.setTickInterval(std::chrono::seconds{daylight_tick_seconds_});
 
 #if !CONFIG_SUNSIM_DEBUG_FAST_DAY
-    WifiTimeSync wifi_sync;
-    wifi_sync.run();
+    // First sync before Zigbee starts, so the radio isn't shared at boot;
+    // later retries/resyncs run alongside Zigbee (Wi-Fi/802.15.4 coexistence).
+    const bool synced = WifiTimeSync{}.run();
+    xTaskCreate(&SunsimApp::timeSyncTaskTrampoline, "time_sync", 4096, reinterpret_cast<void *>(synced ? 1 : 0), 3,
+                nullptr);
 #endif
 
     startHeartbeatTimer();
@@ -68,7 +79,8 @@ void SunsimApp::run()
     ESP_LOGI(kTag, "Starting Zigbee stack");
     xTaskCreate(&SunsimApp::zigbeeTaskTrampoline, "Zigbee_main", 4096, this, 5, nullptr);
 
-    startPairingConsole(light_rig_);
+    startStatusDisplay(light_rig_, button_);
+    startPairingConsole(light_rig_, button_);
 }
 
 void SunsimApp::startHeartbeatTimer()
@@ -92,6 +104,11 @@ void SunsimApp::heartbeatTick()
     esp_zigbee_lock_acquire(portMAX_DELAY);
 
     button_.tick();
+
+    if (++ping_ticks_ >= kPingSeconds) {
+        ping_ticks_ = 0;
+        light_rig_.pingDevices();
+    }
 
     if (++discovery_retry_ticks_ >= kDiscoveryRetrySeconds) {
         discovery_retry_ticks_ = 0;
@@ -221,6 +238,7 @@ void SunsimApp::handleZclAction(ezb_zcl_core_action_callback_id_t callback_id, v
         if (m && m->info.dst_ep == SUNSIM_BUTTON_RX_EP_ID && m->info.cluster_id == EZB_ZCL_CLUSTER_ID_ON_OFF) {
             const bool on = *static_cast<uint8_t *>(m->in.attribute.data.value) != 0;
             ESP_LOGI(kTag, "Button On/Off attribute -> %d", on);
+            light_rig_.noteHeard(Role::Button);
             button_.onOffOffCommand(on);
         }
     } break;
@@ -229,6 +247,7 @@ void SunsimApp::handleZclAction(ezb_zcl_core_action_callback_id_t callback_id, v
         if (m && m->info.dst_ep == SUNSIM_BUTTON_RX_EP_ID) {
             ESP_LOGI(kTag, "Button Scenes RecallScene (group=0x%04x scene=%d) -> treated as double-press",
                      m->in.group_id, m->in.scene_id);
+            light_rig_.noteHeard(Role::Button);
             button_.onSceneRecall();
         }
     } break;
@@ -242,11 +261,15 @@ void SunsimApp::handleZclAction(ezb_zcl_core_action_callback_id_t callback_id, v
         if (m && m->info.dst_ep == SUNSIM_BUTTON_RX_EP_ID) {
             ESP_LOGI(kTag, "Button OffWithEffect (effect=%d variant=%d) -> treated as long-press",
                      m->in.effect_id, m->in.effect_variant);
+            light_rig_.noteHeard(Role::Button);
             button_.onOffOffCommand(false);
         }
     } break;
     case EZB_ZCL_CORE_DEFAULT_RSP_CB_ID: {
         auto *rsp = static_cast<ezb_zcl_cmd_default_rsp_message_t *>(message);
+        if (rsp->in.header && rsp->in.header->src_addr.addr_mode == EZB_ADDR_MODE_SHORT) {
+            light_rig_.noteHeardFrom(rsp->in.header->src_addr.u.short_addr, rsp->in.header->rssi);
+        }
         if (rsp->in.status_code != 0) { // success acks arrive several times a second; only failures matter
             ESP_LOGW(kTag, "Default response status(0x%02x)", rsp->in.status_code);
         }
@@ -320,6 +343,19 @@ void SunsimApp::heartbeatTrampoline(void *arg)
 void SunsimApp::retryTrampoline(void *arg)
 {
     static_cast<SunsimApp *>(arg)->retryCommissioning();
+}
+
+void SunsimApp::timeSyncTaskTrampoline(void *arg)
+{
+    bool synced = arg != nullptr;
+    for (;;) {
+        const auto wait = synced ? std::chrono::duration_cast<std::chrono::minutes>(kResyncInterval) : kSyncRetryDelay;
+        // One minute at a time: a full day in ticks can overflow pdMS_TO_TICKS.
+        for (auto m = wait.count(); m > 0; --m) {
+            vTaskDelay(pdMS_TO_TICKS(60'000));
+        }
+        synced = WifiTimeSync{}.run();
+    }
 }
 
 void SunsimApp::zigbeeTaskTrampoline(void *arg)

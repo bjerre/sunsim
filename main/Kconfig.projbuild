@@ -66,4 +66,49 @@ menu "Sunsim Configuration"
         range 10 3600
         default 120
 
+    menu "Status display"
+
+        config SUNSIM_DISPLAY
+            bool "Show status on the board's ST7789 LCD"
+            default y
+            help
+                Time, day length, next sunrise/sunset, mode and device
+                links on the on-board LCD. Defaults match the Waveshare
+                ESP32-C6-GEEK (1.14" ST7789, 240x135).
+
+        config SUNSIM_DISPLAY_PIN_SCLK
+            int "SCLK GPIO"
+            depends on SUNSIM_DISPLAY
+            default 1
+        config SUNSIM_DISPLAY_PIN_MOSI
+            int "MOSI GPIO"
+            depends on SUNSIM_DISPLAY
+            default 2
+        config SUNSIM_DISPLAY_PIN_DC
+            int "DC GPIO"
+            depends on SUNSIM_DISPLAY
+            default 3
+        config SUNSIM_DISPLAY_PIN_RST
+            int "RST GPIO"
+            depends on SUNSIM_DISPLAY
+            default 4
+        config SUNSIM_DISPLAY_PIN_CS
+            int "CS GPIO"
+            depends on SUNSIM_DISPLAY
+            default 5
+        config SUNSIM_DISPLAY_PIN_BL
+            int "Backlight GPIO"
+            depends on SUNSIM_DISPLAY
+            default 6
+
+        config SUNSIM_DISPLAY_FLIP
+            bool "Rotate the picture 180 degrees"
+            depends on SUNSIM_DISPLAY
+            default n
+            help
+                Landscape either way round; pick whichever is upright with
+                the board's USB plug where you hold it.
+
+    endmenu
+
 endmenu

@@ -25,7 +25,8 @@ public:
     // the Zigbee lock, as SunsimApp::heartbeatTick does). manualOff and
     // enterRedAlert only ever fire from onOffOffCommand()/onSceneRecall(),
     // i.e. from SunsimApp's ZCL action handler (already a Zigbee callback -
-    // do NOT take the lock there). If you add new call sites for these
+    // do NOT take the lock there) or from the console's `press` command
+    // (which takes the lock itself). If you add new call sites for these
     // methods, preserve that split or update both ends.
     struct Callbacks {
         std::function<void()> resumeAuto;

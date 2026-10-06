@@ -2,7 +2,7 @@ file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
 idf_component_register(SRC_DIRS "."
                        PRIV_INCLUDE_DIRS "." "${CMAKE_CURRENT_BINARY_DIR}/generated"
-                       PRIV_REQUIRES console nvs_flash esp_wifi esp_netif esp_timer lwip)
+                       PRIV_REQUIRES console driver esp_lcd nvs_flash esp_wifi esp_netif esp_timer lwip)
 
 set(role_manifest_json "${CMAKE_CURRENT_SOURCE_DIR}/role_manifest.json")
 set(role_manifest_hdr "${CMAKE_CURRENT_BINARY_DIR}/generated/role_manifest.h")

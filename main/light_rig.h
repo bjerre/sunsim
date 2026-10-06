@@ -41,6 +41,17 @@ public:
     void setClock(ClockFn clock);
     void setUtcOffsetFn(UtcOffsetFn utc_offset_fn);
 
+    // Until the clock has been set (SNTP), the time is near the 1970 epoch
+    // and the schedule would be nonsense, so every bulb is held off. The
+    // debug fast-day clock is synthetic and always counts as set.
+    void setRequireSyncedClock(bool require) noexcept { require_synced_clock_ = require; }
+    [[nodiscard]] bool clockValid() const;
+
+    // The clock and UTC offset the program runs on (simulated in fast-day mode).
+    [[nodiscard]] std::tm localTime() const { return now(); }
+    [[nodiscard]] double utcOffsetHours() const { return utc_offset_fn_(); }
+    [[nodiscard]] bool inActiveWindow() const { return schedule_.inActiveWindow(now()); }
+
     // How often applyAllBulbs() is expected to be called while in Auto
     // mode. Bulb level/color transitions are timed to this interval so the
     // gradient ramps continuously from the bulb's current state instead of
@@ -92,6 +103,23 @@ public:
 
     [[nodiscard]] std::optional<BulbEndpoint> bulbFor(Role role) const;
 
+    // Liveness, for the status display: when each device was last heard
+    // from (a command ack, a ping reply, an announce, a button press).
+    struct DeviceStatus {
+        bool    paired         = false;
+        bool    has_endpoint   = false;
+        int64_t last_heard_us  = 0;   // esp_timer time; 0 = not since boot
+        int8_t  rssi           = 0;   // of the last ack, if any
+    };
+    [[nodiscard]] DeviceStatus deviceStatus(Role role) const noexcept;
+    void noteHeardFrom(uint16_t short_addr, int8_t rssi) noexcept;
+    void noteHeard(Role role) noexcept;
+
+    // Pings every paired bulb (ZDO Active_EP request) so liveness stays
+    // current even while no light commands are being sent (outside the
+    // active window). Caller must hold the Zigbee lock.
+    void pingDevices();
+
 private:
     struct AppliedState {
         bool    valid = false;
@@ -109,6 +137,12 @@ private:
     static void onMatchDescBulbResult(const ezb_zdo_match_desc_req_result_t *result, void *user_ctx);
     static void onMatchDescButtonResult(const ezb_zdo_match_desc_req_result_t *result, void *user_ctx);
     static void onBindButtonResult(const ezb_zdp_bind_req_result_t *result, void *user_ctx);
+    static void onPingResult(const ezb_zdo_active_ep_req_result_t *result, void *user_ctx);
+
+    struct Liveness {
+        int64_t last_heard_us = 0;
+        int8_t  rssi          = 0;
+    };
 
     RoleStore                   roles_;
     DaylightSchedule            schedule_;
@@ -118,6 +152,9 @@ private:
     std::array<AppliedState, 4> applied_{};
     bool                        red_alert_bright_ = false;
     std::optional<Role>         armed_role_;
+    std::array<Liveness, kRoleCount> liveness_{};
+    bool                        require_synced_clock_ = true;
+    bool                        clock_warned_         = false;
 
     static LightRig *s_self;
 };

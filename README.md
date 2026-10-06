@@ -53,6 +53,20 @@ sunsim> config days mon-fri          # or: all, or a list like mon,tue,thu
 Settings are stored on the device and survive reflashing; changes apply
 on the next update.
 
+## Status display
+
+The board's LCD (Waveshare ESP32-C6-GEEK, 1.14" ST7789) shows:
+
+- the time, large, and the weekday ("sim" in fast-day mode)
+- the mode: `daylight`, `idle` (outside active hours), `off` or `RED ALERT`
+- today's day length, and the countdown to the next sunrise or sunset
+- one dot per device: green = responding, amber = paired but silent,
+  grey = not paired (labels A, B, C = wall bulbs, W = work, Btn = button)
+
+The `status` console command prints the same information. Pins and
+orientation are under menuconfig, "Sunsim Configuration" -> "Status
+display"; "Rotate the picture 180 degrees" flips it if it's upside down.
+
 ## Wi-Fi (clock sync)
 
 sunsim connects to Wi-Fi once at boot to set its clock over SNTP. Set the
@@ -138,6 +152,17 @@ it to see what command it really sends, then adjust the dispatch in
 `SunsimApp::handleZclAction` (`main/sunsim_app.cpp`) and/or
 `ButtonController` (`main/button_controller.*`) accordingly.
 
+### Testing without the button
+
+The console's `press` command feeds the same button logic, so you can try
+every mode before a button is paired:
+
+```
+sunsim> press double   # red alert
+sunsim> press single   # resume the daylight program
+sunsim> press hold     # all lights off
+```
+
 ## Debug fast-day mode
 
 To bench-test the daylight curve without waiting for a real sunrise/sunset,
@@ -172,7 +197,10 @@ tick to catch up.
 - `main/bulb_endpoint.*` - a Zigbee light endpoint's address, with `turnOn/turnOff/setLevel/setColorTemperature/setHueSaturation`.
 - `main/role_manifest.json` - `ext_addr -> Role` table, filled in from device labels; `main/gen_role_manifest.py` turns it into a C++ header at build time.
 - `main/roles_store.*` - persisted role -> device address/endpoint mapping.
-- `main/pairing_console.*` - serial REPL: `pair`/`unpair`/`roles`/`open`/`config`/`wifi`/`restart`/`factory_reset`.
+- `main/pairing_console.*` - serial REPL: `pair`/`unpair`/`roles`/`open`/`status`/`config`/`press`/`wifi`/`restart`/`factory_reset`.
+- `main/day_info.*` - day length and next sunrise/sunset, pure math like `solar.*`.
+- `main/status.*` - one status snapshot shared by the `status` command and the display.
+- `main/status_display.*` - LVGL screen on the on-board LCD.
 - `main/schedule_settings.*` - persists the `config` settings (active hours, fade, days) in NVS.
 - `main/light_rig.*` - owns the 5 paired devices, discovery/binding, and applies the daylight program.
 - `main/button_controller.*` - single/double/long-press state machine, decoupled from Zigbee via callbacks.

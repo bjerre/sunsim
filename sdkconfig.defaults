@@ -29,3 +29,17 @@ CONFIG_ESP_WIFI_ENABLED=y
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 # end of Console
 
+
+#
+# LVGL fonts used by the status display
+#
+CONFIG_LV_FONT_MONTSERRAT_14=y
+CONFIG_LV_FONT_MONTSERRAT_20=y
+CONFIG_LV_FONT_MONTSERRAT_48=y
+# end of LVGL fonts
+
+#
+# Normal log level (DEBUG floods the console with SPI/NVS traffic)
+#
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+# end of Log
