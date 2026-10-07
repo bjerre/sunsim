@@ -187,7 +187,7 @@ void clearWifiNetworks()
     writeSaved({});
 }
 
-void WifiTimeSync::onWifiEvent(void *arg, esp_event_base_t event_base, int32_t event_id, void *)
+void WifiTimeSync::onWifiEvent(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
     auto *self = static_cast<WifiTimeSync *>(arg);
 
@@ -195,6 +195,9 @@ void WifiTimeSync::onWifiEvent(void *arg, esp_event_base_t event_base, int32_t e
         if (!self->connecting_) {
             return; // our own disconnect between networks, or after the sync
         }
+        // e.g. 201 = no AP found, 15/204 = handshake failed (usually a wrong password)
+        const auto *d = static_cast<const wifi_event_sta_disconnected_t *>(event_data);
+        ESP_LOGI(kTag, "  attempt %d failed (reason %d)", self->retry_count_ + 1, d ? d->reason : -1);
         if (self->retry_count_ < kMaxRetries) {
             ++self->retry_count_;
             esp_wifi_connect();
@@ -235,6 +238,14 @@ std::vector<WifiNetwork> WifiTimeSync::candidates(const std::vector<WifiNetwork>
     }
     if (seen.empty()) {
         ESP_LOGW(kTag, "No saved network seen in the scan; trying each anyway (it may be hidden)");
+        // What *is* around, to tell "out of range" from a typo or a 5 GHz-only
+        // network (the C6 is 2.4 GHz only).
+        ESP_LOGI(kTag, "Scan found %u network(s)%s", static_cast<unsigned>(records.size()),
+                 records.empty() ? "" : ", strongest first:");
+        for (std::size_t i = 0; i < records.size() && i < 8; ++i) {
+            ESP_LOGI(kTag, "  \"%s\" (%d dBm, channel %d)", reinterpret_cast<const char *>(records[i].ssid),
+                     records[i].rssi, records[i].primary);
+        }
         return saved;
     }
     return seen;
