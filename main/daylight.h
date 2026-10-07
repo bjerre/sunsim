@@ -9,6 +9,12 @@ struct LightState {
     bool     on     = false;
     uint8_t  level  = 0;  // 0-254, meaningful only if `on`
     uint16_t mireds = 0;  // color temperature, meaningful only if `on`
+
+    // Golden hour: the colour is warmer than colour-temperature mode can
+    // show, so send it as CIE xy (on the blackbody line at `mireds`) instead.
+    bool  use_xy  = false;
+    float color_x = 0.0f;
+    float color_y = 0.0f;
 };
 
 // Astronomical daylight model for the wall bulbs: warm and dim at the real
@@ -29,6 +35,20 @@ public:
         uint16_t warm_mireds   = 370; // ~2700K
         uint16_t cool_mireds   = 153; // ~6500K
         uint8_t  min_level     = 1;
+
+        // Sun direction along the wall: the wall bulbs sit east-to-west on a
+        // south wall, and the one nearest the sun's east-west position gets
+        // the full curve while those further along dim by up to this much
+        // (0 = off). See wallState's wall_position.
+        uint8_t  sun_shift_percent = 25;
+
+        // Amber sunrise/sunset: below golden_elevation_deg of sun elevation,
+        // the wall bulbs' colour slides along the blackbody line from the
+        // normal curve down to amber_kelvin at the horizon (beyond most
+        // bulbs' ~2700K colour-temperature floor, hence xy colour mode).
+        bool     amber_enabled        = true;
+        double   golden_elevation_deg = 6.0;
+        double   amber_kelvin         = 1800.0;
         uint8_t  max_level     = 254;
 
         // Active window, shared by all bulbs: lights are on only on
@@ -61,7 +81,10 @@ public:
     // date, including DST, positive = East of Greenwich. Needed because
     // std::tm alone doesn't carry it (no portable tm_gmtoff on this
     // toolchain) - see LightRig::utcOffsetHours() for how it's derived.
-    [[nodiscard]] LightState wallState(const std::tm &local_time, double utc_offset_hours) const noexcept;
+    // wall_position: where the bulb sits along the (south) wall, +1 = east
+    // end, 0 = middle, -1 = west end; drives the sun-direction dimming.
+    [[nodiscard]] LightState wallState(const std::tm &local_time, double utc_offset_hours,
+                                       double wall_position = 0.0) const noexcept;
     [[nodiscard]] LightState workState(const std::tm &local_time) const noexcept;
 
     // True inside the active window (lights may be on), including its fades.

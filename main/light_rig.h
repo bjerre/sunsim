@@ -99,6 +99,10 @@ public:
     void armPairing(Role role) noexcept;
     void cancelPairing() noexcept;
     [[nodiscard]] bool isAssigned(Role role) const noexcept { return roles_.at(role).valid; }
+    [[nodiscard]] bool isDevice(Role role, uint16_t short_addr) const noexcept
+    {
+        return roles_.at(role).valid && roles_.at(role).short_addr == short_addr;
+    }
 
     // Re-sends endpoint discovery for every assigned device whose endpoint
     // is still unknown (e.g. its Match_Desc went unanswered right after
@@ -150,6 +154,7 @@ private:
     struct Liveness {
         int64_t last_heard_us = 0;
         int8_t  rssi          = 0;
+        bool    ping_ok       = true; // last ping's outcome, for logging changes only
     };
 
     RoleStore                   roles_;

@@ -118,28 +118,30 @@ re-trigger pairing on that bulb so it rejoins and matches.
 
 ## 3. Button input handling
 
-The SNZB-01P (and most simple single-button switches) only exposes its
-clicks through the standard On/Off cluster. esp-zigbee-lib resolves the
-standard `On`/`Off`/`Toggle` commands internally and only surfaces the
-*resulting attribute value* to the app (`EZB_ZCL_CORE_SET_ATTR_VALUE_CB_ID`)
-— there is no API-level way to tell `On` and `Toggle` apart. So single vs.
-double press is resolved by **timing** on that boolean, not by command
-type; `Off`/`OffWithEffect` and a Scenes `RecallScene` command are each
-unambiguous and handled directly.
+The SNZB-01-style button tells us which press it was through the standard
+On/Off cluster: single = `Toggle`, double = `On`, hold = `Off`. It sends
+these to the coordinator's endpoint 1 (our light-control endpoint, which
+has no On/Off server) whatever the binding says, so the stack would drop
+them. `SunsimApp::handleApsIndication` (an APSDE-DATA.indication hook)
+therefore picks frames from the paired button's short address out before
+ZCL processing and dispatches by command id, consuming them.
 
 ```mermaid
 stateDiagram-v2
     state "Any mode (Auto / ManualOff / RedAlert)" as Any
     [*] --> Auto
-    Any --> ManualOff: Off / OffWithEffect command
-    Any --> Auto: single On/Toggle<br/>(no 2nd one within 450ms)
-    Any --> RedAlert: 2x On/Toggle within 450ms,<br/>or Scenes RecallScene
-    RedAlert --> RedAlert: heartbeat tick -> flash brightness
+    Any --> Auto: Toggle (single press)
+    Any --> RedAlert: On (double press)
+    Any --> ManualOff: Off (hold)
+    RedAlert --> RedAlert: heartbeat tick -> pulse brightness
 ```
 
-The debounce window (450ms, `ButtonController`'s `double_click_window_`) is
-resolved on the next heartbeat tick, not by its own timer — see
-`ButtonController::tick()`.
+Fallback for buttons that do send to the bound receiver endpoint 2: the
+stack resolves `On`/`Off`/`Toggle` internally and only surfaces the
+resulting On/Off attribute (`EZB_ZCL_CORE_SET_ATTR_VALUE_CB_ID`), where
+`On` and `Toggle` look the same, so single vs. double press is resolved by
+timing (450ms, on the next heartbeat tick — `ButtonController::tick()`);
+`OffWithEffect` and Scenes `RecallScene` are handled directly.
 
 ## 4. Daylight mathematical model
 
@@ -175,6 +177,42 @@ with the real day length through the year.
 
 Defaults: `warm_mireds=370` (~2700K), `cool_mireds=153` (~6500K),
 `min_level=1`, `max_level=254`.
+
+### Sun direction along the wall
+
+The three wall bulbs sit east-to-west along the south wall: A at the east
+end (`x = +1`), B in the middle (`0`), C at the west end (`-1`).
+`computeSunPosition()` (NOAA solar position equations, in `solar.cpp`)
+gives the sun's compass azimuth; its east-west component
+`sun_x = sin(azimuth)` is +1 due East, 0 due South, -1 due West. Each wall
+bulb's level is then scaled by
+
+```
+direction = 1 - k · |x_bulb - sun_x| / 2          k = sun_shift_percent / 100 (default 0.25)
+```
+
+so the bulb under the sun gets the full curve and the far end down to
+`1 - k`. It only ever dims, so `intensity` peaks stay true maxima. Seasons
+fall out of the real azimuth: in June the sun rises NE (~57°) and sets NW
+(~303°), so A and C lead strongly at the ends of the day; in December it
+rises SE (~123°) and sets SW (~238°) and B leads for longer.
+
+### Amber sunrise/sunset
+
+Below `golden_elevation_deg` (6°) of sun elevation, the wall colour slides
+along the blackbody (Planckian) locus from the curve's value down to
+`amber_kelvin` (1800K) at the horizon:
+
+```
+g      = min(1, (6° - elevation) / 6°)
+mireds = curve_mireds + g · (1e6/1800 - curve_mireds)
+```
+
+Most bulbs' colour-temperature mode stops around 2700K, so in this band the
+colour is sent as CIE 1931 xy (`BulbEndpoint::setColorXY`, Kim et al.
+Planckian-locus approximation) instead; the rest of the day stays in
+colour-temperature mode, which renders whites with the dedicated white
+LEDs. On a winter weekday this is visible from ~15:40 to sunset (~16:22).
 
 ### Work bulb (`DaylightSchedule::workState`)
 

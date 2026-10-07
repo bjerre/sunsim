@@ -19,6 +19,8 @@ constexpr const char *kFadeKey  = "act.fade";
 constexpr const char *kDaysKey  = "act.days";
 constexpr const char *kWorkStartKey = "work.start";
 constexpr const char *kWorkEndKey   = "work.end";
+constexpr const char *kSunShiftKey  = "sun.shift";
+constexpr const char *kAmberKey     = "sun.amber";
 
 uint16_t toMinutes(double hours) noexcept
 {
@@ -47,6 +49,14 @@ void loadScheduleSettings(DaylightSchedule::Config &config)
     }
     if (nvs_get_u16(handle, kFadeKey, &minutes) == ESP_OK) {
         config.fade_minutes = minutes;
+    }
+    uint8_t amber = 0;
+    if (nvs_get_u8(handle, kAmberKey, &amber) == ESP_OK) {
+        config.amber_enabled = amber != 0;
+    }
+    uint8_t shift = 0;
+    if (nvs_get_u8(handle, kSunShiftKey, &shift) == ESP_OK && shift <= 100) {
+        config.sun_shift_percent = shift;
     }
     if (nvs_get_u16(handle, kWorkStartKey, &minutes) == ESP_OK) {
         config.work_start_hour = minutes / 60.0;
@@ -83,6 +93,12 @@ void saveScheduleSettings(const DaylightSchedule::Config &config)
     }
     if (err == ESP_OK) {
         err = nvs_set_u16(handle, kWorkEndKey, toMinutes(config.work_end_hour));
+    }
+    if (err == ESP_OK) {
+        err = nvs_set_u8(handle, kSunShiftKey, config.sun_shift_percent);
+    }
+    if (err == ESP_OK) {
+        err = nvs_set_u8(handle, kAmberKey, config.amber_enabled ? 1 : 0);
     }
     if (err == ESP_OK) {
         err = nvs_commit(handle);

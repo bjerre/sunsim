@@ -14,6 +14,20 @@
 namespace sunsim {
 
 namespace {
+// Wall bulbs sit east-to-west along the south wall: A at the east end, C at
+// the west end (see DaylightSchedule::wallState).
+double wallPosition(Role role) noexcept
+{
+    switch (role) {
+    case Role::WallA:
+        return 1.0;
+    case Role::WallC:
+        return -1.0;
+    default:
+        return 0.0;
+    }
+}
+
 constexpr const char *kTag = "LIGHT_RIG";
 
 // Fixed, short transition for state changes that should feel immediate
@@ -132,8 +146,22 @@ void LightRig::pingDevices()
 void LightRig::onPingResult(const ezb_zdo_active_ep_req_result_t *result, void *user_ctx)
 {
     const auto idx = static_cast<std::size_t>(reinterpret_cast<intptr_t>(user_ctx));
-    if (result && result->error == EZB_ERR_NONE && result->rsp && result->rsp->status == EZB_ZDP_STATUS_SUCCESS) {
-        s_self->liveness_[idx].last_heard_us = esp_timer_get_time();
+    const bool ok  = result && result->error == EZB_ERR_NONE && result->rsp &&
+                    result->rsp->status == EZB_ZDP_STATUS_SUCCESS;
+    Liveness  &l   = s_self->liveness_[idx];
+    if (ok) {
+        l.last_heard_us = esp_timer_get_time();
+    }
+    // Log only changes, so a bulb switched off at the wall doesn't log every minute.
+    if (ok != l.ping_ok) {
+        l.ping_ok = ok;
+        if (ok) {
+            ESP_LOGI(kTag, "%s is answering", roleName(idx).data());
+        } else {
+            ESP_LOGW(kTag, "%s not answering (err=0x%x status=0x%x) - powered off or out of range?",
+                     roleName(idx).data(), result ? result->error : -1,
+                     (result && result->rsp) ? result->rsp->status : -1);
+        }
     }
 }
 
@@ -169,7 +197,8 @@ void LightRig::applyRoleWithTransition(Role role, BulbEndpoint::TransitionTime t
     LightState        desired{};
     if (clockValid()) {
         clock_warned_ = false;
-        desired = (role == Role::Work) ? schedule_.workState(now_tm) : schedule_.wallState(now_tm, utc_offset_fn_());
+        desired = (role == Role::Work) ? schedule_.workState(now_tm)
+                                       : schedule_.wallState(now_tm, utc_offset_fn_(), wallPosition(role));
     } else if (!clock_warned_) {
         clock_warned_ = true;
         ESP_LOGW(kTag, "Clock not set yet (no time sync) - holding lights off");
@@ -185,7 +214,11 @@ void LightRig::applyRoleWithTransition(Role role, BulbEndpoint::TransitionTime t
             bulb->turnOn();
         }
         bulb->setLevel(desired.level, transition);
-        bulb->setColorTemperature(desired.mireds, transition);
+        if (desired.use_xy) {
+            bulb->setColorXY(desired.color_x, desired.color_y, transition);
+        } else {
+            bulb->setColorTemperature(desired.mireds, transition);
+        }
     } else if (!cache.valid || cache.on) {
         bulb->turnOff();
     }

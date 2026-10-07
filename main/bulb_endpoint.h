@@ -24,6 +24,9 @@ public:
     void setLevel(uint8_t level_0_254, TransitionTime transition = TransitionTime{1}) const;
     void setColorTemperature(uint16_t mireds, TransitionTime transition = TransitionTime{1}) const;
     void setHueSaturation(uint8_t hue, uint8_t saturation, TransitionTime transition = TransitionTime{1}) const;
+    // CIE 1931 xy chromaticity (each 0..1), for colours outside the bulb's
+    // colour-temperature range (e.g. amber below ~2700K).
+    void setColorXY(double x, double y, TransitionTime transition = TransitionTime{1}) const;
 
     [[nodiscard]] constexpr uint16_t shortAddress() const noexcept { return short_addr_; }
     [[nodiscard]] constexpr uint8_t endpoint() const noexcept { return endpoint_; }

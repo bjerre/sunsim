@@ -8,6 +8,9 @@ simulation and responds to one physical button controller:
 - **1 "work" bulb** stays bright and shifts cool to warm across the work
   hours (default 08:30-17:30: ~6000K in the morning to ~3000K by
   17:30, then holds warm).
+- The wall bulbs sit east-to-west on the south wall (A east, C west): the
+  one nearest the real sun's direction is brightest (`config sunshift`),
+  and near sunrise/sunset they glow amber (`config amber`).
 - All bulbs only run inside an **active window** (default Mon-Fri,
   08:00-19:00, 10 min fade at each edge) and are off outside it.
 - **1 button controller** (any simple single-button Zigbee switch):
@@ -49,6 +52,8 @@ without the `export.sh` step.
 sunsim> config                       # show current settings
 sunsim> config hours 08:00-19:00
 sunsim> config workhours 08:30-17:30   # work light's cool -> warm span
+sunsim> config sunshift 25          # wall dimming away from the sun, % (0 = off)
+sunsim> config amber on             # amber glow when the sun is < 6 deg up
 sunsim> config fade 10               # minutes to fade in/out at each edge (0 = hard on/off)
 sunsim> config days mon-fri          # or: all, or a list like mon,tue,thu
 ```
@@ -141,32 +146,29 @@ You don't need all 5 devices present for sunsim to do something useful:
 whichever bulbs have joined get the program applied; missing ones are
 silently skipped.
 
-## Button mapping is a best guess
+## Button
 
-sunsim doesn't know your exact button model up front. It binds the button's
-On/Off (and Scenes) output to its own receiver endpoint and maps:
+Tested with a SONOFF SNZB-01-style button, which says which press it was:
 
-- `Off` or `OffWithEffect` command -> all lights off (long-press/hold on most simple switches)
-- `On`/`Toggle` command, no second press within 450ms -> resume program (single press)
-- `On`/`Toggle` command twice within 450ms, or a `Scenes` RecallScene command -> red alert (double press)
+| Press  | Button sends | sunsim does            |
+|--------|--------------|------------------------|
+| single | `Toggle`     | resume daylight program |
+| double | `On`         | red alert (TNG pulse)  |
+| hold   | `Off`        | all lights off         |
 
-Note that esp-zigbee-lib's `On`/`Off`/`Toggle` commands (0x01/0x00/0x02) are
-handled inside the stack and only surface to the app as the resulting On/Off
-*attribute value* (`EZB_ZCL_CORE_SET_ATTR_VALUE_CB_ID`) - there's no way to
-tell `On` and `Toggle` apart at this layer, which is why single vs. double
-press is resolved by timing rather than by command type. `OffWithEffect`
-(0x40) is the one On/Off command that does get its own dedicated callback
-(`EZB_ZCL_CORE_ON_OFF_OFF_WITH_EFFECT_CB_ID`), so it's handled separately in
-`SunsimApp::handleZclAction`.
+These buttons send to sunsim's endpoint 1 regardless of the binding, where
+the stack has no On/Off server and would drop them, so frames from the
+paired button are picked out at the APS layer and dispatched by command
+(`SunsimApp::handleApsIndication`). Buttons that instead send to the bound
+receiver endpoint 2 still go through the older path: the On/Off attribute
+change, with single vs. double press resolved by timing
+(`SunsimApp::handleZclAction`, `ButtonController::onOffOffCommand`).
 
-This matches common cheap single-button Zigbee switches (e.g. the
-click/double-click/hold -> toggle/on/off convention used by several
-Sonoff/Aqara/Tuya switches, including the SONOFF SNZB-01P), but isn't
-guaranteed for every device. Watch
-the `BUTTON`/`SUNSIM` log tags after pairing your actual button and pressing
-it to see what command it really sends, then adjust the dispatch in
-`SunsimApp::handleZclAction` (`main/sunsim_app.cpp`) and/or
-`ButtonController` (`main/button_controller.*`) accordingly.
+For a different button, set the `SUNSIM` log tag to DEBUG
+(`esp_log_level_set("SUNSIM", ESP_LOG_DEBUG)` or menuconfig): every
+incoming application frame is then logged as
+`RX from 0x2fed ep1 -> ep1 cluster 0x0006 cluster cmd 0x02 ...`,
+which shows what it really sends.
 
 ### Testing without the button
 

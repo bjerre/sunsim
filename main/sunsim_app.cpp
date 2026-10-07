@@ -1,5 +1,6 @@
 #include "sunsim_app.h"
 
+#include <cstdio>
 #include <cstdlib>
 
 #include "esp_check.h"
@@ -311,6 +312,7 @@ void SunsimApp::setupCommissioning()
     ESP_ERROR_CHECK(ezb_bdb_set_primary_channel_set(SUNSIM_PRIMARY_CHANNEL_MASK));
     ESP_ERROR_CHECK(ezb_bdb_set_secondary_channel_set(SUNSIM_SECONDARY_CHANNEL_MASK));
     ESP_ERROR_CHECK(ezb_app_signal_add_handler(&SunsimApp::signalTrampoline));
+    ezb_apsde_data_indication_handler_register(&SunsimApp::apsIndicationTrampoline);
 }
 
 void SunsimApp::zigbeeTaskBody()
@@ -326,6 +328,67 @@ void SunsimApp::zigbeeTaskBody()
 
     esp_zigbee_deinit();
     vTaskDelete(nullptr);
+}
+
+bool SunsimApp::apsIndicationTrampoline(const ezb_apsde_data_ind_t *ind)
+{
+    return instance().handleApsIndication(ind);
+}
+
+bool SunsimApp::handleApsIndication(const ezb_apsde_data_ind_t *ind)
+{
+    if (!ind || ind->profile_id == 0 || ind->asdu_length < 3) {
+        return false; // ZDO, or too short to be ZCL
+    }
+    const uint8_t fc  = ind->asdu[0];
+    const bool    mfr = fc & 0x04; // manufacturer-specific: 2-byte code before TSN
+    if (mfr && ind->asdu_length < 5) {
+        return false;
+    }
+    const uint8_t cmd         = ind->asdu[mfr ? 4 : 2];
+    const bool    cluster_cmd = (fc & 0x03) == 0x01;
+    const bool    from_short  = ind->src_address.addr_mode == EZB_ADDR_MODE_SHORT;
+    const uint16_t src        = from_short ? ind->src_address.u.short_addr : 0xffff;
+
+    // Diagnostics (enable DEBUG for the SUNSIM tag to see a device's real
+    // traffic), skipping the bulbs' routine ZCL Default Responses.
+    constexpr uint8_t kDefaultRsp = 0x0B;
+    if (cluster_cmd || cmd != kDefaultRsp) {
+        char hex[3 * 16 + 1] = {};
+        for (uint16_t i = 0; i < ind->asdu_length && i < 16; ++i) {
+            std::snprintf(hex + 3 * i, 4, "%02x ", ind->asdu[i]);
+        }
+        ESP_LOGD(kTag, "RX from 0x%04x ep%d -> ep%d cluster 0x%04x %s cmd 0x%02x%s rssi %d | %s", src,
+                 ind->src_endpoint, ind->dst_endpoint, ind->cluster_id, cluster_cmd ? "cluster" : "global", cmd,
+                 mfr ? " (mfr-specific)" : "", ind->rssi, hex);
+    }
+
+    // The paired button. SONOFF SNZB-01-style buttons say which press it was
+    // (single = Toggle, double = On, hold = Off) and send it to our endpoint
+    // 1 whatever the binding says, where there's no On/Off server to receive
+    // it - so it's handled here, before the stack would drop it.
+    if (!from_short || !light_rig_.isDevice(Role::Button, src) || ind->cluster_id != EZB_ZCL_CLUSTER_ID_ON_OFF ||
+        !cluster_cmd || mfr) {
+        return false;
+    }
+    light_rig_.noteHeard(Role::Button);
+    switch (cmd) {
+    case 0x02: // Toggle
+        ESP_LOGI(kTag, "Button: single press (Toggle)");
+        button_.onSinglePress();
+        break;
+    case 0x01: // On
+        ESP_LOGI(kTag, "Button: double press (On)");
+        button_.onDoublePress();
+        break;
+    case 0x00: // Off
+        ESP_LOGI(kTag, "Button: hold (Off)");
+        button_.onHold();
+        break;
+    default:
+        return false;
+    }
+    return true; // handled; don't let the stack reply "unsupported" to the button
 }
 
 bool SunsimApp::signalTrampoline(const ezb_app_signal_t *signal)

@@ -32,6 +32,24 @@ void ButtonController::onOffOffCommand(bool on)
     }
 }
 
+void ButtonController::onSinglePress()
+{
+    click_pending_ = false;
+    enterAuto();
+}
+
+void ButtonController::onDoublePress()
+{
+    click_pending_ = false;
+    enterRedAlert();
+}
+
+void ButtonController::onHold()
+{
+    click_pending_ = false;
+    enterManualOff();
+}
+
 void ButtonController::onSceneRecall()
 {
     click_pending_ = false;

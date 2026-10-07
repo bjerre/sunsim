@@ -194,7 +194,9 @@ void printSchedule(const DaylightSchedule::Config &c)
     printClock(c.work_start_hour);
     std::printf("-");
     printClock(c.work_end_hour);
-    std::printf("  (work light cool -> warm)\ndays ");
+    std::printf("  (work light cool -> warm)\nsun   %u%% (wall dimming away from the sun)\n"
+                "amber %s (sunrise/sunset glow below %.0f deg sun elevation)\ndays ",
+                c.sun_shift_percent, c.amber_enabled ? "on" : "off", c.golden_elevation_deg);
     for (int d = 0; d < 7; ++d) {
         const int day = (d + 1) % 7; // list Monday first
         if ((c.active_days >> day) & 1U) {
@@ -245,7 +247,7 @@ int cmdConfig(void *ctx, int argc, char **argv)
     const std::string_view key{argv[1]};
     if (argc != 3) {
         std::printf("usage: config [hours HH:MM-HH:MM | workhours HH:MM-HH:MM | fade <minutes> |\n"
-                    "               days mon-fri|all|mon,tue,...]\n");
+                    "               sunshift <0-100> | amber on|off | days mon-fri|all|mon,tue,...]\n");
         return 1;
     }
 
@@ -276,6 +278,20 @@ int cmdConfig(void *ctx, int argc, char **argv)
             return 1;
         }
         c.fade_minutes = minutes;
+    } else if (key == "sunshift") {
+        const int percent = std::atoi(argv[2]);
+        if (percent < 0 || percent > 100 || (percent == 0 && argv[2][0] != '0')) {
+            std::printf("sunshift must be 0-100 (%%; 0 = off)\n");
+            return 1;
+        }
+        c.sun_shift_percent = static_cast<uint8_t>(percent);
+    } else if (key == "amber") {
+        const std::string_view value{argv[2]};
+        if (value != "on" && value != "off") {
+            std::printf("amber must be on or off\n");
+            return 1;
+        }
+        c.amber_enabled = value == "on";
     } else if (key == "days") {
         const auto days = parseDays(argv[2]);
         if (!days) {
@@ -284,7 +300,7 @@ int cmdConfig(void *ctx, int argc, char **argv)
         }
         c.active_days = *days;
     } else {
-        std::printf("unknown setting '%s' (hours, workhours, fade, days)\n", argv[1]);
+        std::printf("unknown setting '%s' (hours, workhours, fade, sunshift, amber, days)\n", argv[1]);
         return 1;
     }
 
@@ -295,7 +311,8 @@ int cmdConfig(void *ctx, int argc, char **argv)
 }
 
 // Feeds the same ButtonController entry points the real button's Zigbee
-// traffic does, so this exercises the whole press -> mode path.
+// traffic does (see SunsimApp::apsIndicationTrampoline), so this exercises
+// the whole press -> mode path.
 int cmdPress(void *ctx, int argc, char **argv)
 {
     auto &button = *static_cast<ButtonController *>(ctx);
@@ -307,11 +324,11 @@ int cmdPress(void *ctx, int argc, char **argv)
 
     ZigbeeLock lock;
     if (kind == "single") {
-        button.onOffOffCommand(true); // resolves to "resume" on the heartbeat after the double-click window
+        button.onSinglePress();
     } else if (kind == "double") {
-        button.onSceneRecall();
+        button.onDoublePress();
     } else if (kind == "hold") {
-        button.onOffOffCommand(false);
+        button.onHold();
     } else {
         std::printf("usage: press single|double|hold\n");
         return 1;
@@ -487,8 +504,8 @@ void startPairingConsole(LightRig &rig, ButtonController &button)
                     "<WallA|WallB|WallC|Work|Button|cancel>", &cmdPair, &rig);
     registerCommand("unpair", "Forget a role's device (it can then be re-paired)", "<role|all>", &cmdUnpair, &rig);
     registerCommand("open", "Open the network for joining", "[seconds]", &cmdOpen, &rig);
-    registerCommand("config", "Show or change active hours, work-light colour hours, edge fade and work days",
-                    "[hours|workhours HH:MM-HH:MM | fade <min> | days mon-fri|all|mon,tue,...]", &cmdConfig, &rig);
+    registerCommand("config", "Show or change active/work hours, fade, sun shift, amber glow and work days",
+                    "[hours|workhours HH:MM-HH:MM | fade <min> | sunshift <0-100> | amber on|off | days ...]", &cmdConfig, &rig);
     static StatusContext status_ctx{&rig, &button};
     registerCommand("status", "Time, day length, next sunrise/sunset, mode and device links", nullptr, &cmdStatus,
                     &status_ctx);

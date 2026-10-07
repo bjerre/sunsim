@@ -72,4 +72,31 @@ SunTimes computeSunTimes(double latitude_deg, double longitude_deg, int day_of_y
             .sunset_hour  = sunEventLocalHour(latitude_deg, longitude_deg, day_of_year, utc_offset_hours, false)};
 }
 
+SunPosition computeSunPosition(double latitude_deg, double longitude_deg, int day_of_year, double local_hour,
+                               double utc_offset_hours) noexcept
+{
+    const double utc_hour = local_hour - utc_offset_hours;
+
+    // Fractional year (radians).
+    const double g = 2.0 * M_PI / 365.0 * (day_of_year - 1 + (utc_hour - 12.0) / 24.0);
+
+    const double eq_time_min = 229.18 * (0.000075 + 0.001868 * std::cos(g) - 0.032077 * std::sin(g) -
+                                         0.014615 * std::cos(2 * g) - 0.040849 * std::sin(2 * g));
+    const double decl = 0.006918 - 0.399912 * std::cos(g) + 0.070257 * std::sin(g) - 0.006758 * std::cos(2 * g) +
+                        0.000907 * std::sin(2 * g) - 0.002697 * std::cos(3 * g) + 0.00148 * std::sin(3 * g);
+
+    // True solar time (minutes) -> hour angle (0 at solar noon, negative in the morning).
+    const double true_solar_min = utc_hour * 60.0 + eq_time_min + 4.0 * longitude_deg;
+    const double hour_angle     = (true_solar_min / 4.0 - 180.0) * kDeg2Rad;
+
+    const double lat       = latitude_deg * kDeg2Rad;
+    const double cos_zen   = std::sin(lat) * std::sin(decl) + std::cos(lat) * std::cos(decl) * std::cos(hour_angle);
+    const double elevation = 90.0 - std::acos(std::fmax(-1.0, std::fmin(1.0, cos_zen))) * kRad2Deg;
+
+    // Measured from South, positive toward West; +180 makes it a compass bearing.
+    const double from_south = std::atan2(std::sin(hour_angle),
+                                         std::cos(hour_angle) * std::sin(lat) - std::tan(decl) * std::cos(lat));
+    return {.azimuth_deg = normalizeDegrees(from_south * kRad2Deg + 180.0), .elevation_deg = elevation};
+}
+
 } // namespace sunsim

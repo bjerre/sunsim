@@ -4,6 +4,7 @@
 
 #include "esp_timer.h"
 #include "esp_zigbee.h"
+#include "ezbee/aps.h"
 #include "ezbee/zha.h"
 
 #include "button_controller.h"
@@ -37,11 +38,13 @@ private:
 
     void handleSignal(const ezb_app_signal_t *signal);
     void handleZclAction(ezb_zcl_core_action_callback_id_t callback_id, void *message);
+    bool handleApsIndication(const ezb_apsde_data_ind_t *ind);
     void heartbeatTick();
     void scheduleCommissioningRetry(ezb_bdb_comm_mode_mask_t mode, std::chrono::milliseconds delay);
     void retryCommissioning();
 
     static bool signalTrampoline(const ezb_app_signal_t *signal);
+    static bool apsIndicationTrampoline(const ezb_apsde_data_ind_t *ind);
     static void zclTrampoline(ezb_zcl_core_action_callback_id_t callback_id, void *message);
     static void heartbeatTrampoline(void *arg);
     static void retryTrampoline(void *arg);

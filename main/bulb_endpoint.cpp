@@ -1,5 +1,7 @@
 #include "bulb_endpoint.h"
 
+#include <cmath>
+
 #include "ezbee/zha.h"
 
 namespace sunsim {
@@ -63,6 +65,21 @@ void BulbEndpoint::setHueSaturation(uint8_t hue, uint8_t saturation, TransitionT
     cmd.payload.saturation      = saturation;
     cmd.payload.transition_time = transition.count();
     ezb_zcl_color_control_move_to_hue_and_saturation_cmd_req(&cmd);
+}
+
+void BulbEndpoint::setColorXY(double x, double y, TransitionTime transition) const
+{
+    // ZCL encodes x and y as value * 65536, capped at 0xFEFF.
+    const auto encode = [](double v) {
+        const long scaled = std::lround(v * 65536.0);
+        return static_cast<uint16_t>(scaled < 0 ? 0 : (scaled > 0xFEFF ? 0xFEFF : scaled));
+    };
+    ezb_zcl_color_control_move_to_color_cmd_t cmd{
+        .cmd_ctrl = makeCmdCtrl(short_addr_, endpoint_, source_endpoint_), .payload = {}};
+    cmd.payload.color_x         = encode(x);
+    cmd.payload.color_y         = encode(y);
+    cmd.payload.transition_time = transition.count();
+    ezb_zcl_color_control_move_to_color_cmd_req(&cmd);
 }
 
 } // namespace sunsim

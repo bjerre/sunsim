@@ -23,7 +23,9 @@ public:
     // redAlertTick only ever fire from tick(), i.e. from SunsimApp's
     // heartbeat timer (outside any Zigbee callback - the caller must hold
     // the Zigbee lock, as SunsimApp::heartbeatTick does). manualOff and
-    // enterRedAlert only ever fire from onOffOffCommand()/onSceneRecall(),
+    // enterRedAlert fire from the press handlers below (onSinglePress() etc.,
+    // onOffOffCommand(), onSceneRecall()) - and resumeAuto also from
+    // onSinglePress() -
     // i.e. from SunsimApp's ZCL action handler (already a Zigbee callback -
     // do NOT take the lock there) or from the console's `press` command
     // (which takes the lock itself). If you add new call sites for these
@@ -37,6 +39,13 @@ public:
 
     explicit ButtonController(Callbacks callbacks,
                                std::chrono::milliseconds double_click_window = std::chrono::milliseconds{450});
+
+    // For buttons that say which press it was (e.g. SONOFF SNZB-01:
+    // single = Toggle, double = On, hold = Off), no timing needed.
+    // Must be called from within a Zigbee callback (see Callbacks above).
+    void onSinglePress();
+    void onDoublePress();
+    void onHold();
 
     // Call when the button's bound On/Off attribute changes (On/Toggle -> true, Off -> false).
     // Must be called from within a Zigbee callback (see Callbacks above).
