@@ -57,6 +57,7 @@ private:
     void scheduleCommissioningRetry(ezb_bdb_comm_mode_mask_t mode, std::chrono::milliseconds delay);
     void retryCommissioning();
     void pressed(ev::Press press);
+    void countSend(ezb_err_t err);
 
     static void taskTrampoline(void *arg);
     static bool signalTrampoline(const ezb_app_signal_t *signal);
@@ -75,6 +76,13 @@ private:
     // The button's short address (0xFFFF = none), read by the APS hook on the
     // Zigbee task to decide synchronously whether to consume a frame.
     std::atomic<uint16_t> button_short_{0xFFFF};
+
+    // Bulb commands the stack refused to queue (e.g. out of buffers),
+    // summarised every kSendReportUs so silent drops show up in the log.
+    uint32_t  sends_           = 0;
+    uint32_t  send_failures_   = 0;
+    ezb_err_t last_send_error_ = EZB_ERR_NONE;
+    int64_t   report_start_us_ = 0;
 
     static ZigbeeAdapter *s_self;
 };

@@ -129,6 +129,10 @@ struct Ping {
     Role     role       = Role::WallA;
     uint16_t short_addr = 0;
 };
+struct ReachabilityChanged {     // a bulb stopped answering / answers again
+    Role role      = Role::WallA;
+    bool reachable = true;
+};
 struct DevicesUpdated {          // 1 Hz summary for the status model
     std::array<DeviceStatus, kRoleCount> devices{};
     DeviceRecords                        records{};
@@ -176,7 +180,8 @@ using Payload = std::variant<Heartbeat, Tick, ProgramTick,                      
                              NetworkUp, DeviceAnnounced, EndpointFound, BindResult, PingResult,       //
                              AckReceived, ButtonPressed,                                              //
                              PairRequested, PairCancelled, UnpairRequested, OpenNetwork, FactoryReset, //
-                             RoleAssigned, RoleCleared, Discover, Bind, Ping, DevicesUpdated,         //
+                             RoleAssigned, RoleCleared, Discover, Bind, Ping, ReachabilityChanged,    //
+                             DevicesUpdated,                                                          //
                              ModeChanged, RedAlertPulse, RefreshLights, LightTarget, SetLight,       //
                              StatusChanged>;
 
@@ -187,7 +192,7 @@ inline constexpr const char *kEventNames[] = {
     "NetworkUp", "DeviceAnnounced", "EndpointFound", "BindResult", "PingResult",
     "AckReceived", "ButtonPressed",
     "PairRequested", "PairCancelled", "UnpairRequested", "OpenNetwork", "FactoryReset",
-    "RoleAssigned", "RoleCleared", "Discover", "Bind", "Ping", "DevicesUpdated",
+    "RoleAssigned", "RoleCleared", "Discover", "Bind", "Ping", "ReachabilityChanged", "DevicesUpdated",
     "ModeChanged", "RedAlertPulse", "RefreshLights", "LightTarget", "SetLight",
     "StatusChanged",
 };

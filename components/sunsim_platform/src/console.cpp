@@ -391,36 +391,82 @@ int cmdStatus(int, char **)
 
 // ---- wifi / restart / factory_reset -----------------------------------------------
 
-// Wi-Fi credentials live in their own NVS keys and are only read by the
+// Wi-Fi networks live in their own NVS keys and are only read by the
 // time-sync task at connect time, so these call the store directly.
-int cmdWifi(int argc, char **argv)
+void printWifiUsage()
 {
-    if (argc == 1) {
-        const WifiCredentials creds = loadWifiCredentials();
-        if (creds.ssid.empty()) {
-            std::printf("no Wi-Fi configured; set one with: wifi <ssid> [password]\n");
-        } else {
-            std::printf("ssid \"%s\" (%s, %s)\n", creds.ssid.c_str(),
-                        creds.from_nvs ? "set from console" : "menuconfig fallback",
-                        creds.password.empty() ? "open network" : "password set");
-        }
+    std::printf("usage: wifi                          list saved networks\n"
+                "       wifi add <ssid> [password]    add one (or change its password); up to %u\n"
+                "       wifi remove <ssid>            forget one\n"
+                "       wifi clear                    forget all (falls back to menuconfig's)\n"
+                "quote an SSID with spaces: wifi add \"My Net\" secret\n",
+                static_cast<unsigned>(kMaxWifiNetworks));
+}
+
+int addWifi(const char *ssid, const char *password)
+{
+    switch (addWifiNetwork(ssid, password)) {
+    case WifiSaveResult::Added:
+        std::printf("added \"%s\"; type `restart` to sync time now\n", ssid);
         return 0;
-    }
-    if (argc == 2 && std::string_view{argv[1]} == "clear") {
-        clearWifiCredentials();
-        std::printf("cleared; falling back to menuconfig Wi-Fi settings on next boot\n");
+    case WifiSaveResult::Updated:
+        std::printf("updated the password for \"%s\"\n", ssid);
         return 0;
-    }
-    if (argc > 3) {
-        std::printf("usage: wifi [<ssid> [password]] | wifi clear   (quote an SSID with spaces: \"My Net\")\n");
-        return 1;
-    }
-    if (!saveWifiCredentials(argv[1], argc == 3 ? argv[2] : "")) {
+    case WifiSaveResult::Invalid:
         std::printf("not saved: SSID must be 1-32 chars, password at most 64\n");
         return 1;
+    case WifiSaveResult::Full:
+        std::printf("not saved: already %u networks; `wifi remove` one first\n",
+                    static_cast<unsigned>(kMaxWifiNetworks));
+        return 1;
+    case WifiSaveResult::StorageError:
+        std::printf("not saved: storage error\n");
+        return 1;
     }
-    std::printf("saved \"%s\"; type `restart` to sync time with it\n", argv[1]);
-    return 0;
+    return 1;
+}
+
+int cmdWifi(int argc, char **argv)
+{
+    const std::string_view sub = argc >= 2 ? argv[1] : "";
+    if (argc == 1) {
+        const WifiNetworks saved = loadWifiNetworks();
+        if (saved.networks.empty()) {
+            std::printf("no Wi-Fi networks; add one with: wifi add <ssid> [password]\n");
+            return 0;
+        }
+        if (saved.from_menuconfig) {
+            std::printf("none saved; using the menuconfig fallback:\n");
+        }
+        for (std::size_t i = 0; i < saved.networks.size(); ++i) {
+            const WifiNetwork &n = saved.networks[i];
+            std::printf("  %u. \"%s\" (%s)\n", static_cast<unsigned>(i + 1), n.ssid.c_str(),
+                        n.password.empty() ? "open network" : "password set");
+        }
+        std::printf("the strongest one in range is used at each clock sync\n");
+        return 0;
+    }
+    if (sub == "add" && (argc == 3 || argc == 4)) {
+        return addWifi(argv[2], argc == 4 ? argv[3] : "");
+    }
+    if (sub == "remove" && argc == 3) {
+        if (!removeWifiNetwork(argv[2])) {
+            std::printf("no saved network called \"%s\"\n", argv[2]);
+            return 1;
+        }
+        std::printf("removed \"%s\"\n", argv[2]);
+        return 0;
+    }
+    if (sub == "clear" && argc == 2) {
+        clearWifiNetworks();
+        std::printf("all networks forgotten; falling back to menuconfig's Wi-Fi settings\n");
+        return 0;
+    }
+    if (sub != "add" && sub != "remove" && sub != "clear" && argc <= 3) {
+        return addWifi(argv[1], argc == 3 ? argv[2] : ""); // the old `wifi <ssid> [password]` form
+    }
+    printWifiUsage();
+    return 1;
 }
 
 int cmdRestart(int, char **)
@@ -482,8 +528,8 @@ void startConsole(const ev::Post &post, const StatusSlot &status)
                     &cmdIntensity);
     registerCommand("press", "Simulate the button: single = resume daylight, double = red alert, hold = all off",
                     "single|double|hold", &cmdPress);
-    registerCommand("wifi", "Show, set or clear the Wi-Fi network used for the clock sync",
-                    "[<ssid> [password]] | clear", &cmdWifi);
+    registerCommand("wifi", "List, add or remove the Wi-Fi networks used for the clock sync (e.g. home and work)",
+                    "[add <ssid> [password] | remove <ssid> | clear]", &cmdWifi);
     registerCommand("restart", "Reboot (keeps roles, network and Wi-Fi settings)", nullptr, &cmdRestart);
     registerCommand("factory_reset", "Forget all roles AND the Zigbee network, then restart", nullptr,
                     &cmdFactoryReset);

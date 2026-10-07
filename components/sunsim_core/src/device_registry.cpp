@@ -7,8 +7,11 @@ namespace sunsim::core {
 namespace {
 constexpr const char *kTag = "REGISTRY";
 
-constexpr uint32_t kDiscoveryRetrySeconds = 15;
-constexpr uint32_t kPingSeconds           = 60;
+constexpr uint32_t kDiscoveryRetrySeconds   = 15;
+constexpr uint32_t kFirstPingSeconds        = 15;
+constexpr uint32_t kPingSeconds             = 60; // reachable bulbs
+constexpr uint32_t kUnreachablePingSeconds  = 15; // until they answer again
+constexpr int64_t  kUnreachableSilenceUs    = 60LL * 1000 * 1000;
 constexpr uint8_t  kPairOpenSeconds       = 180;
 
 const char *name(ev::Role role) noexcept
@@ -47,6 +50,28 @@ void DeviceRegistry::persist()
 void DeviceRegistry::heard(ev::Role role)
 {
     liveness_[ev::indexOf(role)].last_heard_us = now_us_ > 0 ? now_us_ : 1;
+    setReachable(role, true);
+}
+
+void DeviceRegistry::setReachable(ev::Role role, bool reachable)
+{
+    Liveness &l = liveness_[ev::indexOf(role)];
+    if (l.reachable == reachable) {
+        return;
+    }
+    l.reachable = reachable;
+    post_(ev::ReachabilityChanged{role, reachable});
+    if (reachable) {
+        SUNSIM_LOGI(kTag, "%s is answering again - resuming its light", name(role));
+        l.next_ping_s = seconds_ + kPingSeconds;
+        if (ev::isBulb(role)) {
+            post_(ev::RefreshLights{role});
+        }
+    } else {
+        SUNSIM_LOGW(kTag, "%s not answering - pausing its light commands (powered off or out of range?)",
+                    name(role));
+        l.next_ping_s = seconds_ + kUnreachablePingSeconds;
+    }
 }
 
 void DeviceRegistry::discover(ev::Role role)
@@ -56,7 +81,8 @@ void DeviceRegistry::discover(ev::Role role)
 
 void DeviceRegistry::assign(ev::Role role, uint64_t ext_addr, uint16_t short_addr)
 {
-    records_[ev::indexOf(role)]  = {.valid = true, .ext_addr = ext_addr, .short_addr = short_addr, .endpoint = 0};
+    records_[ev::indexOf(role)] = {.valid = true, .ext_addr = ext_addr, .short_addr = short_addr, .endpoint = 0};
+    setReachable(role, true);
     liveness_[ev::indexOf(role)] = {};
     persist();
     heard(role);
@@ -66,7 +92,7 @@ void DeviceRegistry::assign(ev::Role role, uint64_t ext_addr, uint16_t short_add
 
 void DeviceRegistry::clear(ev::Role role)
 {
-    records_[ev::indexOf(role)]  = {};
+    records_[ev::indexOf(role)] = {};
     liveness_[ev::indexOf(role)] = {};
     post_(ev::RoleCleared{role});
 }
@@ -155,19 +181,19 @@ void DeviceRegistry::onBindResult(const ev::BindResult &e)
 
 void DeviceRegistry::onPingResult(const ev::PingResult &e)
 {
-    Liveness &l = liveness_[ev::indexOf(e.role)];
+    if (!records_[ev::indexOf(e.role)].valid) {
+        return; // unpaired meanwhile
+    }
     if (e.ok) {
         heard(e.role);
+        return;
     }
-    // Log only changes, so a bulb switched off at the wall doesn't log every minute.
-    if (e.ok != l.ping_ok) {
-        l.ping_ok = e.ok;
-        if (e.ok) {
-            SUNSIM_LOGI(kTag, "%s is answering", name(e.role));
-        } else {
-            SUNSIM_LOGW(kTag, "%s not answering (err=0x%x status=0x%x) - powered off or out of range?", name(e.role),
-                        e.error, e.status);
-        }
+    // A lost ping alone isn't enough (a busy network drops some); it must
+    // also have been silent - no acks - for a while.
+    const Liveness &l = liveness_[ev::indexOf(e.role)];
+    if (l.last_heard_us == 0 || now_us_ - l.last_heard_us > kUnreachableSilenceUs) {
+        SUNSIM_LOGD(kTag, "Ping to %s failed (err=0x%x status=0x%x)", name(e.role), e.error, e.status);
+        setReachable(e.role, false);
     }
 }
 
@@ -236,13 +262,19 @@ void DeviceRegistry::onTick(const ev::Tick &e)
         }
     }
 
-    if (seconds_ % kPingSeconds == 0) {
-        for (std::size_t i = 0; i < ev::kRoleCount; ++i) {
-            // The button is a sleepy end device that won't answer; it counts
-            // as heard when it's pressed instead.
-            if (records_[i].valid && static_cast<ev::Role>(i) != ev::Role::Button) {
-                post_(ev::Ping{static_cast<ev::Role>(i), records_[i].short_addr});
-            }
+    for (std::size_t i = 0; i < ev::kRoleCount; ++i) {
+        // The button is a sleepy end device that won't answer; it counts as
+        // heard when it's pressed instead.
+        if (!records_[i].valid || static_cast<ev::Role>(i) == ev::Role::Button) {
+            continue;
+        }
+        Liveness &l = liveness_[i];
+        if (l.next_ping_s == 0) {
+            l.next_ping_s = kFirstPingSeconds;
+        }
+        if (seconds_ >= l.next_ping_s) {
+            l.next_ping_s = seconds_ + (l.reachable ? kPingSeconds : kUnreachablePingSeconds);
+            post_(ev::Ping{static_cast<ev::Role>(i), records_[i].short_addr});
         }
     }
 
@@ -251,7 +283,8 @@ void DeviceRegistry::onTick(const ev::Tick &e)
         u.devices[i] = {.paired        = records_[i].valid,
                         .has_endpoint  = records_[i].endpoint != 0,
                         .last_heard_us = liveness_[i].last_heard_us,
-                        .rssi          = liveness_[i].rssi};
+                        .rssi          = liveness_[i].rssi,
+                        .reachable     = liveness_[i].reachable};
     }
     post_(u);
 }

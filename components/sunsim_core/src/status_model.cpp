@@ -52,7 +52,7 @@ void StatusModel::publish()
         const ev::DeviceStatus &d = snap_.devices[i];
         if (!d.paired) {
             snap_.links[i] = ev::DeviceLink::Unpaired;
-        } else if (d.last_heard_us != 0 && e.uptime_us - d.last_heard_us <= kOnlineWindowUs) {
+        } else if (d.reachable && d.last_heard_us != 0 && e.uptime_us - d.last_heard_us <= kOnlineWindowUs) {
             snap_.links[i] = ev::DeviceLink::Online;
         } else {
             snap_.links[i] = ev::DeviceLink::Silent;

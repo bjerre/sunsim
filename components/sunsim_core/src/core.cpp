@@ -42,6 +42,7 @@ void wireCore(ev::EventBus &bus, CoreModules &m)
     // Registry
     bus.on<RoleAssigned>([&](const RoleAssigned &e) { m.output.onRoleAssigned(e); });
     bus.on<RoleCleared>([&](const RoleCleared &e) { m.output.onRoleCleared(e); });
+    bus.on<ReachabilityChanged>([&](const ReachabilityChanged &e) { m.output.onReachability(e); });
     bus.on<DevicesUpdated>([&](const DevicesUpdated &e) { m.status.onDevices(e); });
 
     // Mode

@@ -101,6 +101,7 @@ struct DeviceStatus {
     bool    has_endpoint  = false;
     int64_t last_heard_us = 0; // uptime; 0 = not since boot
     int8_t  rssi          = 0; // of the last ack, if any
+    bool    reachable     = true; // false: not answering, light commands paused
 };
 
 // ---- Program settings -----------------------------------------------------

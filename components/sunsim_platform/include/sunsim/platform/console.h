@@ -19,8 +19,9 @@ class StatusSlot;
 //   config <key> <value>  change one (see `help config`)
 //   intensity [<light|all> <1-100>]   per-light peak brightness, saved
 //   press single|double|hold          simulate the button
-//   wifi [<ssid> [pw]]    show / set the Wi-Fi used for the clock sync
-//   wifi clear            forget it, falling back to menuconfig's
+//   wifi                  list saved Wi-Fi networks (the strongest in range is used)
+//   wifi add <ssid> [pw]  add a network (up to 5), or change its password
+//   wifi remove <ssid>    forget one; `wifi clear` forgets all
 //   restart               reboot, keeping everything
 //   factory_reset         forget all roles AND the Zigbee network, then restart
 //

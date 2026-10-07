@@ -46,6 +46,14 @@ idf.py -p /dev/ttyACM0 flash monitor   # builds too; Ctrl+] quits the monitor
 The VS Code ESP-IDF extension's Build/Flash/Monitor buttons do the same
 without the `export.sh` step.
 
+## Missing devices
+
+A bulb that stops answering (switched off at the wall, out of range) is
+detected within about a minute (`REGISTRY: ... not answering - pausing its
+light commands`) and gets no commands until it answers again; the other
+lights carry on normally. It's checked every 15 s and its light is
+re-applied as soon as it's back. `status` shows it as `silent`.
+
 ## Active hours
 
 ```

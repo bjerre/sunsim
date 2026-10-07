@@ -1,5 +1,7 @@
 #include "sunsim/platform/wifi_time_sync.h"
 
+#include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <ctime>
 
@@ -17,15 +19,31 @@ constexpr const char *kTag = "WIFI_TIME";
 
 constexpr int kGotIpBit   = BIT0;
 constexpr int kFailBit    = BIT1;
-constexpr int kMaxRetries = 5;
+constexpr int kMaxRetries = 3; // per network, before moving on to the next
 
-constexpr const char *kNamespace   = "sunsim";
-constexpr const char *kSsidKey     = "wifi.ssid";
-constexpr const char *kPasswordKey = "wifi.pass";
+constexpr const char *kNamespace = "sunsim";
+
+// Pre-multi-network keys (one network). Read as part of the list; moved
+// into the numbered slots the first time the list is changed.
+constexpr const char *kLegacySsidKey     = "wifi.ssid";
+constexpr const char *kLegacyPasswordKey = "wifi.pass";
 
 // Sizes of wifi_sta_config_t's ssid/password fields, less the terminator.
 constexpr std::size_t kMaxSsidLen     = sizeof(wifi_sta_config_t::ssid) - 1;
 constexpr std::size_t kMaxPasswordLen = sizeof(wifi_sta_config_t::password) - 1;
+
+constexpr uint16_t kMaxScanRecords = 20;
+
+// Slot keys "wifi<n>.ssid" / "wifi<n>.pass".
+struct SlotKeys {
+    char ssid[16];
+    char pass[16];
+    explicit SlotKeys(std::size_t slot)
+    {
+        std::snprintf(ssid, sizeof(ssid), "wifi%u.ssid", static_cast<unsigned>(slot));
+        std::snprintf(pass, sizeof(pass), "wifi%u.pass", static_cast<unsigned>(slot));
+    }
+};
 
 bool readNvsString(nvs_handle_t handle, const char *key, std::string &out)
 {
@@ -39,6 +57,62 @@ bool readNvsString(nvs_handle_t handle, const char *key, std::string &out)
     }
     out.resize(len - 1); // drop the terminator nvs_get_str counts
     return true;
+}
+
+std::vector<WifiNetwork> readSaved()
+{
+    std::vector<WifiNetwork> saved;
+    nvs_handle_t             handle;
+    if (nvs_open(kNamespace, NVS_READONLY, &handle) != ESP_OK) {
+        return saved;
+    }
+    for (std::size_t i = 0; i < kMaxWifiNetworks; ++i) {
+        const SlotKeys k{i};
+        WifiNetwork    n;
+        if (readNvsString(handle, k.ssid, n.ssid)) {
+            readNvsString(handle, k.pass, n.password); // absent = open network
+            saved.push_back(std::move(n));
+        }
+    }
+    WifiNetwork legacy;
+    if (readNvsString(handle, kLegacySsidKey, legacy.ssid)) {
+        readNvsString(handle, kLegacyPasswordKey, legacy.password);
+        const bool listed = std::any_of(saved.begin(), saved.end(),
+                                        [&](const WifiNetwork &n) { return n.ssid == legacy.ssid; });
+        if (!listed && saved.size() < kMaxWifiNetworks) {
+            saved.insert(saved.begin(), std::move(legacy));
+        }
+    }
+    nvs_close(handle);
+    return saved;
+}
+
+bool writeSaved(const std::vector<WifiNetwork> &saved)
+{
+    nvs_handle_t handle;
+    if (nvs_open(kNamespace, NVS_READWRITE, &handle) != ESP_OK) {
+        return false;
+    }
+    esp_err_t err = ESP_OK;
+    for (std::size_t i = 0; i < kMaxWifiNetworks && err == ESP_OK; ++i) {
+        const SlotKeys k{i};
+        if (i < saved.size()) {
+            err = nvs_set_str(handle, k.ssid, saved[i].ssid.c_str());
+            if (err == ESP_OK) {
+                err = nvs_set_str(handle, k.pass, saved[i].password.c_str());
+            }
+        } else {
+            nvs_erase_key(handle, k.ssid);
+            nvs_erase_key(handle, k.pass);
+        }
+    }
+    nvs_erase_key(handle, kLegacySsidKey); // migrated into the slots now
+    nvs_erase_key(handle, kLegacyPasswordKey);
+    if (err == ESP_OK) {
+        err = nvs_commit(handle);
+    }
+    nvs_close(handle);
+    return err == ESP_OK;
 }
 
 bool ensureWifiStackInitialized()
@@ -67,63 +141,60 @@ bool ensureWifiStackInitialized()
 
 } // namespace
 
-WifiCredentials loadWifiCredentials()
+WifiNetworks loadWifiNetworks()
 {
-    nvs_handle_t handle;
-    if (nvs_open(kNamespace, NVS_READONLY, &handle) == ESP_OK) {
-        WifiCredentials creds;
-        creds.from_nvs = true;
-        const bool      found = readNvsString(handle, kSsidKey, creds.ssid);
-        if (found) {
-            readNvsString(handle, kPasswordKey, creds.password); // absent = open network
-        }
-        nvs_close(handle);
-        if (found) {
-            return creds;
-        }
+    WifiNetworks result{.networks = readSaved(), .from_menuconfig = false};
+    if (result.networks.empty() && std::strlen(CONFIG_SUNSIM_WIFI_SSID) > 0) {
+        result.networks.push_back({.ssid = CONFIG_SUNSIM_WIFI_SSID, .password = CONFIG_SUNSIM_WIFI_PASSWORD});
+        result.from_menuconfig = true;
     }
-    return {.ssid = CONFIG_SUNSIM_WIFI_SSID, .password = CONFIG_SUNSIM_WIFI_PASSWORD, .from_nvs = false};
+    return result;
 }
 
-bool saveWifiCredentials(std::string_view ssid, std::string_view password)
+WifiSaveResult addWifiNetwork(std::string_view ssid, std::string_view password)
 {
     if (ssid.empty() || ssid.size() > kMaxSsidLen || password.size() > kMaxPasswordLen) {
-        return false;
+        return WifiSaveResult::Invalid;
     }
-    nvs_handle_t handle;
-    if (nvs_open(kNamespace, NVS_READWRITE, &handle) != ESP_OK) {
-        return false;
+    std::vector<WifiNetwork> saved = readSaved();
+    auto it = std::find_if(saved.begin(), saved.end(), [&](const WifiNetwork &n) { return n.ssid == ssid; });
+    WifiSaveResult result = WifiSaveResult::Updated;
+    if (it != saved.end()) {
+        it->password = std::string{password};
+    } else if (saved.size() >= kMaxWifiNetworks) {
+        return WifiSaveResult::Full;
+    } else {
+        saved.push_back({.ssid = std::string{ssid}, .password = std::string{password}});
+        result = WifiSaveResult::Added;
     }
-    esp_err_t err = nvs_set_str(handle, kSsidKey, std::string{ssid}.c_str());
-    if (err == ESP_OK) {
-        err = nvs_set_str(handle, kPasswordKey, std::string{password}.c_str());
-    }
-    if (err == ESP_OK) {
-        err = nvs_commit(handle);
-    }
-    nvs_close(handle);
-    return err == ESP_OK;
+    return writeSaved(saved) ? result : WifiSaveResult::StorageError;
 }
 
-void clearWifiCredentials()
+bool removeWifiNetwork(std::string_view ssid)
 {
-    nvs_handle_t handle;
-    if (nvs_open(kNamespace, NVS_READWRITE, &handle) != ESP_OK) {
-        return;
+    std::vector<WifiNetwork> saved = readSaved();
+    const auto               it =
+        std::remove_if(saved.begin(), saved.end(), [&](const WifiNetwork &n) { return n.ssid == ssid; });
+    if (it == saved.end()) {
+        return false;
     }
-    nvs_erase_key(handle, kSsidKey);
-    nvs_erase_key(handle, kPasswordKey);
-    nvs_commit(handle);
-    nvs_close(handle);
+    saved.erase(it, saved.end());
+    return writeSaved(saved);
+}
+
+void clearWifiNetworks()
+{
+    writeSaved({});
 }
 
 void WifiTimeSync::onWifiEvent(void *arg, esp_event_base_t event_base, int32_t event_id, void *)
 {
     auto *self = static_cast<WifiTimeSync *>(arg);
 
-    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
-    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        if (!self->connecting_) {
+            return; // our own disconnect between networks, or after the sync
+        }
         if (self->retry_count_ < kMaxRetries) {
             ++self->retry_count_;
             esp_wifi_connect();
@@ -131,26 +202,81 @@ void WifiTimeSync::onWifiEvent(void *arg, esp_event_base_t event_base, int32_t e
             xEventGroupSetBits(self->event_group_, kFailBit);
         }
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        self->retry_count_ = 0;
         xEventGroupSetBits(self->event_group_, kGotIpBit);
     }
 }
 
+std::vector<WifiNetwork> WifiTimeSync::candidates(const std::vector<WifiNetwork> &saved)
+{
+    if (saved.size() == 1) {
+        return saved; // nothing to choose between; skip the scan
+    }
+
+    std::vector<wifi_ap_record_t> records(kMaxScanRecords);
+    uint16_t                      count = kMaxScanRecords;
+    if (esp_wifi_scan_start(nullptr, true) != ESP_OK ||
+        esp_wifi_scan_get_ap_records(&count, records.data()) != ESP_OK) {
+        ESP_LOGW(kTag, "Scan failed; trying saved networks in order");
+        return saved;
+    }
+    records.resize(count); // the driver returns them strongest first
+
+    std::vector<WifiNetwork> seen;
+    for (const wifi_ap_record_t &r : records) {
+        const std::string_view ssid{reinterpret_cast<const char *>(r.ssid)};
+        for (const WifiNetwork &n : saved) {
+            const bool already = std::any_of(seen.begin(), seen.end(),
+                                             [&](const WifiNetwork &s) { return s.ssid == n.ssid; });
+            if (n.ssid == ssid && !already) {
+                ESP_LOGI(kTag, "In range: \"%s\" (%d dBm)", n.ssid.c_str(), r.rssi);
+                seen.push_back(n);
+            }
+        }
+    }
+    if (seen.empty()) {
+        ESP_LOGW(kTag, "No saved network seen in the scan; trying each anyway (it may be hidden)");
+        return saved;
+    }
+    return seen;
+}
+
+bool WifiTimeSync::connect(const WifiNetwork &network, std::chrono::milliseconds timeout)
+{
+    wifi_config_t wifi_config{};
+    std::strncpy(reinterpret_cast<char *>(wifi_config.sta.ssid), network.ssid.c_str(), kMaxSsidLen);
+    std::strncpy(reinterpret_cast<char *>(wifi_config.sta.password), network.password.c_str(), kMaxPasswordLen);
+    esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
+
+    ESP_LOGI(kTag, "Connecting to \"%s\"", network.ssid.c_str());
+    xEventGroupClearBits(event_group_, kGotIpBit | kFailBit);
+    retry_count_ = 0;
+    connecting_  = true;
+    esp_wifi_connect();
+
+    const EventBits_t bits =
+        xEventGroupWaitBits(event_group_, kGotIpBit | kFailBit, pdFALSE, pdFALSE, pdMS_TO_TICKS(timeout.count()));
+    connecting_ = false;
+    if (bits & kGotIpBit) {
+        return true;
+    }
+    ESP_LOGW(kTag, "Could not connect to \"%s\"", network.ssid.c_str());
+    esp_wifi_disconnect();
+    return false;
+}
+
 bool WifiTimeSync::run(std::chrono::milliseconds connect_timeout, std::chrono::milliseconds sntp_timeout)
 {
-    const WifiCredentials creds = loadWifiCredentials();
-    if (creds.ssid.empty()) {
-        ESP_LOGW(kTag, "No Wi-Fi SSID configured (use the `wifi` console command), skipping time sync");
+    const WifiNetworks saved = loadWifiNetworks();
+    if (saved.networks.empty()) {
+        ESP_LOGW(kTag, "No Wi-Fi network configured (use `wifi add <ssid> <password>`), skipping time sync");
         return false;
     }
-    ESP_LOGI(kTag, "Connecting to \"%s\" (from %s)", creds.ssid.c_str(), creds.from_nvs ? "console" : "menuconfig");
     if (!ensureWifiStackInitialized()) {
         ESP_LOGE(kTag, "Failed to bring up Wi-Fi netif");
         return false;
     }
 
     event_group_ = xEventGroupCreate();
-    retry_count_ = 0;
 
     esp_event_handler_instance_t wifi_handler_instance;
     esp_event_handler_instance_t ip_handler_instance;
@@ -159,24 +285,24 @@ bool WifiTimeSync::run(std::chrono::milliseconds connect_timeout, std::chrono::m
     esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &WifiTimeSync::onWifiEvent, this,
                                          &ip_handler_instance);
 
-    wifi_config_t wifi_config{};
-    std::strncpy(reinterpret_cast<char *>(wifi_config.sta.ssid), creds.ssid.c_str(), kMaxSsidLen);
-    std::strncpy(reinterpret_cast<char *>(wifi_config.sta.password), creds.password.c_str(), kMaxPasswordLen);
-
     esp_wifi_set_mode(WIFI_MODE_STA);
-    esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
     esp_wifi_start();
 
-    const EventBits_t bits = xEventGroupWaitBits(event_group_, kGotIpBit | kFailBit, pdFALSE, pdFALSE,
-                                                  pdMS_TO_TICKS(connect_timeout.count()));
+    bool connected = false;
+    for (const WifiNetwork &n : candidates(saved.networks)) {
+        if (connect(n, connect_timeout)) {
+            connected = true;
+            break;
+        }
+    }
 
     bool synced = false;
-    if (bits & kGotIpBit) {
+    if (connected) {
         ESP_LOGI(kTag, "Connected, syncing time over SNTP");
         esp_sntp_config_t sntp_cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
         esp_netif_sntp_init(&sntp_cfg);
         if (esp_netif_sntp_sync_wait(pdMS_TO_TICKS(sntp_timeout.count())) == ESP_OK) {
-            synced          = true;
+            synced                = true;
             const std::time_t now = std::time(nullptr);
             ESP_LOGI(kTag, "Time synced: %s", std::ctime(&now));
         } else {
@@ -184,9 +310,10 @@ bool WifiTimeSync::run(std::chrono::milliseconds connect_timeout, std::chrono::m
         }
         esp_netif_sntp_deinit();
     } else {
-        ESP_LOGW(kTag, "Wi-Fi connect failed/timed out, proceeding without time sync");
+        ESP_LOGW(kTag, "No Wi-Fi network reachable, proceeding without time sync");
     }
 
+    connecting_ = false;
     esp_wifi_disconnect();
     esp_wifi_stop();
 

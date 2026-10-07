@@ -15,8 +15,13 @@ namespace sunsim::core {
 //    is ignored.
 //  - Discovery: finds each device's endpoint (Discover/EndpointFound),
 //    retried every 15 s until it's known; the button is then bound (Bind).
-//  - Liveness: every bulb is pinged every 60 s; acks, ping replies,
-//    announces and button presses count as "heard".
+//  - Liveness: acks, ping replies, announces and button presses count as
+//    "heard". Bulbs are pinged 15 s after boot, then every 60 s. A failed
+//    ping with nothing heard for a minute marks a bulb unreachable
+//    (ReachabilityChanged): its light commands pause - sending to a missing
+//    device ties up the stack's buffers with retries and starves everything
+//    else - and it's pinged every 15 s until it answers anything, when it's
+//    marked reachable again and its light re-applied.
 // Persists through PersistRoles; never touches storage or the radio itself.
 class DeviceRegistry {
 public:
@@ -38,9 +43,10 @@ public:
 
 private:
     struct Liveness {
-        int64_t last_heard_us = 0;
-        int8_t  rssi          = 0;
-        bool    ping_ok       = true; // last ping's outcome, for logging changes only
+        int64_t  last_heard_us = 0;
+        int8_t   rssi          = 0;
+        bool     reachable     = true;
+        uint32_t next_ping_s   = 0; // 0 = first ping due kFirstPingSeconds after boot
     };
 
     [[nodiscard]] std::optional<ev::Role> roleByExt(uint64_t ext_addr) const noexcept;
@@ -48,6 +54,7 @@ private:
     void assign(ev::Role role, uint64_t ext_addr, uint16_t short_addr);
     void clear(ev::Role role);
     void heard(ev::Role role);
+    void setReachable(ev::Role role, bool reachable);
     void persist();
     void discover(ev::Role role);
 

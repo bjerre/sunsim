@@ -275,6 +275,70 @@ int main()
         CHECK(h.all<SetLight>().empty()); // never treated as a bulb
     });
 
+    test("a missing bulb is paused, the others keep going, and it resumes when it answers", [] {
+        Harness h;
+        h.tick();
+        h.pairBulb(Role::WallA, 0xA1, 0x0001);
+        h.pairBulb(Role::Work, 0xB2, 0x0002); // never answers
+        h.post(AckReceived{.short_addr = 0x0001, .rssi = -50});
+        h.clearLog();
+
+        h.tick(14);
+        h.post(AckReceived{.short_addr = 0x0001, .rssi = -50});
+        h.tick(1); // 15 s after boot: first pings
+        const auto pings = h.all<Ping>();
+        CHECK(pings.size() == 2);
+
+        // WallA's ping is lost too, but it acked recently: still reachable.
+        h.post(PingResult{.role = Role::WallA, .ok = false});
+        // Work's ping fails and it was never heard after pairing... except
+        // at pairing itself, so it needs 60 s of silence first.
+        h.post(PingResult{.role = Role::Work, .ok = false});
+        CHECK(h.all<ReachabilityChanged>().empty());
+
+        h.tick(60);
+        h.post(AckReceived{.short_addr = 0x0001, .rssi = -50});
+        h.post(PingResult{.role = Role::Work, .ok = false});
+        auto changes = h.all<ReachabilityChanged>();
+        CHECK(changes.size() == 1 && changes[0].role == Role::Work && !changes[0].reachable);
+
+        h.clearLog();
+        TimeReading later = noon();
+        later.local.tm_hour = 14; // the curve has moved on since the last update
+        h.post(ProgramTick{.time = later, .transition_ds = 600});
+        bool to_work = false, to_wall = false;
+        for (const auto &l : h.all<SetLight>()) {
+            to_work |= l.short_addr == 0x0002;
+            to_wall |= l.short_addr == 0x0001;
+        }
+        CHECK(!to_work); // paused
+        CHECK(to_wall);  // others unaffected (level/colour moved since last time)
+
+        h.clearLog();
+        h.tick(15);
+        CHECK(h.all<Ping>().size() >= 1); // unreachable bulbs are checked every 15 s
+
+        h.clearLog();
+        h.post(PingResult{.role = Role::Work, .ok = true}); // powered back on
+        changes = h.all<ReachabilityChanged>();
+        CHECK(changes.size() == 1 && changes[0].reachable);
+        bool resumed_on = false;
+        for (const auto &l : h.all<SetLight>()) {
+            resumed_on |= l.short_addr == 0x0002 && l.power && *l.power;
+        }
+        CHECK(resumed_on); // re-applied in full at once
+    });
+
+    test("only changed values are re-sent", [] {
+        Harness h;
+        h.tick();
+        h.pairBulb(Role::WallB, 0xC3, 0x0003);
+        h.post(ProgramTick{.time = noon(), .transition_ds = 600});
+        h.clearLog();
+        h.post(ProgramTick{.time = noon(), .transition_ds = 600}); // same time -> same target
+        CHECK(h.all<SetLight>().empty());
+    });
+
     test("unpair all clears every role and persists", [] {
         Harness h;
         h.pairBulb(Role::WallA, 0xA1, 0x0001);

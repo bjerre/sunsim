@@ -16,6 +16,8 @@ constexpr const char *kTag = "ZIGBEE";
 
 constexpr EventBits_t kReadyBit = BIT0;
 
+constexpr int64_t kSendReportUs = 10LL * 1000 * 1000;
+
 int64_t nowUs()
 {
     return esp_timer_get_time();
@@ -369,21 +371,44 @@ void ZigbeeAdapter::onSetLight(const ev::SetLight &e)
     const BulbEndpoint::TransitionTime color_tr{e.color_transition_ds};
 
     if (e.power && *e.power) {
-        bulb.turnOn();
+        countSend(bulb.turnOn());
     }
     if (e.hue_sat) {
-        bulb.setHueSaturation(e.hue_sat->first, e.hue_sat->second, color_tr);
+        countSend(bulb.setHueSaturation(e.hue_sat->first, e.hue_sat->second, color_tr));
     }
     if (e.level) {
-        bulb.setLevel(*e.level, level_tr);
+        countSend(bulb.setLevel(*e.level, level_tr));
     }
     if (e.xy) {
-        bulb.setColorXY(e.xy->first, e.xy->second, color_tr);
+        countSend(bulb.setColorXY(e.xy->first, e.xy->second, color_tr));
     } else if (e.mireds) {
-        bulb.setColorTemperature(*e.mireds, color_tr);
+        countSend(bulb.setColorTemperature(*e.mireds, color_tr));
     }
     if (e.power && !*e.power) {
-        bulb.turnOff();
+        countSend(bulb.turnOff());
+    }
+}
+
+void ZigbeeAdapter::countSend(ezb_err_t err)
+{
+    ++sends_;
+    if (err != EZB_ERR_NONE) {
+        ++send_failures_;
+        last_send_error_ = err;
+    }
+    const int64_t now = nowUs();
+    if (now - report_start_us_ >= kSendReportUs) {
+        if (send_failures_ > 0) {
+            ESP_LOGW(kTag, "%lu of %lu bulb commands not queued in the last %llds (last err 0x%x)",
+                     static_cast<unsigned long>(send_failures_), static_cast<unsigned long>(sends_),
+                     static_cast<long long>((now - report_start_us_) / 1'000'000), last_send_error_);
+        } else {
+            ESP_LOGD(kTag, "%lu bulb commands sent in the last %llds", static_cast<unsigned long>(sends_),
+                     static_cast<long long>((now - report_start_us_) / 1'000'000));
+        }
+        sends_           = 0;
+        send_failures_   = 0;
+        report_start_us_ = now;
     }
 }
 

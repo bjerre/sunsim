@@ -32,6 +32,7 @@ void LightOutput::onRoleAssigned(const ev::RoleAssigned &e)
     b.short_addr = e.record.short_addr;
     b.endpoint   = e.record.endpoint;
     b.sent_valid = false; // (re)paired or moved: resend everything next time
+    b.sent_state.reset();
 }
 
 void LightOutput::onRoleCleared(const ev::RoleCleared &e)
@@ -50,13 +51,16 @@ void LightOutput::onModeChanged(const ev::ModeChanged &e)
         break;
     case ev::Mode::ManualOff:
         for (Bulb &b : bulbs_) {
-            if (b.known) {
+            if (usable(b)) {
                 ev::SetLight s = to(b);
                 s.power        = false;
                 post_(s);
                 b.sent_valid = true;
                 b.sent_on    = false;
+            } else {
+                b.sent_valid = false; // switch it off once it's back
             }
+            b.sent_state.reset();
         }
         break;
     case ev::Mode::RedAlert:
@@ -70,7 +74,9 @@ void LightOutput::onRedAlertPulse(const ev::RedAlertPulse &e)
         return;
     }
     for (Bulb &b : bulbs_) {
-        if (!b.known) {
+        b.sent_valid = false; // force a clean re-sync once we leave red alert
+        b.sent_state.reset();
+        if (!usable(b)) {
             continue;
         }
         ev::SetLight s        = to(b);
@@ -79,7 +85,6 @@ void LightOutput::onRedAlertPulse(const ev::RedAlertPulse &e)
         s.level               = e.bright ? kRedAlertBright : kRedAlertDim;
         s.level_transition_ds = kRedAlertFadeDs;
         post_(s);
-        b.sent_valid = false; // force a clean re-sync once we leave red alert
     }
 }
 
@@ -89,31 +94,58 @@ void LightOutput::onTarget(const ev::LightTarget &e)
         return;
     }
     Bulb &b = bulbs_[ev::indexOf(e.role)];
-    if (!b.known) {
+    if (!usable(b)) {
         return;
     }
 
     if (e.state.on) {
-        ev::SetLight s = to(b);
-        if (!b.sent_valid || !b.sent_on) {
+        const ev::LightState *prev = (b.sent_valid && b.sent_on && b.sent_state) ? &*b.sent_state : nullptr;
+        ev::SetLight          s    = to(b);
+        if (!prev) {
             s.power = true;
         }
-        s.level               = e.state.level;
-        s.level_transition_ds = e.transition_ds;
-        if (e.state.use_xy) {
-            s.xy = std::pair<float, float>{e.state.color_x, e.state.color_y};
-        } else {
-            s.mireds = e.state.mireds;
+        if (!prev || prev->level != e.state.level) {
+            s.level               = e.state.level;
+            s.level_transition_ds = e.transition_ds;
         }
-        s.color_transition_ds = e.transition_ds;
-        post_(s);
-    } else if (!b.sent_valid || b.sent_on) {
-        ev::SetLight s = to(b);
-        s.power        = false;
-        post_(s);
+        const bool color_changed = !prev || prev->use_xy != e.state.use_xy ||
+                                   (e.state.use_xy ? (prev->color_x != e.state.color_x || prev->color_y != e.state.color_y)
+                                                   : prev->mireds != e.state.mireds);
+        if (color_changed) {
+            if (e.state.use_xy) {
+                s.xy = std::pair<float, float>{e.state.color_x, e.state.color_y};
+            } else {
+                s.mireds = e.state.mireds;
+            }
+            s.color_transition_ds = e.transition_ds;
+        }
+        if (s.power || s.level || s.mireds || s.xy) {
+            post_(s);
+        }
+        b.sent_state = e.state;
+    } else {
+        if (!b.sent_valid || b.sent_on) {
+            ev::SetLight s = to(b);
+            s.power        = false;
+            post_(s);
+        }
+        b.sent_state.reset();
     }
     b.sent_valid = true;
     b.sent_on    = e.state.on;
+}
+
+void LightOutput::onReachability(const ev::ReachabilityChanged &e)
+{
+    if (!ev::isBulb(e.role)) {
+        return;
+    }
+    Bulb &b     = bulbs_[ev::indexOf(e.role)];
+    b.reachable = e.reachable;
+    if (!e.reachable) {
+        b.sent_valid = false; // unknown state when it's back: resend everything
+        b.sent_state.reset();
+    }
 }
 
 } // namespace sunsim::core

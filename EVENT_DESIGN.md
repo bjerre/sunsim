@@ -129,6 +129,7 @@ flowchart LR
     DR -->|Discover, Bind, Ping, OpenNetwork| ZA
     DR -->|PersistRoles| ST
     DR -->|RoleAssigned, RoleCleared| LO & ZA
+    DR -->|ReachabilityChanged| LO
     DR -->|RefreshLights| DP
     DR -->|DevicesUpdated| SM
 
@@ -146,10 +147,10 @@ flowchart LR
 | Module | Replaces | Listens to | Posts |
 |---|---|---|---|
 | **ZigbeeAdapter** — the only code including esp-zigbee | `SunsimApp`'s signal/ZCL/APS handlers, ZDO calls in `LightRig`, `BulbEndpoint` | `SetLight`, `Discover`, `Bind`, `Ping`, `OpenNetwork`, `FactoryReset`, `RoleAssigned`, `RoleCleared` | `NetworkUp`, `DeviceAnnounced`, `EndpointFound`, `BindResult`, `PingResult`, `AckReceived`, `ButtonPressed` |
-| **DeviceRegistry** | `RoleStore`; pairing, discovery retry, liveness in `LightRig` | `RolesLoaded`, `DeviceAnnounced`, `EndpointFound`, `BindResult`, `PingResult`, `AckReceived`, `ButtonPressed`, `PairRequested`, `PairCancelled`, `UnpairRequested`, `Tick` | `RoleAssigned`, `RoleCleared`, `Discover`, `Bind`, `Ping`, `OpenNetwork`, `PersistRoles`, `RefreshLights`, `DevicesUpdated` |
+| **DeviceRegistry** | `RoleStore`; pairing, discovery retry, liveness in `LightRig` | `RolesLoaded`, `DeviceAnnounced`, `EndpointFound`, `BindResult`, `PingResult`, `AckReceived`, `ButtonPressed`, `PairRequested`, `PairCancelled`, `UnpairRequested`, `Tick` | `RoleAssigned`, `RoleCleared`, `Discover`, `Bind`, `Ping`, `OpenNetwork`, `PersistRoles`, `RefreshLights`, `ReachabilityChanged`, `DevicesUpdated` |
 | **ModeController** | `ButtonController` | `ButtonPressed`, `Tick` | `ModeChanged`, `RedAlertPulse` |
 | **DaylightProgram** | `DaylightSchedule` use, peaks, clock guard in `LightRig` | `ConfigChanged`, `Tick`, `ProgramTick`, `RefreshLights`, `NetworkUp` | `LightTarget` |
-| **LightOutput** | applied-state cache and apply logic in `LightRig` | `LightTarget`, `ModeChanged`, `RedAlertPulse`, `RoleAssigned`, `RoleCleared` | `SetLight`, `RefreshLights` |
+| **LightOutput** | applied-state cache and apply logic in `LightRig` | `LightTarget`, `ModeChanged`, `RedAlertPulse`, `RoleAssigned`, `RoleCleared`, `ReachabilityChanged` | `SetLight`, `RefreshLights` |
 | **StatusModel** | `status.cpp` | `ConfigChanged`, `ModeChanged`, `DevicesUpdated`, `Tick` | `StatusChanged` |
 | **Clock** | heartbeat timer and counters, `FastDayClock`, `WifiTimeSync` | `Heartbeat`, `ConfigChanged` | `Heartbeat` (from its timer), `Tick`, `ProgramTick` |
 | **SettingsStore** | `schedule_settings`, `RoleStore` persistence | `SetConfig`, `SetIntensity`, `PersistRoles`, `FactoryReset` | `RolesLoaded`, `ConfigChanged` |
@@ -182,6 +183,7 @@ address for the synchronous APS decision).
 | `FactoryReset` | — | Console |
 | `RoleAssigned` / `RoleCleared` | role (+ `DeviceRecord`) | DeviceRegistry |
 | `Discover` / `Bind` / `Ping` | role, short (+ ext, endpoint for bind) | DeviceRegistry |
+| `ReachabilityChanged` | role, reachable | DeviceRegistry (a bulb stopped answering / answers again) |
 | `DevicesUpdated` | per-role `DeviceStatus`, records, armed role | DeviceRegistry (1 Hz) |
 | `ModeChanged` | `Mode` | ModeController |
 | `RedAlertPulse` | bright/dim | ModeController |
@@ -360,6 +362,16 @@ real button presses, console commands, status).
   `SetWifi`): they're only read by the time-sync task at connect time.
 - **`wireCore()` lives in `sunsim_core`** so tests and firmware share it;
   only platform edges are in `main/app.cpp`.
+
+- **Missing devices are tolerated** (added after the first build): sending
+  to an unreachable bulb ties up the stack's buffers with retries; in
+  fast-day mode that made ~20% of all light commands fail to queue and
+  starved other traffic. `DeviceRegistry` now marks a bulb unreachable on a
+  failed ping plus 60 s of silence (first ping 15 s after boot), posts
+  `ReachabilityChanged`, and `LightOutput` pauses it until it answers again
+  (pinged every 15 s meanwhile), then re-applies its light. `LightOutput`
+  also only re-sends values that changed. `ZigbeeAdapter` logs a summary of
+  any commands the stack refuses to queue.
 
 ## 12. Open questions
 
