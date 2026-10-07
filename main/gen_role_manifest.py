@@ -3,7 +3,7 @@
 
 Keeps the role -> ext_addr table editable as plain data (fill in each
 device's IEEE address from its label) without hand-editing C++ syntax.
-Role order must match the Role enum in roles_store.h.
+Role order must match ev::Role in components/sunsim_events/include/sunsim/ev/types.h.
 """
 import json
 import sys
@@ -14,28 +14,18 @@ HEADER_TEMPLATE = """#pragma once
 
 #include <array>
 #include <cstdint>
-#include <optional>
 
-#include "roles_store.h"
+#include "sunsim/ev/types.h"
 
 namespace sunsim {{
 
 // Generated from role_manifest.json by gen_role_manifest.py - do not edit by
 // hand. Edit role_manifest.json instead (one IEEE/EUI-64 address per role,
-// from the device's label) and rebuild.
-inline constexpr std::array<uint64_t, kRoleCount> kRoleManifest = {{{{
+// from the device's label) and rebuild. 0 = no entry. Looked up by
+// core::DeviceRegistry when a device joins with no `pair` armed.
+inline constexpr std::array<uint64_t, ev::kRoleCount> kRoleManifest = {{{{
 {entries}
 }}}};
-
-[[nodiscard]] inline std::optional<Role> roleForExtAddr(uint64_t ext_addr) noexcept
-{{
-    for (std::size_t i = 0; i < kRoleManifest.size(); ++i) {{
-        if (ext_addr != 0 && kRoleManifest[i] == ext_addr) {{
-            return static_cast<Role>(i);
-        }}
-    }}
-    return std::nullopt;
-}}
 
 }} // namespace sunsim
 """

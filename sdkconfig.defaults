@@ -43,3 +43,11 @@ CONFIG_LV_FONT_MONTSERRAT_48=y
 #
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 # end of Log
+
+#
+# Task stacks: every task that posts events (main/startup, esp_timer for the
+# heartbeat) needs room for a few Event copies (~256 B each) per post
+#
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
+CONFIG_ESP_TIMER_TASK_STACK_SIZE=4608
+# end of Task stacks

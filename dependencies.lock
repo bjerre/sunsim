@@ -62,6 +62,6 @@ direct_dependencies:
 - espressif/esp-zigbee-lib
 - espressif/esp_lvgl_port
 - idf
-manifest_hash: 2b90599e9aaecfb95c632fcfa5bb5e0f97ecd915d6f0fede96ea32973c055e64
+manifest_hash: c073e138e43f18dfbb42c1a893867dd6562056a70200ca7f129e044ed02a5905
 target: esp32c6
 version: 2.0.0

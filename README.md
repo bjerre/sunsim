@@ -159,10 +159,11 @@ Tested with a SONOFF SNZB-01-style button, which says which press it was:
 These buttons send to sunsim's endpoint 1 regardless of the binding, where
 the stack has no On/Off server and would drop them, so frames from the
 paired button are picked out at the APS layer and dispatched by command
-(`SunsimApp::handleApsIndication`). Buttons that instead send to the bound
+(`platform::ZigbeeAdapter::handleApsIndication`). Buttons that instead send to the bound
 receiver endpoint 2 still go through the older path: the On/Off attribute
 change, with single vs. double press resolved by timing
-(`SunsimApp::handleZclAction`, `ButtonController::onOffOffCommand`).
+(`ZigbeeAdapter::handleZclAction` posts `Press::Ambiguous`, resolved in
+`core::ModeController`).
 
 For a different button, set the `SUNSIM` log tag to DEBUG
 (`esp_log_level_set("SUNSIM", ESP_LOG_DEBUG)` or menuconfig): every
@@ -204,24 +205,47 @@ a transition time matching the update interval (60s normally, 1s in debug
 fast-day mode), so a bulb fades continuously from its current value to the
 next target rather than snapping and holding. Explicit state changes that
 should feel immediate instead - resuming after an override, a bulb
-finishing discovery, a reboot - use a short fixed 2s transition
-(`LightRig::snapRole`/`snapAllBulbs`) rather than waiting for the next slow
-tick to catch up.
+finishing discovery, a reboot, a setting change - use a short fixed 2s
+transition (`RefreshLights`) rather than waiting for the next slow tick to
+catch up.
 
 ## Layout
 
-- `main/daylight.*` - pure time -> `{on, level, color temperature}` curve math, no Zigbee dependency.
-- `main/solar.*` - pure latitude/longitude/day-of-year -> sunrise/sunset calculation, no Zigbee dependency.
-- `main/bulb_endpoint.*` - a Zigbee light endpoint's address, with `turnOn/turnOff/setLevel/setColorTemperature/setHueSaturation`.
-- `main/role_manifest.json` - `ext_addr -> Role` table, filled in from device labels; `main/gen_role_manifest.py` turns it into a C++ header at build time.
-- `main/roles_store.*` - persisted role -> device address/endpoint mapping.
-- `main/pairing_console.*` - serial REPL: `pair`/`unpair`/`roles`/`open`/`status`/`config`/`intensity`/`press`/`wifi`/`restart`/`factory_reset`.
-- `main/day_info.*` - day length and next sunrise/sunset, pure math like `solar.*`.
-- `main/status.*` - one status snapshot shared by the `status` command and the display.
-- `main/status_display.*` - LVGL screen on the on-board LCD.
-- `main/schedule_settings.*` - persists the `config` settings (active hours, fade, days) in NVS.
-- `main/light_rig.*` - owns the 5 paired devices, discovery/binding, and applies the daylight program.
-- `main/button_controller.*` - single/double/long-press state machine, decoupled from Zigbee via callbacks.
-- `main/wifi_time_sync.*` - one-shot Wi-Fi connect + SNTP sync, then Wi-Fi off (keeps the 802.15.4 radio clear).
-- `main/fast_day_clock.h` - the debug-mode synthetic clock.
-- `main/sunsim_app.*` - orchestrates everything; the Zigbee/esp_timer C callback trampolines live here.
+Event-driven: every module talks only through events on one bus, processed
+by a single app task. See [EVENT_DESIGN.md](EVENT_DESIGN.md).
+
+- `components/sunsim_events/` (`sunsim::ev`) - the shared vocabulary: value
+  types (`types.h`), every event (`events.h`), the `EventBus` (`bus.h`).
+- `components/sunsim_core/` (`sunsim::core`) - all application logic, pure
+  C++ (builds on the host):
+  - `device_registry.*` - pairing, endpoint discovery/binding, liveness pings.
+  - `mode_controller.*` - single/double/hold -> daylight / red alert / off.
+  - `daylight_program.*` - what each bulb should show (sun curve, work light,
+    active window, sun shift, amber, per-light intensity, clock guard).
+  - `light_output.*` - turns targets/modes into ZCL commands, diffed against
+    what was last sent.
+  - `status_model.*` - the snapshot shown by `status` and the display.
+  - `daylight.*`, `solar.*`, `day_info.*` - the math.
+  - `core.*` - `CoreModules` and `wireCore()`, every core-to-core edge.
+- `components/sunsim_platform/` (`sunsim::platform`) - everything ESP-IDF:
+  - `zigbee_adapter.*` - the only code using esp-zigbee-lib (stack,
+    commissioning, discovery/bind/ping, button frames, bulb commands).
+  - `clock.*`, `fast_day_clock.h`, `wifi_time_sync.*` - heartbeat, program
+    time, SNTP sync.
+  - `settings_store.*` - all NVS persistence (roles, settings, intensities).
+  - `console.*` - the serial REPL; `status_display.*` - the LCD.
+- `components/eventpp/` - vendored [eventpp](https://github.com/wqking/eventpp)
+  (header-only, Apache-2.0).
+- `main/` - `app.*` (creates the bus and modules, platform wiring, app task),
+  `main.cpp`, menuconfig (`Kconfig.projbuild`), and the role manifest
+  (`role_manifest.json` -> `role_manifest.h` via `gen_role_manifest.py`).
+- `test/host/` - host tests for the core (see below).
+
+## Host tests
+
+The core logic is tested on your PC (no board, no ESP-IDF), wired exactly
+as in the firmware and driven by events:
+
+```
+cmake -S test/host -B build-host && cmake --build build-host && ./build-host/sunsim_tests
+```

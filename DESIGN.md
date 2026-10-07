@@ -8,42 +8,44 @@ build/pairing/configuration instructions, see [README.md](README.md).
 ```mermaid
 flowchart TB
     subgraph Coordinator["sunsim (ESP32-C6, Zigbee coordinator + trust center)"]
-        App[SunsimApp]
-        Rig[LightRig]
-        Store[RoleStore - NVS]
-        Manifest["role_manifest.json<br/>(ext_addr -> Role)"]
-        Schedule[DaylightSchedule]
-        Solar["solar.h<br/>(lat/long -> sunrise/sunset)"]
-        Btn[ButtonController]
-        Wifi[WifiTimeSync]
-
-        App --> Rig
-        App --> Btn
-        App -.one-shot at boot.-> Wifi
-        Rig --> Store
-        Rig --> Manifest
-        Rig --> Schedule
-        Schedule --> Solar
+        Bus[["EventBus (one app task)"]]
+        subgraph Core["sunsim::core (pure C++)"]
+            Reg[DeviceRegistry]
+            Mode[ModeController]
+            Prog["DaylightProgram<br/>(daylight / solar math)"]
+            Out[LightOutput]
+            Stat[StatusModel]
+        end
+        subgraph Platform["sunsim::platform (ESP-IDF)"]
+            ZA[ZigbeeAdapter]
+            Clk["Clock + WifiTimeSync"]
+            Set["SettingsStore (NVS)"]
+            Con[Console]
+            Disp[StatusDisplay]
+        end
+        Core <--> Bus
+        Platform <--> Bus
     end
 
     WallA((Wall bulb A))
     WallB((Wall bulb B))
     WallC((Wall bulb C))
     Work((Work bulb))
-    Switch(("Button<br/>(SNZB-01P)"))
+    Switch(("Button<br/>(SNZB-01)"))
 
-    Rig == "ZCL: On/Off, Level,<br/>Color Control" ==> WallA
-    Rig == "ZCL: On/Off, Level,<br/>Color Control" ==> WallB
-    Rig == "ZCL: On/Off, Level,<br/>Color Control" ==> WallC
-    Rig == "ZCL: On/Off, Level,<br/>Color Control" ==> Work
-    Switch -- "bound On/Off +<br/>Scenes commands" --> App
+    ZA == "ZCL: On/Off, Level,<br/>Color Control" ==> WallA & WallB & WallC & Work
+    Switch -- "On/Off: Toggle / On / Off" --> ZA
 ```
 
-`SunsimApp` is the only stateful singleton; it owns a `LightRig` (the 5
-paired devices, their roles, and the daylight program) and a
-`ButtonController` (a pure state machine, decoupled from Zigbee via
-callbacks). `WifiTimeSync` runs once at boot to get a correct clock over
-SNTP, then shuts Wi-Fi off so it doesn't contend with the 802.15.4 radio.
+Every module talks only through events on one `EventBus`
+([eventpp](https://github.com/wqking/eventpp)); a single app task processes
+them while holding the Zigbee lock, so no module takes locks or calls
+another. `sunsim::core` holds all application logic and builds on the host
+(`test/host`); `sunsim::platform` is everything that touches ESP-IDF.
+[EVENT_DESIGN.md](EVENT_DESIGN.md) has the full architecture: layers,
+threading, the event catalogue, and key flows. `WifiTimeSync` syncs the
+clock over SNTP at boot (before the radio starts), then retries/resyncs
+on a background task.
 
 ## 2. Device addressing & role assignment
 
@@ -56,44 +58,42 @@ directly — see the table below, then the join sequence.
 | `short_addr` (NWK address) | 16-bit | Assigned by sunsim (the trust center) when the device associates | No — can change on every rejoin |
 | `endpoint` | 8-bit | Discovered via a ZDO Match_Desc query, not announced by the device | Fixed per device/firmware, but not knowable up front |
 
-Role (`WallA`/`WallB`/`WallC`/`Work`/`Button`) comes from none of these —
-it's a lookup of `ext_addr` against the static table in
-[`main/role_manifest.json`](main/role_manifest.json), filled in by hand from each
-device's label before deployment. This replaced an earlier join-order
-scheme (first device seen -> first role) that made pairing order load-bearing
-and fragile.
+Role (`WallA`/`WallB`/`WallC`/`Work`/`Button`) comes from none of these.
+It's assigned when the device joins: to the role armed with the console's
+`pair <role>` (if the device doesn't already hold one), or else by looking
+up `ext_addr` in the optional build-time table
+[`main/role_manifest.json`](main/role_manifest.json). Pairing order never
+matters.
 
 ```mermaid
 sequenceDiagram
     participant Dev as New device
-    participant Z as Zigbee stack
-    participant App as SunsimApp
-    participant Rig as LightRig
-    participant Man as role_manifest.json
-    participant Store as RoleStore (NVS)
+    participant ZA as ZigbeeAdapter
+    participant DR as DeviceRegistry
+    participant SS as SettingsStore (NVS)
+    participant LO as LightOutput
 
-    Dev->>Z: Associate with sunsim's network
-    Z->>App: EZB_ZDO_SIGNAL_DEVICE_ANNCE(ext_addr, short_addr)
-    App->>Rig: handleDeviceAnnounce(ext_addr, short_addr)
+    Dev->>ZA: Associate, Device_annce(ext_addr, short_addr)
+    ZA->>DR: DeviceAnnounced
 
-    alt ext_addr already in NVS (rejoin)
-        Rig->>Store: findByExtAddr(ext_addr)
-        Rig->>Store: refresh short_addr if it changed
-    else first time seen
-        Rig->>Man: roleForExtAddr(ext_addr)
-        Man-->>Rig: Role, or none (unknown device -> ignored)
-        Rig->>Store: assign role, save()
+    alt ext_addr already holds a role (rejoin)
+        DR->>SS: PersistRoles (if short_addr changed)
+    else a role is armed (`pair`), or ext_addr is in the manifest
+        DR->>SS: PersistRoles (role assigned)
+    else unknown
+        Note over DR: ignored (logged with its ext_addr)
     end
 
-    Rig->>Dev: ZDO Match_Desc request<br/>(which endpoint hosts On/Off+Level+Color,<br/>or On/Off output for the button)
-    Dev-->>Rig: Match_Desc response: endpoint
-    Rig->>Store: save endpoint
+    DR->>LO: RoleAssigned (addresses)
+    DR->>ZA: Discover (ZDO Match_Desc: endpoint with On/Off+Level+Color,<br/>or the button's On/Off output)
+    ZA->>DR: EndpointFound(endpoint)
+    DR->>SS: PersistRoles (endpoint)
 
-    opt role == Button
-        Rig->>Dev: ZDO Bind request<br/>(button's On/Off -> sunsim's receiver endpoint)
+    alt role == Button
+        DR->>ZA: Bind (button's On/Off -> sunsim's receiver endpoint)
+    else bulb
+        DR->>LO: RefreshLights: apply the current daylight state, 2s transition
     end
-
-    Rig->>Dev: snapRole() - apply current daylight state, 2s transition
 ```
 
 `short_addr` is deliberately never put in the manifest or treated as
@@ -122,7 +122,7 @@ The SNZB-01-style button tells us which press it was through the standard
 On/Off cluster: single = `Toggle`, double = `On`, hold = `Off`. It sends
 these to the coordinator's endpoint 1 (our light-control endpoint, which
 has no On/Off server) whatever the binding says, so the stack would drop
-them. `SunsimApp::handleApsIndication` (an APSDE-DATA.indication hook)
+them. `ZigbeeAdapter::handleApsIndication` (an APSDE-DATA.indication hook)
 therefore picks frames from the paired button's short address out before
 ZCL processing and dispatches by command id, consuming them.
 
@@ -140,13 +140,14 @@ Fallback for buttons that do send to the bound receiver endpoint 2: the
 stack resolves `On`/`Off`/`Toggle` internally and only surfaces the
 resulting On/Off attribute (`EZB_ZCL_CORE_SET_ATTR_VALUE_CB_ID`), where
 `On` and `Toggle` look the same, so single vs. double press is resolved by
-timing (450ms, on the next heartbeat tick — `ButtonController::tick()`);
+timing (450ms, resolved on the next `Tick` — `core::ModeController`);
 `OffWithEffect` and Scenes `RecallScene` are handled directly.
 
 ## 4. Daylight mathematical model
 
-No Zigbee or hardware dependency in either piece below (`main/daylight.cpp`,
-`main/solar.cpp`) — both are pure functions, unit-testable on the host.
+No Zigbee or hardware dependency in either piece below
+(`components/sunsim_core/src/daylight.cpp`, `solar.cpp`) — both are pure
+functions, unit-testable on the host.
 
 ### Wall bulbs (`DaylightSchedule::wallState`)
 
@@ -237,9 +238,9 @@ Defaults: `work_cool_mireds=167` (~6000K), `work_warm_mireds=333`
 off. Interpolating in mireds rather than kelvin
 keeps the steps perceptually closer to even.
 
-### Per-light peak intensity (`LightRig::setPeakPercent`)
+### Per-light peak intensity (`core::DaylightProgram`)
 
-After the schedule computes a bulb's level, `LightRig` scales it by that
+After the schedule computes a bulb's level, `DaylightProgram` scales it by that
 light's peak percentage (`intensity` console command, NVS key
 `<role>.peak`, defaults walls 100 / work 90):
 
@@ -254,7 +255,7 @@ proportion. Colour temperature is untouched; red alert is not scaled.
 ### Active window (`DaylightSchedule::activeGate`)
 
 Both bulb types are gated by one shared window, set with the `config`
-console command and persisted in NVS (`main/schedule_settings.*`):
+console command and persisted in NVS (`platform::SettingsStore`):
 on only on `active_days` (default Mon–Fri) between `active_start_hour` and
 `active_end_hour` (default 08:00–19:00), off otherwise. Inside it, a gate
 factor ramps over `fade_minutes` (default 10) at each edge:
@@ -276,12 +277,12 @@ calculation — no GPS, just two numbers you configure once:
 
 1. **Latitude/longitude** (`CONFIG_SUNSIM_LATITUDE_DEG`/
    `CONFIG_SUNSIM_LONGITUDE_DEG`, decimal degrees, North/East positive) —
-   set via `menuconfig`, parsed with `strtod()` in `SunsimApp`'s
-   constructor, and stored in `DaylightSchedule::Config`.
+   set via `menuconfig`, parsed with `strtod()` in `App`'s (`main/app.cpp`)
+   constructor, and stored in `ev::ProgramConfig`.
 2. **Local civil UTC offset** — needed alongside longitude because the
    calculation has to know which UTC instant "today, local time" actually
    is. `WifiTimeSync` syncs the clock to UTC over SNTP once at boot; from
-   there, `LightRig::currentUtcOffsetHours()` derives the offset in effect
+   there, `platform::Clock` derives the offset in effect
    *today* (DST included) without a portable `tm_gmtoff` field (not
    available on this toolchain's `struct tm` — confirmed by test
    compile): it takes the current instant, reads its UTC calendar fields
@@ -290,7 +291,7 @@ calculation — no GPS, just two numbers you configure once:
    `TZ` (`CONFIG_SUNSIM_TZ`) — and the difference between the two
    `time_t`s is the local UTC offset.
 
-`main/solar.cpp` implements the "Sunrise/Sunset Algorithm" from the
+`solar.cpp` implements the "Sunrise/Sunset Algorithm" from the
 *Almanac for Computers, 1990* (Nautical Almanac Office, US Naval
 Observatory) — the standard non-iterative closed-form approximation used
 by most embedded sunrise/sunset libraries (accurate to within a couple of
@@ -317,13 +318,13 @@ compute.
 
 ## 6. Smooth transitions
 
-Every periodic update (`LightRig::applyAllBulbs`, driven by the heartbeat
+Every periodic update (`ProgramTick` -> `DaylightProgram`, driven by the clock
 timer) sends level/color-temperature commands with a transition time equal
 to the tick interval (60s normally, 1s in debug fast-day mode), so bulbs
 fade continuously rather than stepping. Explicit state changes that should
 feel immediate — resuming after an override, a bulb finishing discovery, a
-reboot — use a fixed 2s transition instead (`LightRig::snapRole`/
-`snapAllBulbs`).
+reboot, a setting change — use a fixed 2s transition instead
+(`RefreshLights`).
 
 ## 7. File layout
 

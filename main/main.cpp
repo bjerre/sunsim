@@ -1,9 +1,10 @@
 #include <cstdlib>
+#include <ctime>
 
 #include "esp_check.h"
 #include "nvs_flash.h"
 
-#include "sunsim_app.h"
+#include "app.h"
 
 extern "C" void app_main(void)
 {
@@ -12,5 +13,6 @@ extern "C" void app_main(void)
     setenv("TZ", CONFIG_SUNSIM_TZ, 1);
     tzset();
 
-    sunsim::SunsimApp::instance().run();
+    static sunsim::App app;
+    app.run();
 }

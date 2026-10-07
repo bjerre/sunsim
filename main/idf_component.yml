@@ -1,8 +1,6 @@
 ## IDF Component Manager Manifest File
+## Third-party dependencies live with the component that uses them
+## (components/sunsim_platform/idf_component.yml); eventpp is vendored.
 dependencies:
-  ## Required IDF version
   idf:
     version: '>=5.2'
-  espressif/esp-zigbee-lib:
-    version: '>=2.0.0'
-  espressif/esp_lvgl_port: ^2.4.0

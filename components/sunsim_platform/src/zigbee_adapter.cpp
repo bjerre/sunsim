@@ -1,0 +1,499 @@
+#include "sunsim/platform/zigbee_adapter.h"
+
+#include <cstdio>
+
+#include "esp_check.h"
+#include "esp_log.h"
+#include "freertos/task.h"
+
+#include "bulb_endpoint.h"
+#include "sunsim_config.h"
+
+namespace sunsim::platform {
+
+namespace {
+constexpr const char *kTag = "ZIGBEE";
+
+constexpr EventBits_t kReadyBit = BIT0;
+
+int64_t nowUs()
+{
+    return esp_timer_get_time();
+}
+
+void *roleCtx(ev::Role role)
+{
+    return reinterpret_cast<void *>(static_cast<intptr_t>(role));
+}
+
+ev::Role roleFromCtx(void *ctx)
+{
+    return static_cast<ev::Role>(reinterpret_cast<intptr_t>(ctx));
+}
+} // namespace
+
+ZigbeeAdapter *ZigbeeAdapter::s_self = nullptr;
+
+ZigbeeAdapter::ZigbeeAdapter(ev::Post post) : post_(std::move(post)), ready_(xEventGroupCreate())
+{
+    s_self = this;
+}
+
+void ZigbeeAdapter::start()
+{
+    ESP_LOGI(kTag, "Starting Zigbee stack");
+    // 6 KB: the stack's callbacks run here and post events (~256 B per copy).
+    xTaskCreate(&ZigbeeAdapter::taskTrampoline, "Zigbee_main", 6144, this, 5, nullptr);
+}
+
+void ZigbeeAdapter::waitUntilReady()
+{
+    xEventGroupWaitBits(ready_, kReadyBit, pdFALSE, pdTRUE, portMAX_DELAY);
+}
+
+void ZigbeeAdapter::lock()
+{
+    esp_zigbee_lock_acquire(portMAX_DELAY);
+}
+
+void ZigbeeAdapter::unlock()
+{
+    esp_zigbee_lock_release();
+}
+
+// ---- Stack lifecycle ----------------------------------------------------------
+
+void ZigbeeAdapter::taskBody()
+{
+    esp_zigbee_config_t config = SUNSIM_ZB_DEFAULT_CONFIG();
+
+    ESP_ERROR_CHECK(esp_zigbee_init(&config));
+    setupCommissioning();
+    createEndpoints();
+    xEventGroupSetBits(ready_, kReadyBit); // the lock exists from here on
+    ESP_ERROR_CHECK(esp_zigbee_start(false));
+
+    esp_zigbee_launch_mainloop();
+
+    esp_zigbee_deinit();
+    vTaskDelete(nullptr);
+}
+
+void ZigbeeAdapter::setupCommissioning()
+{
+    ezb_aps_secur_enable_distributed_security(false);
+    ESP_ERROR_CHECK(ezb_bdb_set_primary_channel_set(SUNSIM_PRIMARY_CHANNEL_MASK));
+    ESP_ERROR_CHECK(ezb_bdb_set_secondary_channel_set(SUNSIM_SECONDARY_CHANNEL_MASK));
+    ESP_ERROR_CHECK(ezb_app_signal_add_handler(&ZigbeeAdapter::signalTrampoline));
+    ezb_apsde_data_indication_handler_register(&ZigbeeAdapter::apsTrampoline);
+}
+
+void ZigbeeAdapter::createEndpoints()
+{
+    ezb_af_device_desc_t dev_desc = ezb_af_create_device_desc();
+
+    ezb_zha_color_dimmer_switch_config_t ctrl_cfg = EZB_ZHA_COLOR_DIMMER_SWITCH_CONFIG();
+    ezb_af_ep_desc_t ctrl_ep = ezb_zha_create_color_dimmer_switch(SUNSIM_LIGHT_CTRL_EP_ID, &ctrl_cfg);
+    ezb_zcl_cluster_desc_t basic_desc =
+        ezb_af_endpoint_get_cluster_desc(ctrl_ep, EZB_ZCL_CLUSTER_ID_BASIC, EZB_ZCL_CLUSTER_SERVER);
+    ezb_zcl_basic_cluster_desc_add_attr(basic_desc, EZB_ZCL_ATTR_BASIC_MANUFACTURER_NAME_ID,
+                                         (void *)SUNSIM_MANUFACTURER_NAME);
+    ezb_zcl_basic_cluster_desc_add_attr(basic_desc, EZB_ZCL_ATTR_BASIC_MODEL_IDENTIFIER_ID,
+                                         (void *)SUNSIM_MODEL_IDENTIFIER);
+    ESP_ERROR_CHECK(ezb_af_device_add_endpoint_desc(dev_desc, ctrl_ep));
+
+    ezb_zha_on_off_light_config_t rx_cfg = EZB_ZHA_ON_OFF_LIGHT_CONFIG();
+    ezb_af_ep_desc_t rx_ep = ezb_zha_create_on_off_light(SUNSIM_BUTTON_RX_EP_ID, &rx_cfg);
+    ESP_ERROR_CHECK(ezb_af_device_add_endpoint_desc(dev_desc, rx_ep));
+
+    ESP_ERROR_CHECK(ezb_af_device_desc_register(dev_desc));
+    ezb_zcl_core_action_handler_register(&ZigbeeAdapter::zclTrampoline);
+}
+
+void ZigbeeAdapter::scheduleCommissioningRetry(ezb_bdb_comm_mode_mask_t mode, std::chrono::milliseconds delay)
+{
+    pending_retry_mode_ = mode;
+
+    if (!retry_timer_) {
+        const esp_timer_create_args_t args{
+            .callback              = &ZigbeeAdapter::retryTrampoline,
+            .arg                   = this,
+            .dispatch_method       = ESP_TIMER_TASK,
+            .name                  = "zb_retry",
+            .skip_unhandled_events = false,
+        };
+        ESP_ERROR_CHECK(esp_timer_create(&args, &retry_timer_));
+    } else {
+        esp_timer_stop(retry_timer_); // harmless if not running
+    }
+    esp_timer_start_once(retry_timer_, static_cast<uint64_t>(delay.count()) * 1000);
+}
+
+void ZigbeeAdapter::retryCommissioning()
+{
+    lock();
+    ezb_bdb_start_top_level_commissioning(pending_retry_mode_);
+    unlock();
+}
+
+// ---- Stack -> events (Zigbee task; the stack holds the lock) -------------------
+
+void ZigbeeAdapter::handleSignal(const ezb_app_signal_t *app_signal)
+{
+    const ezb_app_signal_type_t signal_type = ezb_app_signal_get_type(app_signal);
+
+    switch (signal_type) {
+    case EZB_ZDO_SIGNAL_SKIP_STARTUP:
+        ESP_LOGI(kTag, "Initialize Zigbee stack");
+        ezb_bdb_start_top_level_commissioning(EZB_BDB_MODE_INITIALIZATION);
+        break;
+    case EZB_BDB_SIGNAL_DEVICE_FIRST_START:
+    case EZB_BDB_SIGNAL_DEVICE_REBOOT: {
+        const auto status = *static_cast<const ezb_bdb_comm_status_t *>(ezb_app_signal_get_params(app_signal));
+        if (status == EZB_BDB_STATUS_SUCCESS) {
+            ESP_LOGI(kTag, "Device started up in%s factory-reset mode", ezb_bdb_is_factory_new() ? "" : " non");
+            if (ezb_bdb_is_factory_new()) {
+                ezb_bdb_start_top_level_commissioning(EZB_BDB_MODE_NETWORK_FORMATION);
+            } else {
+                ezb_bdb_open_network(180);
+                post_(ev::NetworkUp{.rejoined = true});
+            }
+        } else {
+            ESP_LOGW(kTag, "%s failed with status(0x%02x), retrying", ezb_app_signal_to_string(signal_type), status);
+            scheduleCommissioningRetry(EZB_BDB_MODE_INITIALIZATION, std::chrono::milliseconds{1000});
+        }
+    } break;
+    case EZB_BDB_SIGNAL_FORMATION: {
+        const auto status = *static_cast<const ezb_bdb_comm_status_t *>(ezb_app_signal_get_params(app_signal));
+        if (status == EZB_BDB_STATUS_SUCCESS) {
+            ezb_extpanid_t ext_pan_id;
+            ezb_nwk_get_extended_panid(&ext_pan_id);
+            ESP_LOGI(kTag, "Formed network: PAN(0x%04hx, EXT:0x%llx) Channel(%d) Short(0x%04hx)", ezb_nwk_get_panid(),
+                     static_cast<unsigned long long>(ext_pan_id.u64), ezb_nwk_get_current_channel(),
+                     ezb_nwk_get_short_address());
+            ezb_bdb_start_top_level_commissioning(EZB_BDB_MODE_NETWORK_STEERING);
+        } else {
+            ESP_LOGW(kTag, "Failed to form network with status(0x%02x), retrying", status);
+            scheduleCommissioningRetry(EZB_BDB_MODE_NETWORK_FORMATION, std::chrono::milliseconds{1000});
+        }
+    } break;
+    case EZB_BDB_SIGNAL_STEERING: {
+        const auto status = *static_cast<const ezb_bdb_comm_status_t *>(ezb_app_signal_get_params(app_signal));
+        if (status == EZB_BDB_STATUS_SUCCESS) {
+            ESP_LOGI(kTag, "Network formed. Type `pair <role>` (e.g. `pair WallA`), then reset that device.");
+            ezb_bdb_open_network(180);
+            post_(ev::NetworkUp{.rejoined = false});
+        } else {
+            ESP_LOGW(kTag, "Steering failed with status(0x%02x), retrying", status);
+            scheduleCommissioningRetry(EZB_BDB_MODE_NETWORK_STEERING, std::chrono::milliseconds{1000});
+        }
+    } break;
+    case EZB_ZDO_SIGNAL_DEVICE_ANNCE: {
+        const auto *params =
+            static_cast<const ezb_zdo_signal_device_annce_params_t *>(ezb_app_signal_get_params(app_signal));
+        post_(ev::DeviceAnnounced{.ext_addr = params->device_addr.u64, .short_addr = params->short_addr});
+    } break;
+    case EZB_ZDO_SIGNAL_DEVICE_UPDATE: {
+        const auto *params =
+            static_cast<const ezb_zdo_signal_device_update_params_t *>(ezb_app_signal_get_params(app_signal));
+        ESP_LOGI(kTag, "Device Update: ext=0x%llx short=0x%04hx status=%d tc_action=%d parent_short=0x%04hx",
+                 static_cast<unsigned long long>(params->device_addr.u64), params->short_addr, params->status,
+                 params->tc_action, params->parent_short);
+    } break;
+    case EZB_ZDO_SIGNAL_LEAVE: {
+        const auto *leave = static_cast<const ezb_zdo_signal_leave_params_t *>(ezb_app_signal_get_params(app_signal));
+        ESP_LOGI(kTag, "Device left network, type(0x%02x)", leave->leave_type);
+    } break;
+    case EZB_NWK_SIGNAL_PERMIT_JOIN_STATUS: {
+        const auto duration = *static_cast<const uint8_t *>(ezb_app_signal_get_params(app_signal));
+        if (duration) {
+            ESP_LOGI(kTag, "Network open for %d seconds", duration);
+        } else {
+            ESP_LOGW(kTag, "Network closed to new devices");
+        }
+    } break;
+    default:
+        ESP_LOGI(kTag, "Zigbee APP Signal: %s(0x%02x)", ezb_app_signal_to_string(signal_type), signal_type);
+        break;
+    }
+}
+
+void ZigbeeAdapter::pressed(ev::Press press)
+{
+    post_(ev::ButtonPressed{.press = press, .source = ev::Source::Zigbee, .at_us = nowUs()});
+}
+
+// Buttons that do send to the bound receiver endpoint (SUNSIM_BUTTON_RX_EP_ID).
+// The stack resolves On/Off/Toggle itself and only surfaces the resulting
+// attribute, where On and Toggle look the same - hence Press::Ambiguous,
+// resolved by timing in core::ModeController.
+void ZigbeeAdapter::handleZclAction(ezb_zcl_core_action_callback_id_t callback_id, void *message)
+{
+    switch (callback_id) {
+    case EZB_ZCL_CORE_SET_ATTR_VALUE_CB_ID: {
+        auto *m = static_cast<ezb_zcl_set_attr_value_message_t *>(message);
+        if (m && m->info.dst_ep == SUNSIM_BUTTON_RX_EP_ID && m->info.cluster_id == EZB_ZCL_CLUSTER_ID_ON_OFF) {
+            const bool on = *static_cast<uint8_t *>(m->in.attribute.data.value) != 0;
+            ESP_LOGI(kTag, "Button On/Off attribute -> %d", on);
+            pressed(on ? ev::Press::Ambiguous : ev::Press::Hold);
+        }
+    } break;
+    case EZB_ZCL_CORE_SCENES_RECALL_SCENE_CB_ID: {
+        auto *m = static_cast<ezb_zcl_scenes_recall_scene_message_t *>(message);
+        if (m && m->info.dst_ep == SUNSIM_BUTTON_RX_EP_ID) {
+            ESP_LOGI(kTag, "Button Scenes RecallScene (group=0x%04x scene=%d) -> treated as double-press",
+                     m->in.group_id, m->in.scene_id);
+            pressed(ev::Press::Double);
+        }
+    } break;
+    case EZB_ZCL_CORE_ON_OFF_OFF_WITH_EFFECT_CB_ID: {
+        // Some switches send the extended OffWithEffect (0x40) for their
+        // long-press/hold; the stack surfaces it separately from the On/Off
+        // attribute change, so it needs its own case.
+        auto *m = static_cast<ezb_zcl_on_off_off_with_effect_message_t *>(message);
+        if (m && m->info.dst_ep == SUNSIM_BUTTON_RX_EP_ID) {
+            ESP_LOGI(kTag, "Button OffWithEffect (effect=%d variant=%d) -> treated as long-press",
+                     m->in.effect_id, m->in.effect_variant);
+            pressed(ev::Press::Hold);
+        }
+    } break;
+    case EZB_ZCL_CORE_DEFAULT_RSP_CB_ID: {
+        auto *rsp = static_cast<ezb_zcl_cmd_default_rsp_message_t *>(message);
+        if (rsp->in.header && rsp->in.header->src_addr.addr_mode == EZB_ADDR_MODE_SHORT) {
+            post_(ev::AckReceived{.short_addr = rsp->in.header->src_addr.u.short_addr,
+                                  .rssi       = rsp->in.header->rssi,
+                                  .status     = rsp->in.status_code});
+        }
+        if (rsp->in.status_code != 0) { // success acks arrive several times a second; only failures matter
+            ESP_LOGW(kTag, "Default response status(0x%02x)", rsp->in.status_code);
+        }
+    } break;
+    default:
+        break;
+    }
+}
+
+bool ZigbeeAdapter::handleApsIndication(const ezb_apsde_data_ind_t *ind)
+{
+    if (!ind || ind->profile_id == 0 || ind->asdu_length < 3) {
+        return false; // ZDO, or too short to be ZCL
+    }
+    const uint8_t fc  = ind->asdu[0];
+    const bool    mfr = fc & 0x04; // manufacturer-specific: 2-byte code before TSN
+    if (mfr && ind->asdu_length < 5) {
+        return false;
+    }
+    const uint8_t  cmd         = ind->asdu[mfr ? 4 : 2];
+    const bool     cluster_cmd = (fc & 0x03) == 0x01;
+    const bool     from_short  = ind->src_address.addr_mode == EZB_ADDR_MODE_SHORT;
+    const uint16_t src         = from_short ? ind->src_address.u.short_addr : 0xffff;
+
+    // Diagnostics (enable DEBUG for the ZIGBEE tag to see a device's real
+    // traffic), skipping the bulbs' routine ZCL Default Responses.
+    constexpr uint8_t kDefaultRsp = 0x0B;
+    if (cluster_cmd || cmd != kDefaultRsp) {
+        char hex[3 * 16 + 1] = {};
+        for (uint16_t i = 0; i < ind->asdu_length && i < 16; ++i) {
+            std::snprintf(hex + 3 * i, 4, "%02x ", ind->asdu[i]);
+        }
+        ESP_LOGD(kTag, "RX from 0x%04x ep%d -> ep%d cluster 0x%04x %s cmd 0x%02x%s rssi %d | %s", src,
+                 ind->src_endpoint, ind->dst_endpoint, ind->cluster_id, cluster_cmd ? "cluster" : "global", cmd,
+                 mfr ? " (mfr-specific)" : "", ind->rssi, hex);
+    }
+
+    // The paired button. SONOFF SNZB-01-style buttons say which press it was
+    // (single = Toggle, double = On, hold = Off) and send it to our endpoint
+    // 1 whatever the binding says, where there's no On/Off server to receive
+    // it - so it's picked out here, before the stack would drop it.
+    if (!from_short || src != button_short_.load() || ind->cluster_id != EZB_ZCL_CLUSTER_ID_ON_OFF || !cluster_cmd ||
+        mfr) {
+        return false;
+    }
+    switch (cmd) {
+    case 0x02: // Toggle
+        ESP_LOGI(kTag, "Button: single press (Toggle)");
+        pressed(ev::Press::Single);
+        break;
+    case 0x01: // On
+        ESP_LOGI(kTag, "Button: double press (On)");
+        pressed(ev::Press::Double);
+        break;
+    case 0x00: // Off
+        ESP_LOGI(kTag, "Button: hold (Off)");
+        pressed(ev::Press::Hold);
+        break;
+    default:
+        return false;
+    }
+    return true; // handled; don't let the stack reply "unsupported" to the button
+}
+
+void ZigbeeAdapter::onMatchDescResult(const ezb_zdo_match_desc_req_result_t *result, void *user_ctx)
+{
+    const ev::Role role = roleFromCtx(user_ctx);
+    if (!result || result->error != EZB_ERR_NONE || !result->rsp || result->rsp->status != EZB_ZDP_STATUS_SUCCESS ||
+        result->rsp->match_length == 0) {
+        ESP_LOGW(kTag, "Could not find %s endpoint for %s (err=0x%x status=0x%x matches=%d), will retry",
+                 role == ev::Role::Button ? "On/Off output" : "light", ev::roleName(role).data(),
+                 result ? result->error : -1, (result && result->rsp) ? result->rsp->status : -1,
+                 (result && result->rsp) ? result->rsp->match_length : -1);
+        s_self->post_(ev::EndpointFound{.role = role, .endpoint = 0});
+        return;
+    }
+    s_self->post_(ev::EndpointFound{.role = role, .endpoint = result->rsp->match_list[0]});
+}
+
+void ZigbeeAdapter::onBindResult(const ezb_zdp_bind_req_result_t *result, void *user_ctx)
+{
+    const bool ok = result && result->error == EZB_ERR_NONE && result->rsp &&
+                    result->rsp->status == EZB_ZDP_STATUS_SUCCESS;
+    s_self->post_(ev::BindResult{.role = roleFromCtx(user_ctx), .ok = ok});
+}
+
+void ZigbeeAdapter::onPingResult(const ezb_zdo_active_ep_req_result_t *result, void *user_ctx)
+{
+    const bool ok = result && result->error == EZB_ERR_NONE && result->rsp &&
+                    result->rsp->status == EZB_ZDP_STATUS_SUCCESS;
+    s_self->post_(ev::PingResult{.role   = roleFromCtx(user_ctx),
+                                 .ok     = ok,
+                                 .error  = result ? static_cast<int>(result->error) : -1,
+                                 .status = (result && result->rsp) ? static_cast<int>(result->rsp->status) : -1});
+}
+
+// ---- Events -> stack (app task; it holds the lock) ------------------------------
+
+void ZigbeeAdapter::onSetLight(const ev::SetLight &e)
+{
+    const BulbEndpoint bulb{e.short_addr, e.endpoint, SUNSIM_LIGHT_CTRL_EP_ID};
+    const BulbEndpoint::TransitionTime level_tr{e.level_transition_ds};
+    const BulbEndpoint::TransitionTime color_tr{e.color_transition_ds};
+
+    if (e.power && *e.power) {
+        bulb.turnOn();
+    }
+    if (e.hue_sat) {
+        bulb.setHueSaturation(e.hue_sat->first, e.hue_sat->second, color_tr);
+    }
+    if (e.level) {
+        bulb.setLevel(*e.level, level_tr);
+    }
+    if (e.xy) {
+        bulb.setColorXY(e.xy->first, e.xy->second, color_tr);
+    } else if (e.mireds) {
+        bulb.setColorTemperature(*e.mireds, color_tr);
+    }
+    if (e.power && !*e.power) {
+        bulb.turnOff();
+    }
+}
+
+void ZigbeeAdapter::onDiscover(const ev::Discover &e)
+{
+    ezb_zdo_match_desc_req_t req{};
+    req.dst_nwk_addr               = e.short_addr;
+    req.field.nwk_addr_of_interest = e.short_addr;
+    req.field.profile_id           = EZB_AF_HA_PROFILE_ID;
+    req.cb                         = &ZigbeeAdapter::onMatchDescResult;
+    req.user_ctx                   = roleCtx(e.role);
+    if (e.role == ev::Role::Button) {
+        static uint16_t out_clusters[] = {EZB_ZCL_CLUSTER_ID_ON_OFF};
+        req.field.num_in_clusters      = 0;
+        req.field.num_out_clusters     = 1;
+        req.field.cluster_list         = out_clusters;
+    } else {
+        static uint16_t in_clusters[] = {EZB_ZCL_CLUSTER_ID_ON_OFF, EZB_ZCL_CLUSTER_ID_LEVEL,
+                                          EZB_ZCL_CLUSTER_ID_COLOR_CONTROL};
+        req.field.num_in_clusters     = 3;
+        req.field.num_out_clusters    = 0;
+        req.field.cluster_list        = in_clusters;
+    }
+    ezb_zdo_match_desc_req(&req);
+}
+
+void ZigbeeAdapter::onBind(const ev::Bind &e)
+{
+    ezb_extaddr_t self_ext;
+    ezb_get_extended_address(&self_ext);
+    ezb_extaddr_t device_ext{};
+    device_ext.u64 = e.ext_addr;
+
+    ezb_zdo_bind_req_t req{};
+    req.dst_nwk_addr                 = e.short_addr;
+    req.field.src_addr               = device_ext;
+    req.field.src_ep                 = e.endpoint;
+    req.field.cluster_id             = EZB_ZCL_CLUSTER_ID_ON_OFF;
+    req.field.dst_addr_mode          = EZB_ADDR_MODE_EXT;
+    req.field.dst_addr.extended_addr = self_ext;
+    req.field.dst_ep                 = SUNSIM_BUTTON_RX_EP_ID;
+    req.cb                           = &ZigbeeAdapter::onBindResult;
+    req.user_ctx                     = roleCtx(e.role);
+    ezb_zdo_bind_req(&req);
+}
+
+void ZigbeeAdapter::onPing(const ev::Ping &e)
+{
+    ezb_zdo_active_ep_req_t req{};
+    req.dst_nwk_addr               = e.short_addr;
+    req.field.nwk_addr_of_interest = e.short_addr;
+    req.cb                         = &ZigbeeAdapter::onPingResult;
+    req.user_ctx                   = roleCtx(e.role);
+    ezb_zdo_active_ep_req(&req);
+}
+
+void ZigbeeAdapter::onOpenNetwork(const ev::OpenNetwork &e)
+{
+    const ezb_err_t err = ezb_bdb_open_network(e.seconds);
+    if (err != EZB_ERR_NONE) {
+        ESP_LOGW(kTag, "Could not open network (err 0x%x) - has it finished forming?", err);
+    }
+}
+
+void ZigbeeAdapter::onFactoryReset()
+{
+    ESP_LOGW(kTag, "Clearing the Zigbee network, then restarting");
+    esp_zigbee_factory_reset(); // does not return
+}
+
+void ZigbeeAdapter::onRoleAssigned(const ev::RoleAssigned &e)
+{
+    if (e.role == ev::Role::Button) {
+        button_short_.store(e.record.valid ? e.record.short_addr : 0xFFFF);
+    }
+}
+
+void ZigbeeAdapter::onRoleCleared(const ev::RoleCleared &e)
+{
+    if (e.role == ev::Role::Button) {
+        button_short_.store(0xFFFF);
+    }
+}
+
+// ---- Trampolines --------------------------------------------------------------
+
+void ZigbeeAdapter::taskTrampoline(void *arg)
+{
+    static_cast<ZigbeeAdapter *>(arg)->taskBody();
+}
+
+bool ZigbeeAdapter::signalTrampoline(const ezb_app_signal_t *signal)
+{
+    s_self->handleSignal(signal);
+    return true;
+}
+
+void ZigbeeAdapter::zclTrampoline(ezb_zcl_core_action_callback_id_t callback_id, void *message)
+{
+    s_self->handleZclAction(callback_id, message);
+}
+
+bool ZigbeeAdapter::apsTrampoline(const ezb_apsde_data_ind_t *ind)
+{
+    return s_self->handleApsIndication(ind);
+}
+
+void ZigbeeAdapter::retryTrampoline(void *arg)
+{
+    static_cast<ZigbeeAdapter *>(arg)->retryCommissioning();
+}
+
+} // namespace sunsim::platform
