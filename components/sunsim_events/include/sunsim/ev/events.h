@@ -22,12 +22,12 @@ namespace sunsim::ev {
 
 struct Heartbeat {};             // raw 1 Hz timer; the Clock turns it into Tick
 struct Tick {                    // 1 Hz, with the program's current time
-    int64_t     uptime_us = 0;
+    Instant     at{};
     TimeReading time{};
 };
 struct ProgramTick {             // every daylight update interval (60 s, 1 s in fast-day)
     TimeReading time{};
-    uint16_t    transition_ds = 0; // ramp over the whole interval
+    Transition  transition{};    // ramp over the whole interval
 };
 
 // ---- Settings -------------------------------------------------------------
@@ -54,7 +54,7 @@ struct PersistRoles {            // DeviceRegistry -> SettingsStore
 
 struct NetworkUp {               // network formed, or rejoined after a reboot
     bool    rejoined = false;
-    int64_t at_us    = 0;        // uptime
+    Instant at{};
 };
 struct DeviceAnnounced {
     uint64_t ext_addr   = 0;
@@ -90,7 +90,7 @@ enum class Source : uint8_t { Zigbee, Console };
 struct ButtonPressed {
     Press   press  = Press::Single;
     Source  source = Source::Zigbee;
-    int64_t at_us  = 0;          // uptime when pressed
+    Instant at{};
 };
 
 // ---- Console requests -----------------------------------------------------
@@ -102,9 +102,10 @@ struct PairCancelled {};
 struct UnpairRequested {
     std::optional<Role> role;    // nullopt = all
 };
-inline constexpr uint8_t kDefaultOpenSeconds = 180; // pairing, console `open`, network up
+using OpenTime = std::chrono::duration<uint8_t>; // what the stack takes: whole seconds, up to 254
+inline constexpr OpenTime kDefaultOpenTime{180};  // pairing, console `open`, network up
 struct OpenNetwork {
-    uint8_t seconds = kDefaultOpenSeconds;
+    OpenTime duration = kDefaultOpenTime;
 };
 struct FactoryReset {};
 
@@ -152,8 +153,8 @@ struct RefreshLights {           // the running program re-applies now, with its
 struct LightTarget {             // what a bulb should show, from the running program
     Role       role = Role::WallA;
     LightState state{};
-    uint16_t   level_transition_ds = 0;
-    uint16_t   color_transition_ds = 0;
+    Transition level_transition{};
+    Transition color_transition{};
 };
 struct SetLight {                // one bulb's ZCL commands, sent in field order
     uint16_t                                  short_addr = 0;
@@ -163,8 +164,8 @@ struct SetLight {                // one bulb's ZCL commands, sent in field order
     std::optional<uint16_t>                   mireds;
     std::optional<std::pair<float, float>>    xy;
     std::optional<std::pair<uint8_t, uint8_t>> hue_sat;
-    uint16_t                                  level_transition_ds = 0;
-    uint16_t                                  color_transition_ds = 0;
+    Transition                                level_transition{};
+    Transition                                color_transition{};
 };
 
 // ---- Status ---------------------------------------------------------------

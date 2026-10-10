@@ -19,15 +19,15 @@ class ModeController {
 public:
     explicit ModeController(ev::Post post, std::chrono::milliseconds double_click_window = std::chrono::milliseconds{450});
 
-    void onPress(const ev::ButtonPressed &press) { presses_.deliver(press, ev::Uptime{press.at_us}); }
-    void onTick(const ev::Tick &tick) { timer_.tick(ev::Uptime{tick.uptime_us}); }
+    void onPress(const ev::ButtonPressed &press) { presses_.deliver(press, press.at); }
+    void onTick(const ev::Tick &tick) { timer_.tick(tick.at); }
 
 private:
     ev::Flow run();
     void     enter(ev::Mode mode);
 
     ev::Post                     post_;
-    ev::Uptime                   window_;
+    std::chrono::milliseconds    window_;
     ev::Timer                    timer_;
     ev::Inbox<ev::ButtonPressed> presses_{timer_};
     ev::Flow                     flow_; // last: run() starts once the rest exist

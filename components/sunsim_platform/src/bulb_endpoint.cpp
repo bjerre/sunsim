@@ -35,7 +35,7 @@ ezb_err_t BulbEndpoint::turnOff() const
     return ezb_zcl_on_off_off_cmd_req(&cmd);
 }
 
-ezb_err_t BulbEndpoint::setLevel(uint8_t level_0_254, TransitionTime transition) const
+ezb_err_t BulbEndpoint::setLevel(uint8_t level_0_254, ev::Transition transition) const
 {
     ezb_zcl_level_move_to_level_with_on_off_cmd_t cmd{
         .cmd_ctrl = makeCmdCtrl(short_addr_, endpoint_, source_endpoint_), .payload = {}};
@@ -44,7 +44,7 @@ ezb_err_t BulbEndpoint::setLevel(uint8_t level_0_254, TransitionTime transition)
     return ezb_zcl_level_move_to_level_with_on_off_cmd_req(&cmd);
 }
 
-ezb_err_t BulbEndpoint::setColorTemperature(uint16_t mireds, TransitionTime transition) const
+ezb_err_t BulbEndpoint::setColorTemperature(uint16_t mireds, ev::Transition transition) const
 {
     ezb_zcl_color_control_move_to_color_temperature_cmd_t cmd{
         .cmd_ctrl = makeCmdCtrl(short_addr_, endpoint_, source_endpoint_), .payload = {}};
@@ -53,7 +53,7 @@ ezb_err_t BulbEndpoint::setColorTemperature(uint16_t mireds, TransitionTime tran
     return ezb_zcl_color_control_move_to_color_temperature_cmd_req(&cmd);
 }
 
-ezb_err_t BulbEndpoint::setHueSaturation(uint8_t hue, uint8_t saturation, TransitionTime transition) const
+ezb_err_t BulbEndpoint::setHueSaturation(uint8_t hue, uint8_t saturation, ev::Transition transition) const
 {
     ezb_zcl_color_control_move_to_hue_and_saturation_cmd_t cmd{
         .cmd_ctrl = makeCmdCtrl(short_addr_, endpoint_, source_endpoint_), .payload = {}};
@@ -63,7 +63,7 @@ ezb_err_t BulbEndpoint::setHueSaturation(uint8_t hue, uint8_t saturation, Transi
     return ezb_zcl_color_control_move_to_hue_and_saturation_cmd_req(&cmd);
 }
 
-ezb_err_t BulbEndpoint::setColorXY(double x, double y, TransitionTime transition) const
+ezb_err_t BulbEndpoint::setColorXY(double x, double y, ev::Transition transition) const
 {
     // ZCL encodes x and y as value * 65536, capped at 0xFEFF.
     const auto encode = [](double v) {

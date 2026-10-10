@@ -16,11 +16,11 @@ constexpr const char *kTag = "ZIGBEE";
 
 constexpr EventBits_t kReadyBit = BIT0;
 
-constexpr int64_t kSendReportUs = 10LL * 1000 * 1000;
+constexpr auto kSendReport = std::chrono::seconds{10};
 
-int64_t nowUs()
+long long secondsOf(ev::BootClock::duration d)
 {
-    return esp_timer_get_time();
+    return std::chrono::duration_cast<std::chrono::seconds>(d).count();
 }
 
 void *roleCtx(ev::Role role)
@@ -163,8 +163,8 @@ void ZigbeeAdapter::handleSignal(const ezb_app_signal_t *app_signal)
             if (ezb_bdb_is_factory_new()) {
                 ezb_bdb_start_top_level_commissioning(EZB_BDB_MODE_NETWORK_FORMATION);
             } else {
-                ezb_bdb_open_network(ev::kDefaultOpenSeconds);
-                post_(ev::NetworkUp{.rejoined = true, .at_us = nowUs()});
+                ezb_bdb_open_network(ev::kDefaultOpenTime.count());
+                post_(ev::NetworkUp{.rejoined = true, .at = ev::BootClock::now()});
             }
         } else {
             ESP_LOGW(kTag, "%s failed with status(0x%02x), retrying", ezb_app_signal_to_string(signal_type), status);
@@ -189,8 +189,8 @@ void ZigbeeAdapter::handleSignal(const ezb_app_signal_t *app_signal)
         const auto status = *static_cast<const ezb_bdb_comm_status_t *>(ezb_app_signal_get_params(app_signal));
         if (status == EZB_BDB_STATUS_SUCCESS) {
             ESP_LOGI(kTag, "Network formed. Type `pair <role>` (e.g. `pair WallA`), then reset that device.");
-            ezb_bdb_open_network(ev::kDefaultOpenSeconds);
-            post_(ev::NetworkUp{.rejoined = false, .at_us = nowUs()});
+            ezb_bdb_open_network(ev::kDefaultOpenTime.count());
+            post_(ev::NetworkUp{.rejoined = false, .at = ev::BootClock::now()});
         } else {
             ESP_LOGW(kTag, "Steering failed with status(0x%02x), retrying", status);
             scheduleCommissioningRetry(EZB_BDB_MODE_NETWORK_STEERING, std::chrono::milliseconds{1000});
@@ -228,7 +228,7 @@ void ZigbeeAdapter::handleSignal(const ezb_app_signal_t *app_signal)
 
 void ZigbeeAdapter::pressed(ev::Press press)
 {
-    post_(ev::ButtonPressed{.press = press, .source = ev::Source::Zigbee, .at_us = nowUs()});
+    post_(ev::ButtonPressed{.press = press, .source = ev::Source::Zigbee, .at = ev::BootClock::now()});
 }
 
 // Buttons that do send to the bound receiver endpoint (SUNSIM_BUTTON_RX_EP_ID).
@@ -368,22 +368,20 @@ void ZigbeeAdapter::onPingResult(const ezb_zdo_active_ep_req_result_t *result, v
 void ZigbeeAdapter::onSetLight(const ev::SetLight &e)
 {
     const BulbEndpoint bulb{e.short_addr, e.endpoint, SUNSIM_LIGHT_CTRL_EP_ID};
-    const BulbEndpoint::TransitionTime level_tr{e.level_transition_ds};
-    const BulbEndpoint::TransitionTime color_tr{e.color_transition_ds};
 
     if (e.power && *e.power) {
         countSend(bulb.turnOn());
     }
     if (e.hue_sat) {
-        countSend(bulb.setHueSaturation(e.hue_sat->first, e.hue_sat->second, color_tr));
+        countSend(bulb.setHueSaturation(e.hue_sat->first, e.hue_sat->second, e.color_transition));
     }
     if (e.level) {
-        countSend(bulb.setLevel(*e.level, level_tr));
+        countSend(bulb.setLevel(*e.level, e.level_transition));
     }
     if (e.xy) {
-        countSend(bulb.setColorXY(e.xy->first, e.xy->second, color_tr));
+        countSend(bulb.setColorXY(e.xy->first, e.xy->second, e.color_transition));
     } else if (e.mireds) {
-        countSend(bulb.setColorTemperature(*e.mireds, color_tr));
+        countSend(bulb.setColorTemperature(*e.mireds, e.color_transition));
     }
     if (e.power && !*e.power) {
         countSend(bulb.turnOff());
@@ -397,19 +395,19 @@ void ZigbeeAdapter::countSend(ezb_err_t err)
         ++send_failures_;
         last_send_error_ = err;
     }
-    const int64_t now = nowUs();
-    if (now - report_start_us_ >= kSendReportUs) {
+    const ev::Instant now = ev::BootClock::now();
+    if (now - report_start_ >= kSendReport) {
         if (send_failures_ > 0) {
             ESP_LOGW(kTag, "%lu of %lu bulb commands not queued in the last %llds (last err 0x%x)",
                      static_cast<unsigned long>(send_failures_), static_cast<unsigned long>(sends_),
-                     static_cast<long long>((now - report_start_us_) / 1'000'000), last_send_error_);
+                     secondsOf(now - report_start_), last_send_error_);
         } else {
             ESP_LOGD(kTag, "%lu bulb commands sent in the last %llds", static_cast<unsigned long>(sends_),
-                     static_cast<long long>((now - report_start_us_) / 1'000'000));
+                     secondsOf(now - report_start_));
         }
         sends_           = 0;
         send_failures_   = 0;
-        report_start_us_ = now;
+        report_start_    = now;
     }
 }
 
@@ -468,7 +466,7 @@ void ZigbeeAdapter::onPing(const ev::Ping &e)
 
 void ZigbeeAdapter::onOpenNetwork(const ev::OpenNetwork &e)
 {
-    const ezb_err_t err = ezb_bdb_open_network(e.seconds);
+    const ezb_err_t err = ezb_bdb_open_network(e.duration.count());
     if (err != EZB_ERR_NONE) {
         ESP_LOGW(kTag, "Could not open network (err 0x%x) - has it finished forming?", err);
     }

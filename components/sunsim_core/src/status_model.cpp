@@ -32,8 +32,8 @@ void StatusModel::onTick(const ev::Tick &e)
 {
     // Published once the registry's DevicesUpdated for this tick arrives
     // (it posts one every Tick), so device links reflect this second, not the last.
-    snap_.uptime_us = e.uptime_us;
-    snap_.time      = e.time;
+    snap_.at   = e.at;
+    snap_.time = e.time;
 }
 
 void StatusModel::publish()

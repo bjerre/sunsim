@@ -11,7 +11,7 @@ constexpr const char *kTag = "PROGRAM";
 
 // Fixed, short transition for changes that should feel immediate rather
 // than mid-animation: resuming, a bulb (re)joining, a setting change.
-constexpr uint16_t kSnapTransitionDs = 20; // 2.0 s
+constexpr ev::Transition kSnapTransition = std::chrono::seconds{2};
 
 // Wall bulbs sit east-to-west along the south wall: A at the east end, C at
 // the west end (see DaylightSchedule::wallState).
@@ -33,12 +33,12 @@ void DaylightProgram::refresh(std::optional<ev::Role> role, const std::optional<
     if (!now) {
         return; // no time yet: the first ProgramTick will apply it
     }
-    forEachBulb(role, [&](ev::Role r) { emit(r, *now, kSnapTransitionDs); });
+    forEachBulb(role, [&](ev::Role r) { emit(r, *now, kSnapTransition); });
 }
 
 void DaylightProgram::onProgramTick(const ev::ProgramTick &e)
 {
-    forEachBulb(std::nullopt, [&](ev::Role r) { emit(r, e.time, e.transition_ds); });
+    forEachBulb(std::nullopt, [&](ev::Role r) { emit(r, e.time, e.transition); });
 }
 
 void DaylightProgram::onConfig(const ev::ConfigChanged &e)
@@ -47,7 +47,7 @@ void DaylightProgram::onConfig(const ev::ConfigChanged &e)
     peaks_ = e.peaks;
 }
 
-void DaylightProgram::emit(ev::Role role, const ev::TimeReading &time, uint16_t transition_ds)
+void DaylightProgram::emit(ev::Role role, const ev::TimeReading &time, ev::Transition transition)
 {
     ev::LightState state{};
     if (time.valid) {
@@ -63,7 +63,7 @@ void DaylightProgram::emit(ev::Role role, const ev::TimeReading &time, uint16_t 
         const long scaled = std::lround(state.level * peaks_[ev::indexOf(role)] / 100.0);
         state.level       = static_cast<uint8_t>(scaled < 1 ? 1 : scaled);
     }
-    target(role, state, transition_ds);
+    target(role, state, transition);
 }
 
 } // namespace sunsim::core

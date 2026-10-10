@@ -90,12 +90,12 @@ void LightOutput::onTarget(const ev::LightTarget &e)
             s.power = true;
         }
         if (!was_on || b.sent->level != e.state.level) {
-            s.level               = e.state.level;
-            s.level_transition_ds = e.level_transition_ds;
+            s.level            = e.state.level;
+            s.level_transition = e.level_transition;
         }
         if (!was_on || !sameColor(*b.sent, e.state)) {
             setColor(s, e.state);
-            s.color_transition_ds = e.color_transition_ds;
+            s.color_transition = e.color_transition;
         }
     } else if (!b.sent || was_on) {
         s.power = false;

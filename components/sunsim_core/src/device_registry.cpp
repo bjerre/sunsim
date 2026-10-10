@@ -1,7 +1,5 @@
 #include "sunsim/core/device_registry.h"
 
-#include <algorithm>
-
 #include "sunsim/ev/log.h"
 
 namespace sunsim::core {
@@ -11,12 +9,12 @@ using namespace std::chrono_literals;
 namespace {
 constexpr const char *kTag = "REGISTRY";
 
-constexpr ev::Uptime kDiscoveryRetry   = 15s;
-constexpr ev::Uptime kFirstPing        = 15s; // after the network is up, or pairing
-constexpr ev::Uptime kPingInterval     = 60s; // reachable bulbs
-constexpr ev::Uptime kUnreachablePing  = 15s; // until they answer again
-constexpr ev::Uptime kUnreachableAfter = 60s; // of silence, plus a failed ping
-constexpr ev::Uptime kOnlineWindow     = 150s; // shown as online: a couple of missed pings
+constexpr auto kDiscoveryRetry   = 15s;
+constexpr auto kFirstPing        = 15s;  // after the network is up, or pairing
+constexpr auto kPingInterval     = 60s;  // reachable bulbs
+constexpr auto kUnreachablePing  = 15s;  // until they answer again
+constexpr auto kUnreachableAfter = 60s;  // of silence, plus a failed ping
+constexpr auto kOnlineWindow     = 150s; // shown as online: a couple of missed pings
 
 const char *name(ev::Role role) noexcept
 {
@@ -59,7 +57,7 @@ void DeviceRegistry::persist()
 
 void DeviceRegistry::heard(ev::Role role)
 {
-    liveness(role).last_heard = std::max(timer_.now(), ev::Uptime{1}); // nonzero: heard
+    liveness(role).last_heard = timer_.now();
     setReachable(role, true);
 }
 
@@ -88,7 +86,7 @@ ev::DeviceLink DeviceRegistry::link(ev::Role role) const noexcept
     if (!record(role).valid) {
         return ev::DeviceLink::Unpaired;
     }
-    if (l.reachable && l.last_heard != ev::Uptime{} && timer_.now() - l.last_heard <= kOnlineWindow) {
+    if (l.reachable && l.last_heard && timer_.now() - *l.last_heard <= kOnlineWindow) {
         return ev::DeviceLink::Online;
     }
     return ev::DeviceLink::Silent;
@@ -139,7 +137,7 @@ void DeviceRegistry::onRolesLoaded(const ev::RolesLoaded &e)
 void DeviceRegistry::onNetworkUp(const ev::NetworkUp &e)
 {
     network_up_ = true;
-    network_.deliver(e, ev::Uptime{e.at_us});
+    network_.deliver(e, e.at);
 }
 
 void DeviceRegistry::onAnnounced(const ev::DeviceAnnounced &e)
@@ -198,7 +196,7 @@ ev::Flow DeviceRegistry::findEndpoint(ev::Role role)
         co_await network_.next(); // roles restored at boot: ask once there's a network
     }
     for (;;) {
-        const ev::Uptime retry_at = timer_.now() + kDiscoveryRetry;
+        const ev::Instant retry_at = timer_.now() + kDiscoveryRetry;
         post_(ev::Discover{role, record(role).short_addr});
         // A reply without one (the adapter logged why) waits out the interval.
         while (const auto found = co_await endpoints_.next(about(role), retry_at)) {
@@ -248,7 +246,7 @@ ev::Flow DeviceRegistry::keepAlive(ev::Role bulb)
     }
     co_await timer_.after(kFirstPing);
     for (;;) {
-        const ev::Uptime sent = timer_.now();
+        const ev::Instant sent = timer_.now();
         post_(ev::Ping{bulb, record(bulb).short_addr});
         const auto reply = co_await pings_.next(about(bulb), sent + kUnreachablePing);
         if (reply && reply->ok) {
@@ -257,7 +255,7 @@ ev::Flow DeviceRegistry::keepAlive(ev::Role bulb)
             // A lost ping alone isn't enough (a busy network drops some); it
             // must also have been silent - no acks - for a while.
             const Liveness &l = liveness(bulb);
-            if (l.last_heard == ev::Uptime{} || timer_.now() - l.last_heard > kUnreachableAfter) {
+            if (!l.last_heard || timer_.now() - *l.last_heard > kUnreachableAfter) {
                 SUNSIM_LOGD(kTag, "Ping to %s failed (err=0x%x status=0x%x)", name(bulb), reply ? reply->error : -1,
                             reply ? reply->status : -1);
                 setReachable(bulb, false);
@@ -319,7 +317,7 @@ void DeviceRegistry::onUnpairRequested(const ev::UnpairRequested &e)
 
 void DeviceRegistry::onTick(const ev::Tick &e)
 {
-    timer_.tick(ev::Uptime{e.uptime_us});
+    timer_.tick(e.at);
     publishDevices();
 }
 
@@ -331,7 +329,7 @@ void DeviceRegistry::publishDevices()
         u.devices[ev::indexOf(role)] = {.link          = link(role),
                                         .paired        = record(role).valid,
                                         .has_endpoint  = record(role).endpoint != 0,
-                                        .last_heard_us = l.last_heard.count(),
+                                        .last_heard    = l.last_heard,
                                         .rssi          = l.rssi,
                                         .reachable     = l.reachable};
     }

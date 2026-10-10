@@ -1,5 +1,6 @@
 #include "sunsim/platform/console.h"
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <optional>
@@ -8,7 +9,6 @@
 #include "esp_console.h"
 #include "esp_log.h"
 #include "esp_system.h"
-#include "esp_timer.h"
 
 #include "format.h"
 #include "sunsim/platform/status_slot.h"
@@ -130,12 +130,12 @@ int cmdUnpair(int argc, char **argv)
 
 int cmdOpen(int argc, char **argv)
 {
-    const int seconds = argc == 2 ? std::atoi(argv[1]) : ev::kDefaultOpenSeconds;
+    const int seconds = argc == 2 ? std::atoi(argv[1]) : ev::kDefaultOpenTime.count();
     if (seconds < 1 || seconds > 254) {
         std::printf("seconds must be 1-254\n");
         return 1;
     }
-    g_ctx.post(ev::OpenNetwork{static_cast<uint8_t>(seconds)});
+    g_ctx.post(ev::OpenNetwork{ev::OpenTime{seconds}});
     return 0;
 }
 
@@ -331,7 +331,7 @@ int cmdPress(int argc, char **argv)
         std::printf("usage: press single|double|hold\n");
         return 1;
     }
-    g_ctx.post(ev::ButtonPressed{.press = press, .source = ev::Source::Console, .at_us = esp_timer_get_time()});
+    g_ctx.post(ev::ButtonPressed{.press = press, .source = ev::Source::Console, .at = ev::BootClock::now()});
     return 0;
 }
 
@@ -381,8 +381,9 @@ int cmdStatus(int, char **)
             std::printf("*  online");
             break;
         }
-        if (d.last_heard_us != 0) {
-            std::printf(", heard %llds ago", static_cast<long long>((st->uptime_us - d.last_heard_us) / 1'000'000));
+        if (d.last_heard) {
+            const auto ago = std::chrono::duration_cast<std::chrono::seconds>(st->at - *d.last_heard);
+            std::printf(", heard %llds ago", static_cast<long long>(ago.count()));
         }
         if (d.rssi != 0) {
             std::printf(", rssi %d", d.rssi);

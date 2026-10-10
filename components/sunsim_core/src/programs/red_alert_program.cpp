@@ -3,8 +3,8 @@
 namespace sunsim::core {
 
 namespace {
-constexpr uint16_t kFadeDs      = 9; // 0.9 s
-constexpr uint16_t kColorDs     = 2;
+constexpr ev::Transition kFade{9};  // 0.9 s: nearly the whole Tick
+constexpr ev::Transition kColor{2}; // 0.2 s
 constexpr uint8_t  kBrightLevel = 254;
 constexpr uint8_t  kDimLevel    = 30;
 } // namespace
@@ -33,7 +33,7 @@ void RedAlertProgram::emit(std::optional<ev::Role> role)
                              .color      = ev::ColorMode::HueSat,
                              .hue        = 0,
                              .saturation = 254};
-    forEachBulb(role, [&](ev::Role r) { target(r, red, kFadeDs, kColorDs); });
+    forEachBulb(role, [&](ev::Role r) { target(r, red, kFade, kColor); });
 }
 
 } // namespace sunsim::core

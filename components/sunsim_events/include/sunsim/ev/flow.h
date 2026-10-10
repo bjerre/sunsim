@@ -7,7 +7,7 @@
 //
 //   class Registry {
 //       void onReply(const Reply &r) { replies_.deliver(r); }
-//       void onTick(const Tick &t)   { timer_.tick(Uptime{t.uptime_us}); }
+//       void onTick(const Tick &t)   { timer_.tick(t.at); }
 //
 //       Flow ask(Role role) {
 //           for (;;) {
@@ -34,9 +34,9 @@
 #include <utility>
 #include <vector>
 
-namespace sunsim::ev {
+#include "sunsim/ev/types.h"
 
-using Uptime = std::chrono::microseconds; // since boot
+namespace sunsim::ev {
 
 // A coroutine that starts at once and runs until it returns or its owner
 // destroys it, which cancels it wherever it's waiting. Nobody awaits it.
@@ -88,14 +88,14 @@ public:
     virtual void expire() = 0; // the deadline came first: resume the flow
 
 protected:
-    Timed(Timer &timer, Uptime deadline) noexcept : timer_(timer), deadline_(deadline) {}
+    Timed(Timer &timer, Instant deadline) noexcept : timer_(timer), deadline_(deadline) {}
     ~Timed();
 
     void startTimer();
     void stopTimer() noexcept;
 
-    Timer &timer_;
-    Uptime deadline_;
+    Timer  &timer_;
+    Instant deadline_;
 
 private:
     friend class sunsim::ev::Timer;
@@ -103,19 +103,19 @@ private:
 };
 } // namespace detail
 
-// Time for flows. The owning module calls tick() with each Tick's uptime,
-// and events stamped with an uptime move it too (Inbox::deliver); due waits
-// resume then. Time only moves forward.
+// Time for flows. The owning module calls tick() with each Tick's time, and
+// timestamped events move it too (Inbox::deliver); due waits resume then.
+// Time only moves forward.
 class Timer {
 public:
-    [[nodiscard]] Uptime now() const noexcept { return now_; }
+    [[nodiscard]] Instant now() const noexcept { return now_; }
 
     // co_await until(t) / after(d): resumes on the first tick at or after the
     // deadline, or at once if it has already passed.
-    [[nodiscard]] auto until(Uptime deadline) noexcept { return Sleep{*this, deadline}; }
-    [[nodiscard]] auto after(Uptime delay) noexcept { return until(now_ + delay); }
+    [[nodiscard]] auto until(Instant deadline) noexcept { return Sleep{*this, deadline}; }
+    [[nodiscard]] auto after(BootClock::duration delay) noexcept { return until(now_ + delay); }
 
-    void tick(Uptime now)
+    void tick(Instant now)
     {
         now_ = std::max(now_, now);
         // One at a time: expiring resumes a flow, which may start or cancel others.
@@ -136,7 +136,7 @@ private:
 
     class Sleep final : public detail::Timed {
     public:
-        Sleep(Timer &timer, Uptime deadline) noexcept : Timed(timer, deadline) {}
+        Sleep(Timer &timer, Instant deadline) noexcept : Timed(timer, deadline) {}
 
         [[nodiscard]] bool await_ready() const noexcept { return deadline_ <= timer_.now(); }
         void               await_suspend(std::coroutine_handle<> flow)
@@ -152,7 +152,7 @@ private:
         std::coroutine_handle<> flow_;
     };
 
-    Uptime                       now_{};
+    Instant                      now_{};
     std::vector<detail::Timed *> timed_;
 };
 
@@ -185,16 +185,16 @@ public:
     Inbox &operator=(const Inbox &) = delete;
 
     // co_await next() / next(filter): the next T (that passes the filter).
-    [[nodiscard]] auto next() { return Wait<false>{*this, any, Uptime::max()}; }
+    [[nodiscard]] auto next() { return Wait<false>{*this, any, Instant::max()}; }
     template <std::predicate<const T &> F> [[nodiscard]] auto next(F filter)
     {
-        return Wait<false>{*this, std::move(filter), Uptime::max()};
+        return Wait<false>{*this, std::move(filter), Instant::max()};
     }
 
     // co_await next(deadline) / next(filter, deadline): the same, or nullopt
     // once the deadline has passed.
-    [[nodiscard]] auto next(Uptime deadline) { return Wait<true>{*this, any, deadline}; }
-    template <std::predicate<const T &> F> [[nodiscard]] auto next(F filter, Uptime deadline)
+    [[nodiscard]] auto next(Instant deadline) { return Wait<true>{*this, any, deadline}; }
+    template <std::predicate<const T &> F> [[nodiscard]] auto next(F filter, Instant deadline)
     {
         return Wait<true>{*this, std::move(filter), deadline};
     }
@@ -202,7 +202,7 @@ public:
     // `at`, if given, is when it happened: the timer moves on to it first, so
     // waits whose deadline had passed by then time out (and a flow that then
     // waits again here can take this one).
-    void deliver(const T &value, std::optional<Uptime> at = std::nullopt)
+    void deliver(const T &value, std::optional<Instant> at = std::nullopt)
     {
         if (at) {
             timer_.tick(*at);
@@ -220,7 +220,7 @@ private:
 
     class Waiting : public detail::Timed {
     public:
-        Waiting(Inbox &inbox, Filter filter, Uptime deadline)
+        Waiting(Inbox &inbox, Filter filter, Instant deadline)
             : Timed(inbox.timer_, deadline), inbox_(inbox), filter_(std::move(filter))
         {
         }
@@ -232,7 +232,7 @@ private:
             flow_   = flow;
             serial_ = ++inbox_.serial_;
             inbox_.waiting_.push_back(this);
-            if (deadline_ != Uptime::max()) {
+            if (deadline_ != Instant::max()) {
                 startTimer();
             }
         }

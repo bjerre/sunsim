@@ -49,7 +49,7 @@ public:
 
 private:
     struct Liveness {
-        ev::Uptime last_heard{}; // zero = not since boot
+        std::optional<ev::Instant> last_heard{}; // empty: not since boot
         int8_t     rssi      = 0;
         bool       reachable = true;
     };

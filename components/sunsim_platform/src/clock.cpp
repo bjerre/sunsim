@@ -39,11 +39,21 @@ double currentUtcOffsetHours() noexcept
 }
 } // namespace
 
+} // namespace sunsim::platform
+
+// The one definition of the app's steady clock (declared in sunsim::ev).
+sunsim::ev::Instant sunsim::ev::BootClock::now() noexcept
+{
+    return Instant{duration{esp_timer_get_time()}};
+}
+
+namespace sunsim::platform {
+
 Clock::Clock(ev::Post post) : post_(std::move(post))
 {
 #if CONFIG_SUNSIM_DEBUG_FAST_DAY
     fast_day_          = std::make_unique<FastDayClock>(std::chrono::seconds{CONFIG_SUNSIM_DEBUG_DAY_SECONDS});
-    update_interval_s_ = 1;
+    update_interval_   = std::chrono::seconds{1};
     ESP_LOGW(kTag, "DEBUG FAST DAY MODE: simulating one active window (work day) every %d seconds",
              CONFIG_SUNSIM_DEBUG_DAY_SECONDS);
 #endif
@@ -93,13 +103,13 @@ ev::TimeReading Clock::read() const
 void Clock::onHeartbeat()
 {
     const ev::TimeReading time = read();
-    post_(ev::Tick{.uptime_us = esp_timer_get_time(), .time = time});
+    post_(ev::Tick{.at = ev::BootClock::now(), .time = time});
 
-    if (++seconds_ >= update_interval_s_) {
-        seconds_ = 0;
+    if (since_update_ += std::chrono::seconds{1}; since_update_ >= update_interval_) {
+        since_update_ = {};
         // Ramp over the whole interval, so bulbs fade continuously from one
         // update to the next instead of jumping and holding.
-        post_(ev::ProgramTick{.time = time, .transition_ds = static_cast<uint16_t>(update_interval_s_ * 10)});
+        post_(ev::ProgramTick{.time = time, .transition = update_interval_});
     }
 }
 

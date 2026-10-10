@@ -4,6 +4,7 @@
 // trivial helpers, no ESP-IDF includes.
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <ctime>
@@ -11,6 +12,24 @@
 #include <string_view>
 
 namespace sunsim::ev {
+
+// ---- Clock ----------------------------------------------------------------
+
+// Steady time since boot. now() exists only in the platform layer (the
+// esp_timer): core code gets time from events, which keeps it testable.
+struct BootClock {
+    using rep                       = int64_t;
+    using period                    = std::micro;
+    using duration                  = std::chrono::duration<rep, period>;
+    using time_point                = std::chrono::time_point<BootClock>;
+    static constexpr bool is_steady = true;
+
+    static time_point now() noexcept;
+};
+using Instant = BootClock::time_point;
+
+// Zigbee transition times: tenths of a second.
+using Transition = std::chrono::duration<uint16_t, std::deci>;
 
 // ---- Roles ----------------------------------------------------------------
 
@@ -109,12 +128,12 @@ enum class DeviceLink : uint8_t {
 };
 
 struct DeviceStatus {
-    DeviceLink link          = DeviceLink::Unpaired; // what status shows, from the registry's liveness
-    bool       paired        = false;
-    bool       has_endpoint  = false;
-    int64_t    last_heard_us = 0;    // uptime; 0 = not since boot
-    int8_t     rssi          = 0;    // of the last ack, if any
-    bool       reachable     = true; // false: not answering, light commands paused
+    DeviceLink             link         = DeviceLink::Unpaired; // what status shows, from the registry's liveness
+    bool                   paired       = false;
+    bool                   has_endpoint = false;
+    std::optional<Instant> last_heard{};        // empty: not since boot
+    int8_t                 rssi         = 0;    // of the last ack, if any
+    bool                   reachable    = true; // false: not answering, light commands paused
 };
 
 // ---- Program settings -----------------------------------------------------
@@ -187,7 +206,7 @@ struct DayInfo {
 // Everything the `status`/`roles`/`config` console commands and the display
 // show, gathered in one place so they always agree.
 struct StatusSnapshot {
-    int64_t                               uptime_us = 0;
+    Instant                               at{}; // when this snapshot was taken
     TimeReading                           time{};
     DayInfo                               day{};
     Mode                                  mode             = Mode::Daylight;

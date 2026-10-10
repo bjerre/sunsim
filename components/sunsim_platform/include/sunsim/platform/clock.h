@@ -42,8 +42,8 @@ private:
     esp_timer_handle_t            timer_ = nullptr;
     ev::ProgramConfig             config_{};
     std::unique_ptr<FastDayClock> fast_day_; // set in fast-day mode
-    int                           update_interval_s_ = 60;
-    int                           seconds_           = 0;
+    std::chrono::seconds          update_interval_{60};
+    std::chrono::seconds          since_update_{};
 };
 
 } // namespace sunsim::platform

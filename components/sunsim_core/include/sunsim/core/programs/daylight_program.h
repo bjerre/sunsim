@@ -20,7 +20,7 @@ public:
     void onConfig(const ev::ConfigChanged &e) override;
 
 private:
-    void emit(ev::Role role, const ev::TimeReading &time, uint16_t transition_ds);
+    void emit(ev::Role role, const ev::TimeReading &time, ev::Transition transition);
 
     DaylightSchedule schedule_;
     ev::Peaks        peaks_        = ev::kDefaultPeaks;

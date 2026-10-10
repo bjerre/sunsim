@@ -78,11 +78,11 @@ private:
     std::atomic<uint16_t> button_short_{0xFFFF};
 
     // Bulb commands the stack refused to queue (e.g. out of buffers),
-    // summarised every kSendReportUs so silent drops show up in the log.
-    uint32_t  sends_           = 0;
-    uint32_t  send_failures_   = 0;
-    ezb_err_t last_send_error_ = EZB_ERR_NONE;
-    int64_t   report_start_us_ = 0;
+    // summarised every kSendReport so silent drops show up in the log.
+    uint32_t    sends_           = 0;
+    uint32_t    send_failures_   = 0;
+    ezb_err_t   last_send_error_ = EZB_ERR_NONE;
+    ev::Instant report_start_{};
 
     static ZigbeeAdapter *s_self;
 };

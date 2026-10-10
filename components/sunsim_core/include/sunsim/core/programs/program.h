@@ -45,14 +45,13 @@ protected:
         }
     }
 
-    void target(ev::Role role, const ev::LightState &state, uint16_t level_transition_ds,
-                uint16_t color_transition_ds) const
+    void target(ev::Role role, const ev::LightState &state, ev::Transition level, ev::Transition color) const
     {
-        post_(ev::LightTarget{role, state, level_transition_ds, color_transition_ds});
+        post_(ev::LightTarget{role, state, level, color});
     }
-    void target(ev::Role role, const ev::LightState &state, uint16_t transition_ds) const
+    void target(ev::Role role, const ev::LightState &state, ev::Transition transition = {}) const
     {
-        target(role, state, transition_ds, transition_ds);
+        target(role, state, transition, transition);
     }
 
 private:

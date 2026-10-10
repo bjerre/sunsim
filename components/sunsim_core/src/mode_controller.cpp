@@ -36,7 +36,7 @@ ev::Flow ModeController::run()
             enter(modeFor(press.press));
             continue;
         }
-        const auto second = co_await presses_.next(ev::Uptime{press.at_us} + window_);
+        const auto second = co_await presses_.next(press.at + window_);
         if (!second) {
             enter(ev::Mode::Daylight); // the window passed: it was a single press
         } else if (second->press == ev::Press::Ambiguous) {

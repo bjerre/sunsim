@@ -10,6 +10,7 @@
 
 using namespace sunsim;
 using namespace sunsim::ev;
+using namespace std::chrono_literals;
 
 namespace {
 
@@ -22,8 +23,6 @@ int g_failures = 0;
             ++g_failures;                                                                                              \
         }                                                                                                              \
     } while (0)
-
-constexpr int64_t kSecond = 1'000'000;
 
 // A weekday at 12:00, clock set.
 TimeReading noon()
@@ -42,14 +41,14 @@ struct Harness {
     EventBus                 bus;
     core::CoreModules        core{bus.post(), {}};
     std::vector<Event>       log;
-    int64_t                  now_us = 0;
+    Instant                  now{};
 
     Harness()
     {
         core::wireCore(bus, core);
         // Record everything posted, including platform-bound events.
         recordAll(std::make_index_sequence<std::variant_size_v<Payload>>{});
-        post(NetworkUp{}); // at uptime 0, so "15 s after the network is up" is 15 s in
+        post(NetworkUp{}); // at time 0, so "15 s after the network is up" is 15 s in
         clearLog();
     }
 
@@ -69,8 +68,8 @@ struct Harness {
     void tick(int seconds = 1, TimeReading time = noon())
     {
         for (int i = 0; i < seconds; ++i) {
-            now_us += kSecond;
-            post(Tick{.uptime_us = now_us, .time = time});
+            now += 1s;
+            post(Tick{.at = now, .time = time});
         }
     }
 
@@ -152,7 +151,7 @@ int main()
         h.pairBulb(Role::Work, 0xB2, 0x0002);
         h.clearLog();
 
-        h.post(ButtonPressed{.press = Press::Double, .source = Source::Zigbee, .at_us = h.now_us});
+        h.post(ButtonPressed{.press = Press::Double, .source = Source::Zigbee, .at = h.now});
         auto modes = h.all<ModeChanged>();
         CHECK(modes.size() == 1 && modes[0].mode == Mode::RedAlert);
         auto red = h.all<SetLight>();
@@ -167,7 +166,7 @@ int main()
         CHECK(pulses.size() == 6 && !pulses[0].hue_sat); // already red: only the level moves
 
         h.clearLog();
-        h.post(ButtonPressed{.press = Press::Single, .source = Source::Zigbee, .at_us = h.now_us});
+        h.post(ButtonPressed{.press = Press::Single, .source = Source::Zigbee, .at = h.now});
         modes = h.all<ModeChanged>();
         CHECK(modes.size() == 1 && modes[0].mode == Mode::Daylight);
         const auto back = h.all<SetLight>();
@@ -180,12 +179,12 @@ int main()
         h.tick();
         h.pairBulb(Role::WallB, 0xC3, 0x0003);
         h.clearLog();
-        h.post(ButtonPressed{.press = Press::Hold, .source = Source::Console, .at_us = h.now_us});
+        h.post(ButtonPressed{.press = Press::Hold, .source = Source::Console, .at = h.now});
         const auto off = h.all<SetLight>();
         CHECK(off.size() == 1 && off[0].power && !*off[0].power);
 
         h.clearLog();
-        h.post(ProgramTick{.time = noon(), .transition_ds = 600});
+        h.post(ProgramTick{.time = noon(), .transition = 60s});
         CHECK(h.all<LightTarget>().empty());
         CHECK(h.all<SetLight>().empty());
     });
@@ -193,7 +192,7 @@ int main()
     test("a bulb paired during red alert joins in red", [] {
         Harness h;
         h.tick();
-        h.post(ButtonPressed{.press = Press::Double, .source = Source::Console, .at_us = h.now_us});
+        h.post(ButtonPressed{.press = Press::Double, .source = Source::Console, .at = h.now});
         h.clearLog();
         h.pairBulb(Role::WallC, 0xC3, 0x0003);
         const auto lights = h.all<SetLight>();
@@ -204,14 +203,14 @@ int main()
     test("ambiguous On/Toggle: two within 450 ms = double, one alone = single", [] {
         Harness h;
         h.tick();
-        h.post(ButtonPressed{.press = Press::Ambiguous, .at_us = h.now_us});
-        h.post(ButtonPressed{.press = Press::Ambiguous, .at_us = h.now_us + 200'000});
+        h.post(ButtonPressed{.press = Press::Ambiguous, .at = h.now});
+        h.post(ButtonPressed{.press = Press::Ambiguous, .at = h.now + 200ms});
         auto modes = h.all<ModeChanged>();
         CHECK(modes.size() == 1 && modes[0].mode == Mode::RedAlert);
 
         Harness g;
         g.tick();
-        g.post(ButtonPressed{.press = Press::Ambiguous, .at_us = g.now_us});
+        g.post(ButtonPressed{.press = Press::Ambiguous, .at = g.now});
         CHECK(g.all<ModeChanged>().empty()); // still waiting for a possible second click
         g.tick();
         modes = g.all<ModeChanged>();
@@ -221,8 +220,8 @@ int main()
     test("ambiguous then a definite press within the window: the definite press wins", [] {
         Harness h;
         h.tick();
-        h.post(ButtonPressed{.press = Press::Ambiguous, .at_us = h.now_us});
-        h.post(ButtonPressed{.press = Press::Hold, .at_us = h.now_us + 100'000});
+        h.post(ButtonPressed{.press = Press::Ambiguous, .at = h.now});
+        h.post(ButtonPressed{.press = Press::Hold, .at = h.now + 100ms});
         auto modes = h.all<ModeChanged>();
         CHECK(modes.size() == 1 && modes[0].mode == Mode::Off);
         h.tick(); // nothing left pending
@@ -232,11 +231,11 @@ int main()
     test("ambiguous: a second click after the window is a new first click", [] {
         Harness h;
         h.tick();
-        h.post(ButtonPressed{.press = Press::Ambiguous, .at_us = h.now_us});
-        h.post(ButtonPressed{.press = Press::Ambiguous, .at_us = h.now_us + 600'000}); // too late for a double
+        h.post(ButtonPressed{.press = Press::Ambiguous, .at = h.now});
+        h.post(ButtonPressed{.press = Press::Ambiguous, .at = h.now + 600ms}); // too late for a double
         auto modes = h.all<ModeChanged>();
         CHECK(modes.size() == 1 && modes[0].mode == Mode::Daylight); // the first was a single
-        h.post(ButtonPressed{.press = Press::Ambiguous, .at_us = h.now_us + 800'000}); // pairs with the second
+        h.post(ButtonPressed{.press = Press::Ambiguous, .at = h.now + 800ms}); // pairs with the second
         modes = h.all<ModeChanged>();
         CHECK(modes.size() == 2 && modes[1].mode == Mode::RedAlert);
     });
@@ -248,7 +247,7 @@ int main()
         h.tick(1, unset);
         h.pairBulb(Role::WallA, 0xA1, 0x0001);
         h.clearLog();
-        h.post(ProgramTick{.time = unset, .transition_ds = 600});
+        h.post(ProgramTick{.time = unset, .transition = 60s});
         const auto targets = h.all<LightTarget>();
         CHECK(targets.size() == ev::kBulbCount);
         for (const auto &t : targets) {
@@ -263,13 +262,13 @@ int main()
         peaks[0]     = 50; // WallA at 50%
         h.post(ConfigChanged{.config = {}, .peaks = peaks});
         h.clearLog();
-        h.post(ProgramTick{.time = noon(), .transition_ds = 600});
+        h.post(ProgramTick{.time = noon(), .transition = 60s});
         const auto targets = h.all<LightTarget>();
         CHECK(targets.size() == ev::kBulbCount);
         if (targets.size() == ev::kBulbCount) {
             CHECK(targets[0].state.on && targets[1].state.on);
             CHECK(targets[0].state.level * 2 <= targets[1].state.level + 2); // WallA ~half of WallB
-            CHECK(targets[0].level_transition_ds == 600 && targets[0].color_transition_ds == 600);
+            CHECK(targets[0].level_transition == 60s && targets[0].color_transition == 60s);
         }
     });
 
@@ -362,7 +361,7 @@ int main()
         h.clearLog();
         TimeReading later = noon();
         later.local.tm_hour = 14; // the curve has moved on since the last update
-        h.post(ProgramTick{.time = later, .transition_ds = 600});
+        h.post(ProgramTick{.time = later, .transition = 60s});
         bool to_work = false, to_wall = false;
         for (const auto &l : h.all<SetLight>()) {
             to_work |= l.short_addr == 0x0002;
@@ -390,9 +389,9 @@ int main()
         Harness h;
         h.tick();
         h.pairBulb(Role::WallB, 0xC3, 0x0003);
-        h.post(ProgramTick{.time = noon(), .transition_ds = 600});
+        h.post(ProgramTick{.time = noon(), .transition = 60s});
         h.clearLog();
-        h.post(ProgramTick{.time = noon(), .transition_ds = 600}); // same time -> same target
+        h.post(ProgramTick{.time = noon(), .transition = 60s}); // same time -> same target
         CHECK(h.all<SetLight>().empty());
     });
 
