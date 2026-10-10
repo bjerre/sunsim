@@ -1,6 +1,6 @@
 #pragma once
 
-#include "sunsim/core/daylight.h"
+#include "sunsim/core/math/daylight.h"
 #include "sunsim/core/programs/program.h"
 
 namespace sunsim::core {

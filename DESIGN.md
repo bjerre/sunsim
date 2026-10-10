@@ -146,7 +146,7 @@ timing (450ms, resolved on the next `Tick` — `core::ModeController`);
 ## 4. Daylight mathematical model
 
 No Zigbee or hardware dependency in either piece below
-(`components/sunsim_core/src/daylight.cpp`, `solar.cpp`) — both are pure
+(`components/sunsim_core/src/math/daylight.cpp`, `solar.cpp`) — both are pure
 functions, unit-testable on the host.
 
 ### Wall bulbs (`DaylightSchedule::wallState`)

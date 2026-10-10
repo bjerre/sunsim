@@ -2,8 +2,8 @@
 
 #include <memory>
 
-#include "sunsim/core/day_info.h"
-#include "sunsim/core/daylight.h"
+#include "sunsim/core/math/day_info.h"
+#include "sunsim/core/math/daylight.h"
 
 namespace sunsim::core {
 

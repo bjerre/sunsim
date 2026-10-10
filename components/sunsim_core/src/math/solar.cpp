@@ -1,4 +1,4 @@
-#include "sunsim/core/solar.h"
+#include "sunsim/core/math/solar.h"
 
 #include <cmath>
 

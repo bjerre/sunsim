@@ -1,8 +1,8 @@
-#include "sunsim/core/daylight.h"
+#include "sunsim/core/math/daylight.h"
 
 #include <cmath>
 
-#include "sunsim/core/solar.h"
+#include "sunsim/core/math/solar.h"
 
 namespace sunsim::core {
 

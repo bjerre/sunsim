@@ -1,6 +1,6 @@
-#include "sunsim/core/day_info.h"
+#include "sunsim/core/math/day_info.h"
 
-#include "sunsim/core/solar.h"
+#include "sunsim/core/math/solar.h"
 
 namespace sunsim::core {
 

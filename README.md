@@ -237,7 +237,7 @@ by a single app task. See [EVENT_DESIGN.md](EVENT_DESIGN.md).
   - `light_output.*` - turns any program's targets into ZCL commands, diffed
     against what was last sent.
   - `status_model.*` - the snapshot shown by `status` and the display.
-  - `daylight.*`, `solar.*`, `day_info.*` - the math.
+  - `math/` - `daylight.*`, `solar.*`, `day_info.*`: the pure math.
   - `core.*` - `CoreModules` and `wireCore()`, every core-to-core edge.
 - `components/sunsim_platform/` (`sunsim::platform`) - everything ESP-IDF:
   - `zigbee_adapter.*` - the only code using esp-zigbee-lib (stack,
