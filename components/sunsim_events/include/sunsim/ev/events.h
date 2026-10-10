@@ -80,7 +80,7 @@ struct AckReceived {             // ZCL Default Response from a bulb
 };
 
 enum class Press : uint8_t {
-    Single,    // resume the daylight program
+    Single,    // daylight program
     Double,    // red alert
     Hold,      // all off
     Ambiguous, // On/Toggle seen only as an attribute change: single vs double by timing
@@ -141,19 +141,17 @@ struct DevicesUpdated {          // 1 Hz summary for the status model
 
 // ---- Mode, program, output ------------------------------------------------
 
-struct ModeChanged {
-    Mode mode = Mode::Auto;
+struct ModeChanged {             // switch to another program
+    Mode mode = Mode::Daylight;
 };
-struct RedAlertPulse {
-    bool bright = false;
-};
-struct RefreshLights {           // recompute now, with the quick transition
+struct RefreshLights {           // the running program re-applies now, with its quick transition
     std::optional<Role> role;    // nullopt = every light
 };
-struct LightTarget {
+struct LightTarget {             // what a bulb should show, from the running program
     Role       role = Role::WallA;
     LightState state{};
-    uint16_t   transition_ds = 0;
+    uint16_t   level_transition_ds = 0;
+    uint16_t   color_transition_ds = 0;
 };
 struct SetLight {                // one bulb's ZCL commands, sent in field order
     uint16_t                                  short_addr = 0;
@@ -182,7 +180,7 @@ using Payload = std::variant<Heartbeat, Tick, ProgramTick,                      
                              PairRequested, PairCancelled, UnpairRequested, OpenNetwork, FactoryReset, //
                              RoleAssigned, RoleCleared, Discover, Bind, Ping, ReachabilityChanged,    //
                              DevicesUpdated,                                                          //
-                             ModeChanged, RedAlertPulse, RefreshLights, LightTarget, SetLight,       //
+                             ModeChanged, RefreshLights, LightTarget, SetLight,                      //
                              StatusChanged>;
 
 // Names for tracing, in Payload order.
@@ -193,7 +191,7 @@ inline constexpr const char *kEventNames[] = {
     "AckReceived", "ButtonPressed",
     "PairRequested", "PairCancelled", "UnpairRequested", "OpenNetwork", "FactoryReset",
     "RoleAssigned", "RoleCleared", "Discover", "Bind", "Ping", "ReachabilityChanged", "DevicesUpdated",
-    "ModeChanged", "RedAlertPulse", "RefreshLights", "LightTarget", "SetLight",
+    "ModeChanged", "RefreshLights", "LightTarget", "SetLight",
     "StatusChanged",
 };
 static_assert(std::size(kEventNames) == std::variant_size_v<Payload>, "kEventNames out of sync with Payload");

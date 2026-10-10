@@ -10,7 +10,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_compile_options(-Wall -Wextra -fno-exceptions -fno-rtti)
 
 set(ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../..)
-file(GLOB CORE_SOURCES ${ROOT}/components/sunsim_core/src/*.cpp)
+file(GLOB_RECURSE CORE_SOURCES ${ROOT}/components/sunsim_core/src/*.cpp)
 
 find_package(Threads REQUIRED)
 add_executable(sunsim_tests tests.cpp ${CORE_SOURCES})

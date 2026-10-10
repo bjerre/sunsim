@@ -159,21 +159,21 @@ int main()
 
         h.clearLog();
         h.tick(3);
-        CHECK(h.all<RedAlertPulse>().size() == 3);
-        CHECK(h.all<SetLight>().size() == 6);
-        CHECK(h.all<SetLight>().size() == 6 && h.all<SetLight>()[0].level != h.all<SetLight>()[2].level); // bright/dim alternate
+        const auto pulses = h.all<SetLight>();
+        CHECK(pulses.size() == 6);
+        CHECK(pulses.size() == 6 && pulses[0].level && pulses[2].level && *pulses[0].level != *pulses[2].level); // bright/dim alternate
+        CHECK(pulses.size() == 6 && !pulses[0].hue_sat); // already red: only the level moves
 
         h.clearLog();
         h.post(ButtonPressed{.press = Press::Single, .source = Source::Zigbee, .at_us = h.now_us});
         modes = h.all<ModeChanged>();
-        CHECK(modes.size() == 1 && modes[0].mode == Mode::Auto);
-        CHECK(!h.all<RefreshLights>().empty());
+        CHECK(modes.size() == 1 && modes[0].mode == Mode::Daylight);
         const auto back = h.all<SetLight>();
-        CHECK(back.size() == 2 && back[0].power && *back[0].power); // re-sync after red alert
-        CHECK(back.size() == 2 && !back[0].hue_sat && (back[0].mireds || back[0].xy));
+        CHECK(back.size() == 2 && back[0].level && !back[0].hue_sat && (back[0].mireds || back[0].xy)); // daylight at once
+
     });
 
-    test("hold -> all off; daylight targets are ignored until resumed", [] {
+    test("hold -> all off; the daylight program is paused until resumed", [] {
         Harness h;
         h.tick();
         h.pairBulb(Role::WallB, 0xC3, 0x0003);
@@ -184,8 +184,19 @@ int main()
 
         h.clearLog();
         h.post(ProgramTick{.time = noon(), .transition_ds = 600});
-        CHECK(!h.all<LightTarget>().empty());
+        CHECK(h.all<LightTarget>().empty());
         CHECK(h.all<SetLight>().empty());
+    });
+
+    test("a bulb paired during red alert joins in red", [] {
+        Harness h;
+        h.tick();
+        h.post(ButtonPressed{.press = Press::Double, .source = Source::Console, .at_us = h.now_us});
+        h.clearLog();
+        h.pairBulb(Role::WallC, 0xC3, 0x0003);
+        const auto lights = h.all<SetLight>();
+        CHECK(lights.size() == 1 && lights[0].power && *lights[0].power);
+        CHECK(lights.size() == 1 && lights[0].hue_sat && lights[0].hue_sat->first == 0);
     });
 
     test("ambiguous On/Toggle: two within 450 ms = double, one alone = single", [] {
@@ -202,7 +213,7 @@ int main()
         CHECK(g.all<ModeChanged>().empty()); // still waiting for a possible second click
         g.tick();
         modes = g.all<ModeChanged>();
-        CHECK(modes.size() == 1 && modes[0].mode == Mode::Auto);
+        CHECK(modes.size() == 1 && modes[0].mode == Mode::Daylight);
     });
 
     test("clock not set -> lights held off", [] {
@@ -233,7 +244,7 @@ int main()
         if (targets.size() == ev::kBulbCount) {
             CHECK(targets[0].state.on && targets[1].state.on);
             CHECK(targets[0].state.level * 2 <= targets[1].state.level + 2); // WallA ~half of WallB
-            CHECK(targets[0].transition_ds == 600);
+            CHECK(targets[0].level_transition_ds == 600 && targets[0].color_transition_ds == 600);
         }
     });
 

@@ -10,20 +10,20 @@ void wireCore(ev::EventBus &bus, CoreModules &m)
     bus.on<Tick>([&](const Tick &e) {
         m.mode.onTick(e);
         m.registry.onTick(e);
-        m.program.onTick(e);
+        m.programs.onTick(e);
         m.status.onTick(e);
     });
-    bus.on<ProgramTick>([&](const ProgramTick &e) { m.program.onProgramTick(e); });
+    bus.on<ProgramTick>([&](const ProgramTick &e) { m.programs.onProgramTick(e); });
 
     // Settings
     bus.on<ConfigChanged>([&](const ConfigChanged &e) {
-        m.program.onConfig(e);
+        m.programs.onConfig(e);
         m.status.onConfig(e);
     });
     bus.on<RolesLoaded>([&](const RolesLoaded &e) { m.registry.onRolesLoaded(e); });
 
     // From the radio
-    bus.on<NetworkUp>([&](const NetworkUp &) { m.program.onRefresh(RefreshLights{}); });
+    bus.on<NetworkUp>([&](const NetworkUp &) { m.programs.onRefresh(RefreshLights{}); });
     bus.on<DeviceAnnounced>([&](const DeviceAnnounced &e) { m.registry.onAnnounced(e); });
     bus.on<EndpointFound>([&](const EndpointFound &e) { m.registry.onEndpointFound(e); });
     bus.on<BindResult>([&](const BindResult &e) { m.registry.onBindResult(e); });
@@ -45,15 +45,14 @@ void wireCore(ev::EventBus &bus, CoreModules &m)
     bus.on<ReachabilityChanged>([&](const ReachabilityChanged &e) { m.output.onReachability(e); });
     bus.on<DevicesUpdated>([&](const DevicesUpdated &e) { m.status.onDevices(e); });
 
-    // Mode
+    // Mode -> programs
     bus.on<ModeChanged>([&](const ModeChanged &e) {
-        m.output.onModeChanged(e);
+        m.programs.onModeChanged(e);
         m.status.onModeChanged(e);
     });
-    bus.on<RedAlertPulse>([&](const RedAlertPulse &e) { m.output.onRedAlertPulse(e); });
+    bus.on<RefreshLights>([&](const RefreshLights &e) { m.programs.onRefresh(e); });
 
-    // Program -> output
-    bus.on<RefreshLights>([&](const RefreshLights &e) { m.program.onRefresh(e); });
+    // Programs -> output
     bus.on<LightTarget>([&](const LightTarget &e) { m.output.onTarget(e); });
 }
 

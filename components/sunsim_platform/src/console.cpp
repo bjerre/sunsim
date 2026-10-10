@@ -356,7 +356,7 @@ int cmdStatus(int, char **)
     std::printf(")\n");
 
     std::printf("mode    %s", ev::modeName(st->mode));
-    if (st->mode == ev::Mode::Auto) {
+    if (st->mode == ev::Mode::Daylight) {
         std::printf(" - %s", st->in_active_window ? "in active hours" : "outside active hours, lights off");
     }
     std::printf("\n");

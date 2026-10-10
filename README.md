@@ -228,10 +228,14 @@ by a single app task. See [EVENT_DESIGN.md](EVENT_DESIGN.md).
   C++ (builds on the host):
   - `device_registry.*` - pairing, endpoint discovery/binding, liveness pings.
   - `mode_controller.*` - single/double/hold -> daylight / red alert / off.
-  - `daylight_program.*` - what each bulb should show (sun curve, work light,
-    active window, sun shift, amber, per-light intensity, clock guard).
-  - `light_output.*` - turns targets/modes into ZCL commands, diffed against
-    what was last sent.
+  - `programs/` - the lighting programs, one per mode:
+    - `program.h` - the interface every program implements (what each bulb
+      should show); `program_host.*` runs the selected one.
+    - `daylight_program.*` - sun curve, work light, active window, sun
+      shift, amber, per-light intensity, clock guard.
+    - `red_alert_program.*`, `off_program.*` - the other two modes.
+  - `light_output.*` - turns any program's targets into ZCL commands, diffed
+    against what was last sent.
   - `status_model.*` - the snapshot shown by `status` and the display.
   - `daylight.*`, `solar.*`, `day_info.*` - the math.
   - `core.*` - `CoreModules` and `wireCore()`, every core-to-core edge.

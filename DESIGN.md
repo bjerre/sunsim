@@ -128,12 +128,12 @@ ZCL processing and dispatches by command id, consuming them.
 
 ```mermaid
 stateDiagram-v2
-    state "Any mode (Auto / ManualOff / RedAlert)" as Any
-    [*] --> Auto
-    Any --> Auto: Toggle (single press)
+    state "Any mode (Daylight / Off / RedAlert)" as Any
+    [*] --> Daylight
+    Any --> Daylight: Toggle (single press)
     Any --> RedAlert: On (double press)
-    Any --> ManualOff: Off (hold)
-    RedAlert --> RedAlert: heartbeat tick -> pulse brightness
+    Any --> Off: Off (hold)
+    RedAlert --> RedAlert: Tick -> RedAlertProgram flips brightness
 ```
 
 Fallback for buttons that do send to the bound receiver endpoint 2: the

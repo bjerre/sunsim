@@ -117,7 +117,7 @@ LightState DaylightSchedule::wallState(const std::tm &local_time, double utc_off
         const double amber_mireds = 1e6 / config_.amber_kelvin;
         const double m            = mireds + golden * (amber_mireds - mireds);
         state.mireds              = static_cast<uint16_t>(std::lround(m));
-        state.use_xy              = true;
+        state.color               = ev::ColorMode::Xy;
         planckianXy(1e6 / m, state.color_x, state.color_y);
     }
     return state;

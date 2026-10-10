@@ -43,7 +43,7 @@ flowchart TB
     subgraph core["components/sunsim_core — sunsim::core (pure C++, host-testable)"]
         DR[DeviceRegistry]
         MC[ModeController]
-        DP[DaylightProgram]
+        PH["ProgramHost<br/>Daylight / Off / RedAlert programs"]
         LO[LightOutput]
         SM[StatusModel]
         MA["daylight / solar / day_info math"]
@@ -63,7 +63,7 @@ flowchart TB
 | Namespace | Holds | Depends on |
 |---|---|---|
 | `sunsim::ev` | Event payload structs, `Event` variant, `Post`; shared value types (`Role`, `LightState`, `DeviceLink`, `Mode`) | nothing |
-| `sunsim::core` | `DeviceRegistry`, `ModeController`, `DaylightProgram`, `LightOutput`, `StatusModel`, existing pure math | `ev` |
+| `sunsim::core` | `DeviceRegistry`, `ModeController`, `ProgramHost` and its programs, `LightOutput`, `StatusModel`, existing pure math | `ev` |
 | `sunsim::platform` | `ZigbeeAdapter`, `Clock`/`TimeSync`, `SettingsStore`, `Console`, `StatusDisplay` | `ev`, ESP-IDF |
 | `sunsim` | `Bus`, `Modules`, `wire()`, `app_main` | all |
 
@@ -112,15 +112,15 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    CK[Clock] -->|"Tick (1 Hz)"| MC & DR & DP & SM
-    CK -->|ProgramTick| DP
+    CK[Clock] -->|"Tick (1 Hz)"| MC & DR & PH & SM
+    CK -->|ProgramTick| PH
 
-    ST[SettingsStore] -->|ConfigChanged| DP & SM & CK
+    ST[SettingsStore] -->|ConfigChanged| PH & SM & CK
     ST -->|RolesLoaded| DR
 
     ZA[ZigbeeAdapter] -->|DeviceAnnounced, EndpointFound,<br/>BindResult, PingResult, AckReceived| DR
     ZA -->|ButtonPressed| MC & DR
-    ZA -->|NetworkUp| DP
+    ZA -->|NetworkUp| PH
     CO[Console] -->|ButtonPressed| MC
     CO -->|PairRequested, PairCancelled,<br/>UnpairRequested| DR
     CO -->|OpenNetwork, FactoryReset| ZA
@@ -130,14 +130,12 @@ flowchart LR
     DR -->|PersistRoles| ST
     DR -->|RoleAssigned, RoleCleared| LO & ZA
     DR -->|ReachabilityChanged| LO
-    DR -->|RefreshLights| DP
+    DR -->|RefreshLights| PH
     DR -->|DevicesUpdated| SM
 
-    MC -->|ModeChanged| LO & SM
-    MC -->|RedAlertPulse| LO
+    MC -->|ModeChanged| PH & SM
 
-    DP -->|LightTarget| LO
-    LO -->|RefreshLights| DP
+    PH -->|LightTarget| LO
     LO -->|SetLight| ZA
 
     SM -->|StatusChanged| SLOT[("StatusSlot")]
@@ -148,14 +146,39 @@ flowchart LR
 |---|---|---|---|
 | **ZigbeeAdapter** — the only code including esp-zigbee | `SunsimApp`'s signal/ZCL/APS handlers, ZDO calls in `LightRig`, `BulbEndpoint` | `SetLight`, `Discover`, `Bind`, `Ping`, `OpenNetwork`, `FactoryReset`, `RoleAssigned`, `RoleCleared` | `NetworkUp`, `DeviceAnnounced`, `EndpointFound`, `BindResult`, `PingResult`, `AckReceived`, `ButtonPressed` |
 | **DeviceRegistry** | `RoleStore`; pairing, discovery retry, liveness in `LightRig` | `RolesLoaded`, `DeviceAnnounced`, `EndpointFound`, `BindResult`, `PingResult`, `AckReceived`, `ButtonPressed`, `PairRequested`, `PairCancelled`, `UnpairRequested`, `Tick` | `RoleAssigned`, `RoleCleared`, `Discover`, `Bind`, `Ping`, `OpenNetwork`, `PersistRoles`, `RefreshLights`, `ReachabilityChanged`, `DevicesUpdated` |
-| **ModeController** | `ButtonController` | `ButtonPressed`, `Tick` | `ModeChanged`, `RedAlertPulse` |
-| **DaylightProgram** | `DaylightSchedule` use, peaks, clock guard in `LightRig` | `ConfigChanged`, `Tick`, `ProgramTick`, `RefreshLights`, `NetworkUp` | `LightTarget` |
-| **LightOutput** | applied-state cache and apply logic in `LightRig` | `LightTarget`, `ModeChanged`, `RedAlertPulse`, `RoleAssigned`, `RoleCleared`, `ReachabilityChanged` | `SetLight`, `RefreshLights` |
+| **ModeController** | `ButtonController` | `ButtonPressed`, `Tick` | `ModeChanged` |
+| **ProgramHost** (runs one `Program`: `DaylightProgram`, `OffProgram`, `RedAlertProgram`) | `DaylightSchedule` use, peaks, clock guard in `LightRig`; red-alert pulse | `ModeChanged`, `ConfigChanged`, `Tick`, `ProgramTick`, `RefreshLights`, `NetworkUp` | `LightTarget` |
+| **LightOutput** | applied-state cache and apply logic in `LightRig` | `LightTarget`, `RoleAssigned`, `RoleCleared`, `ReachabilityChanged` | `SetLight` |
 | **StatusModel** | `status.cpp` | `ConfigChanged`, `ModeChanged`, `DevicesUpdated`, `Tick` | `StatusChanged` |
 | **Clock** | heartbeat timer and counters, `FastDayClock`, `WifiTimeSync` | `Heartbeat`, `ConfigChanged` | `Heartbeat` (from its timer), `Tick`, `ProgramTick` |
 | **SettingsStore** | `schedule_settings`, `RoleStore` persistence | `SetConfig`, `SetIntensity`, `PersistRoles`, `FactoryReset` | `RolesLoaded`, `ConfigChanged` |
 | **Console** | `pairing_console` | — (REPL task; reads `StatusSlot`) | requests above |
 | **StatusDisplay** | `status_display` | — (display task; reads `StatusSlot`) | — |
+
+### Programs
+
+Every mode is a `core::Program` (`programs/program.h`): it decides what each bulb
+should show and posts `LightTarget`s, and nothing else. `ProgramHost` owns
+them and runs the one the `Mode` selects:
+
+| Hook | Called on | Daylight | Off | Red alert |
+|---|---|---|---|---|
+| `start(now)` | `ModeChanged` | refresh all | refresh all | bright, refresh all |
+| `refresh(role, now)` | `RefreshLights`, `NetworkUp`, after `ConfigChanged` | sun curve now, 2 s | off | red at current level |
+| `onTick` | `Tick` | — | — | flip bright/dim, all red |
+| `onProgramTick` | `ProgramTick` | sun curve, ramp over interval | — | — |
+| `onConfig` | `ConfigChanged` (every program, running or not) | schedule, peaks | — | — |
+
+Only the running program gets ticks and refreshes, so a program never
+checks the mode. `LightOutput` doesn't know programs exist: it diffs every
+target against what it last sent to that bulb, so switching programs sends
+just what differs (daylight -> red alert: hue/sat + level; each pulse after
+that: level only).
+
+To add a program: a `Mode` value (and its name), a `Program` subclass, a
+member and `switch` case in `ProgramHost`, and whatever selects it
+(`ModeController`, the console). `LightOutput`, the events and the wiring
+don't change.
 
 `LightOutput` owns the "what's the bulb's address" map, built from
 `RoleAssigned`, so `SetLight` carries a network address and
@@ -185,10 +208,9 @@ address for the synchronous APS decision).
 | `Discover` / `Bind` / `Ping` | role, short (+ ext, endpoint for bind) | DeviceRegistry |
 | `ReachabilityChanged` | role, reachable | DeviceRegistry (a bulb stopped answering / answers again) |
 | `DevicesUpdated` | per-role `DeviceStatus`, records, armed role | DeviceRegistry (1 Hz) |
-| `ModeChanged` | `Mode` | ModeController |
-| `RedAlertPulse` | bright/dim | ModeController |
-| `RefreshLights` | role (or all) | DeviceRegistry, LightOutput, wiring (`NetworkUp`) |
-| `LightTarget` | role, `LightState`, transition | DaylightProgram |
+| `ModeChanged` | `Mode` (`Daylight` / `Off` / `RedAlert`) | ModeController |
+| `RefreshLights` | role (or all) | DeviceRegistry, wiring (`NetworkUp`) |
+| `LightTarget` | role, `LightState` (on, level, colour as mireds / xy / hue-sat), level and colour transitions | the running program |
 | `SetLight` | short, endpoint, optional power/level/mireds/xy/hue-sat, transitions | LightOutput |
 | `StatusChanged` | `shared_ptr<const StatusSnapshot>` | StatusModel (1 Hz) |
 
@@ -202,6 +224,7 @@ sequenceDiagram
     participant ZA as ZigbeeAdapter
     participant Q as EventQueue
     participant MC as ModeController
+    participant PH as ProgramHost
     participant LO as LightOutput
     participant SM as StatusModel
 
@@ -211,13 +234,16 @@ sequenceDiagram
     ZA-->>B: consume frame (return true)
     Q->>MC: ButtonPressed(Double)
     MC->>Q: post ModeChanged(RedAlert)
-    Q->>LO: ModeChanged(RedAlert): stop forwarding LightTargets
+    Q->>PH: ModeChanged(RedAlert): RedAlertProgram.start()
+    PH->>Q: post LightTarget(red, bright) per bulb
     Q->>SM: ModeChanged(RedAlert)
+    Q->>LO: LightTarget: hue/sat + level changed
+    LO->>Q: post SetLight per bulb
     loop every Tick while RedAlert
-        Q->>MC: Tick
-        MC->>Q: post RedAlertPulse(bright or dim)
-        Q->>LO: RedAlertPulse
-        LO->>Q: post SetLight(red, 0.9 s fade) per bulb
+        Q->>PH: Tick: RedAlertProgram flips bright/dim
+        PH->>Q: post LightTarget(red, 0.9 s fade) per bulb
+        Q->>LO: LightTarget: only the level changed
+        LO->>Q: post SetLight(level) per bulb
         Q->>ZA: SetLight, sends ZCL commands
     end
 ```
@@ -250,10 +276,10 @@ sequenceDiagram
 
 ### Daylight update
 
-`Clock` → `ProgramTick` → `DaylightProgram` computes a `LightTarget` per
-light (sun curve, active window, sun shift, amber, peak %) →
-`LightOutput` (if mode is `Auto` and the address is known, diffed against
-its applied-state cache) → `SetLight` → `ZigbeeAdapter`.
+`Clock` → `ProgramTick` → `ProgramHost` (if `DaylightProgram` is running)
+→ a `LightTarget` per light (sun curve, active window, sun shift, amber,
+peak %) → `LightOutput` (if the address is known and the bulb reachable,
+diffed against what it last sent) → `SetLight` → `ZigbeeAdapter`.
 
 ## 7. Wiring
 
@@ -280,7 +306,7 @@ public:
 // sunsim_core (core.cpp): every core-to-core edge, shared by firmware and tests.
 void wireCore(ev::EventBus &bus, CoreModules &m)
 {
-    bus.on<Tick>([&](const Tick &e) { m.mode.onTick(e); m.registry.onTick(e); m.program.onTick(e); m.status.onTick(e); });
+    bus.on<Tick>([&](const Tick &e) { m.mode.onTick(e); m.registry.onTick(e); m.programs.onTick(e); m.status.onTick(e); });
     bus.on<ButtonPressed>([&](const ButtonPressed &e) { m.registry.onButtonPressed(e); m.mode.onPress(e); });
     bus.on<LightTarget>([&](const LightTarget &e) { m.output.onTarget(e); });
     // ...
@@ -356,10 +382,17 @@ real button presses, console commands, status).
 - **`LinkChanged` -> `DevicesUpdated`:** one 1 Hz summary from the
   registry; `StatusModel` publishes right after it, so links are current.
 - **`RefreshLights`** added: "re-apply now with a 2 s transition", posted
-  on resume, rejoin, endpoint found; `ConfigChanged` re-applies too (so
+  on rejoin, endpoint found, a bulb answering again; `ConfigChanged` re-applies too (so
   `config`/`intensity` changes now show within 2 s, not at the next update).
 - **Wi-Fi credentials** stay direct NVS calls from the console (no
   `SetWifi`): they're only read by the time-sync task at connect time.
+- **Every mode is a `Program`** (added after the first build): red alert
+  used to be split between `ModeController` (pulse timing, a
+  `RedAlertPulse` event) and `LightOutput` (the red, the fades), and "off"
+  was a branch in `LightOutput`. Now each is a program behind
+  `ProgramHost` posting `LightTarget`s like daylight does (see §4,
+  Programs), `LightTarget` carries separate level/colour transitions and
+  hue-sat colour, and `LightOutput` has no notion of modes.
 - **`wireCore()` lives in `sunsim_core`** so tests and firmware share it;
   only platform edges are in `main/app.cpp`.
 

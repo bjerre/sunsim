@@ -1,0 +1,39 @@
+#include "sunsim/core/programs/red_alert_program.h"
+
+namespace sunsim::core {
+
+namespace {
+constexpr uint16_t kFadeDs      = 9; // 0.9 s
+constexpr uint16_t kColorDs     = 2;
+constexpr uint8_t  kBrightLevel = 254;
+constexpr uint8_t  kDimLevel    = 30;
+} // namespace
+
+void RedAlertProgram::start(const std::optional<ev::TimeReading> &)
+{
+    bright_ = true;
+    emit(std::nullopt);
+}
+
+void RedAlertProgram::refresh(std::optional<ev::Role> role, const std::optional<ev::TimeReading> &)
+{
+    emit(role);
+}
+
+void RedAlertProgram::onTick(const ev::Tick &)
+{
+    bright_ = !bright_;
+    emit(std::nullopt);
+}
+
+void RedAlertProgram::emit(std::optional<ev::Role> role)
+{
+    const ev::LightState red{.on         = true,
+                             .level      = bright_ ? kBrightLevel : kDimLevel,
+                             .color      = ev::ColorMode::HueSat,
+                             .hue        = 0,
+                             .saturation = 254};
+    forEachBulb(role, [&](ev::Role r) { target(r, red, kFadeDs, kColorDs); });
+}
+
+} // namespace sunsim::core

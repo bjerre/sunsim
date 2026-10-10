@@ -61,28 +61,35 @@ using DeviceRecords = std::array<DeviceRecord, kRoleCount>;
 
 // ---- Light state ----------------------------------------------------------
 
-struct LightState {
-    bool     on     = false;
-    uint8_t  level  = 0; // 0-254, meaningful only if `on`
-    uint16_t mireds = 0; // colour temperature, meaningful only if `on`
+// How a LightState's colour is given.
+enum class ColorMode : uint8_t {
+    Temperature, // `mireds`
+    Xy,          // CIE `color_x`/`color_y`: golden hour, warmer than colour-temperature mode can show
+    HueSat,      // `hue`/`saturation`: saturated colours (red alert)
+};
 
-    // Golden hour: the colour is warmer than colour-temperature mode can
-    // show, so it's sent as CIE xy (on the blackbody line at `mireds`).
-    bool  use_xy  = false;
-    float color_x = 0.0f;
-    float color_y = 0.0f;
+struct LightState {
+    bool      on     = false;
+    uint8_t   level  = 0; // 0-254; this and the colour are meaningful only if `on`
+    ColorMode color  = ColorMode::Temperature;
+    uint16_t  mireds = 0; // Temperature; for Xy, the blackbody temperature it sits at
+    float     color_x    = 0.0f;
+    float     color_y    = 0.0f;
+    uint8_t   hue        = 0;
+    uint8_t   saturation = 0;
 };
 
 // ---- Modes and links ------------------------------------------------------
 
-enum class Mode : uint8_t { Auto, ManualOff, RedAlert };
+// Which lighting program is running (core::ProgramHost runs it).
+enum class Mode : uint8_t { Daylight, Off, RedAlert };
 
 [[nodiscard]] constexpr const char *modeName(Mode mode) noexcept
 {
     switch (mode) {
-    case Mode::Auto:
+    case Mode::Daylight:
         return "daylight";
-    case Mode::ManualOff:
+    case Mode::Off:
         return "off";
     case Mode::RedAlert:
         return "RED ALERT";
@@ -177,7 +184,7 @@ struct StatusSnapshot {
     int64_t                               uptime_us = 0;
     TimeReading                           time{};
     DayInfo                               day{};
-    Mode                                  mode             = Mode::Auto;
+    Mode                                  mode             = Mode::Daylight;
     bool                                  in_active_window = false;
     std::array<DeviceLink, kRoleCount>    links{};
     std::array<DeviceStatus, kRoleCount>  devices{};

@@ -6,10 +6,10 @@
 
 namespace sunsim::core {
 
-// What the button's presses mean (replaces ButtonController):
-//   single -> resume the daylight program     (ModeChanged{Auto})
-//   double -> red alert                       (ModeChanged{RedAlert}, then a RedAlertPulse every Tick)
-//   hold   -> all lights off                  (ModeChanged{ManualOff})
+// Which program the button's presses choose (ProgramHost runs it):
+//   single -> daylight                        (ModeChanged{Daylight})
+//   double -> red alert                       (ModeChanged{RedAlert})
+//   hold   -> all lights off                  (ModeChanged{Off})
 // Press::Ambiguous (an On/Toggle only seen as an attribute change, from
 // buttons that use the bound receiver endpoint) is resolved by timing: a
 // second one within the double-click window is a double press, otherwise
@@ -25,14 +25,12 @@ public:
 
 private:
     void enter(ev::Mode mode);
-    void pulse();
 
     ev::Post post_;
     int64_t  window_us_;
-    ev::Mode mode_          = ev::Mode::Auto;
+    ev::Mode mode_          = ev::Mode::Daylight;
     bool     click_pending_ = false;
     int64_t  last_click_us_ = 0;
-    bool     bright_        = false;
 };
 
 } // namespace sunsim::core

@@ -18,7 +18,7 @@ void ModeController::onPress(const ev::ButtonPressed &press)
     switch (press.press) {
     case ev::Press::Single:
         click_pending_ = false;
-        enter(ev::Mode::Auto);
+        enter(ev::Mode::Daylight);
         break;
     case ev::Press::Double:
         click_pending_ = false;
@@ -26,7 +26,7 @@ void ModeController::onPress(const ev::ButtonPressed &press)
         break;
     case ev::Press::Hold:
         click_pending_ = false;
-        enter(ev::Mode::ManualOff);
+        enter(ev::Mode::Off);
         break;
     case ev::Press::Ambiguous:
         if (click_pending_ && press.at_us - last_click_us_ <= window_us_) {
@@ -44,10 +44,7 @@ void ModeController::onTick(const ev::Tick &tick)
 {
     if (click_pending_ && tick.uptime_us - last_click_us_ > window_us_) {
         click_pending_ = false;
-        enter(ev::Mode::Auto);
-    }
-    if (mode_ == ev::Mode::RedAlert) {
-        pulse();
+        enter(ev::Mode::Daylight);
     }
 }
 
@@ -55,10 +52,10 @@ void ModeController::enter(ev::Mode mode)
 {
     mode_ = mode;
     switch (mode) {
-    case ev::Mode::Auto:
+    case ev::Mode::Daylight:
         SUNSIM_LOGI(kTag, "Resuming daylight program");
         break;
-    case ev::Mode::ManualOff:
+    case ev::Mode::Off:
         SUNSIM_LOGI(kTag, "Manual off (press again to resume)");
         break;
     case ev::Mode::RedAlert:
@@ -66,15 +63,6 @@ void ModeController::enter(ev::Mode mode)
         break;
     }
     post_(ev::ModeChanged{mode});
-    if (mode == ev::Mode::RedAlert) {
-        pulse(); // start immediately rather than on the next tick
-    }
-}
-
-void ModeController::pulse()
-{
-    bright_ = !bright_;
-    post_(ev::RedAlertPulse{bright_});
 }
 
 } // namespace sunsim::core

@@ -1,4 +1,4 @@
-#include "sunsim/core/daylight_program.h"
+#include "sunsim/core/programs/daylight_program.h"
 
 #include <cmath>
 
@@ -28,52 +28,27 @@ double wallPosition(ev::Role role) noexcept
 }
 } // namespace
 
-DaylightProgram::DaylightProgram(ev::Post post) : post_(std::move(post)) {}
+void DaylightProgram::refresh(std::optional<ev::Role> role, const std::optional<ev::TimeReading> &now)
+{
+    if (!now) {
+        return; // no time yet: the first ProgramTick will apply it
+    }
+    forEachBulb(role, [&](ev::Role r) { emit(r, *now, kSnapTransitionDs); });
+}
+
+void DaylightProgram::onProgramTick(const ev::ProgramTick &e)
+{
+    forEachBulb(std::nullopt, [&](ev::Role r) { emit(r, e.time, e.transition_ds); });
+}
 
 void DaylightProgram::onConfig(const ev::ConfigChanged &e)
 {
     schedule_.setConfig(e.config);
     peaks_ = e.peaks;
-    if (time_) {
-        emitAll(*time_, kSnapTransitionDs); // show a change now, not at the next update
-    }
-}
-
-void DaylightProgram::onTick(const ev::Tick &e)
-{
-    time_ = e.time;
-}
-
-void DaylightProgram::onProgramTick(const ev::ProgramTick &e)
-{
-    time_ = e.time;
-    emitAll(e.time, e.transition_ds);
-}
-
-void DaylightProgram::onRefresh(const ev::RefreshLights &e)
-{
-    if (!time_) {
-        return; // the first ProgramTick will apply it
-    }
-    if (e.role) {
-        emit(*e.role, *time_, kSnapTransitionDs);
-    } else {
-        emitAll(*time_, kSnapTransitionDs);
-    }
-}
-
-void DaylightProgram::emitAll(const ev::TimeReading &time, uint16_t transition_ds)
-{
-    for (std::size_t i = 0; i < ev::kBulbCount; ++i) {
-        emit(static_cast<ev::Role>(i), time, transition_ds);
-    }
 }
 
 void DaylightProgram::emit(ev::Role role, const ev::TimeReading &time, uint16_t transition_ds)
 {
-    if (!ev::isBulb(role)) {
-        return;
-    }
     ev::LightState state{};
     if (time.valid) {
         clock_warned_ = false;
@@ -88,7 +63,7 @@ void DaylightProgram::emit(ev::Role role, const ev::TimeReading &time, uint16_t 
         const long scaled = std::lround(state.level * peaks_[ev::indexOf(role)] / 100.0);
         state.level       = static_cast<uint8_t>(scaled < 1 ? 1 : scaled);
     }
-    post_(ev::LightTarget{role, state, transition_ds});
+    target(role, state, transition_ds);
 }
 
 } // namespace sunsim::core
