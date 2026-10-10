@@ -216,6 +216,29 @@ int main()
         CHECK(modes.size() == 1 && modes[0].mode == Mode::Daylight);
     });
 
+    test("ambiguous then a definite press within the window: the definite press wins", [] {
+        Harness h;
+        h.tick();
+        h.post(ButtonPressed{.press = Press::Ambiguous, .at_us = h.now_us});
+        h.post(ButtonPressed{.press = Press::Hold, .at_us = h.now_us + 100'000});
+        auto modes = h.all<ModeChanged>();
+        CHECK(modes.size() == 1 && modes[0].mode == Mode::Off);
+        h.tick(); // nothing left pending
+        CHECK(h.all<ModeChanged>().size() == 1);
+    });
+
+    test("ambiguous: a second click after the window is a new first click", [] {
+        Harness h;
+        h.tick();
+        h.post(ButtonPressed{.press = Press::Ambiguous, .at_us = h.now_us});
+        h.post(ButtonPressed{.press = Press::Ambiguous, .at_us = h.now_us + 600'000}); // too late for a double
+        auto modes = h.all<ModeChanged>();
+        CHECK(modes.size() == 1 && modes[0].mode == Mode::Daylight); // the first was a single
+        h.post(ButtonPressed{.press = Press::Ambiguous, .at_us = h.now_us + 800'000}); // pairs with the second
+        modes = h.all<ModeChanged>();
+        CHECK(modes.size() == 2 && modes[1].mode == Mode::RedAlert);
+    });
+
     test("clock not set -> lights held off", [] {
         Harness h;
         TimeReading unset = noon();

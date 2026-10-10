@@ -6,45 +6,44 @@ namespace sunsim::core {
 
 namespace {
 constexpr const char *kTag = "MODE";
+
+// The mode a definite (non-Ambiguous) press selects.
+ev::Mode modeFor(ev::Press press) noexcept
+{
+    switch (press) {
+    case ev::Press::Double:
+        return ev::Mode::RedAlert;
+    case ev::Press::Hold:
+        return ev::Mode::Off;
+    case ev::Press::Single:
+    case ev::Press::Ambiguous:
+        break;
+    }
+    return ev::Mode::Daylight;
+}
 } // namespace
 
 ModeController::ModeController(ev::Post post, int64_t double_click_window_us)
-    : post_(std::move(post)), window_us_(double_click_window_us)
+    : post_(std::move(post)), window_us_(double_click_window_us), flow_(run())
 {
 }
 
-void ModeController::onPress(const ev::ButtonPressed &press)
+ev::Flow ModeController::run()
 {
-    switch (press.press) {
-    case ev::Press::Single:
-        click_pending_ = false;
-        enter(ev::Mode::Daylight);
-        break;
-    case ev::Press::Double:
-        click_pending_ = false;
-        enter(ev::Mode::RedAlert);
-        break;
-    case ev::Press::Hold:
-        click_pending_ = false;
-        enter(ev::Mode::Off);
-        break;
-    case ev::Press::Ambiguous:
-        if (click_pending_ && press.at_us - last_click_us_ <= window_us_) {
-            click_pending_ = false;
-            enter(ev::Mode::RedAlert);
-        } else {
-            click_pending_ = true;
-            last_click_us_ = press.at_us;
+    for (;;) {
+        const ev::ButtonPressed press = co_await presses_.next();
+        if (press.press != ev::Press::Ambiguous) {
+            enter(modeFor(press.press));
+            continue;
         }
-        break;
-    }
-}
-
-void ModeController::onTick(const ev::Tick &tick)
-{
-    if (click_pending_ && tick.uptime_us - last_click_us_ > window_us_) {
-        click_pending_ = false;
-        enter(ev::Mode::Daylight);
+        const auto second = co_await presses_.next(press.at_us + window_us_);
+        if (!second) {
+            enter(ev::Mode::Daylight); // the window passed: it was a single press
+        } else if (second->press == ev::Press::Ambiguous) {
+            enter(ev::Mode::RedAlert); // two within the window: a double press
+        } else {
+            enter(modeFor(second->press)); // a definite press wins
+        }
     }
 }
 

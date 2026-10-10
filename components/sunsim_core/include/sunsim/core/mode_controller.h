@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "sunsim/ev/events.h"
+#include "sunsim/ev/flow.h"
 
 namespace sunsim::core {
 
@@ -18,16 +19,17 @@ class ModeController {
 public:
     explicit ModeController(ev::Post post, int64_t double_click_window_us = 450'000);
 
-    void onPress(const ev::ButtonPressed &press);
-    void onTick(const ev::Tick &tick);
+    void onPress(const ev::ButtonPressed &press) { presses_.deliver(press, press.at_us); }
+    void onTick(const ev::Tick &tick) { presses_.tick(tick.uptime_us); }
 
 private:
-    void enter(ev::Mode mode);
+    ev::Flow run();
+    void     enter(ev::Mode mode);
 
-    ev::Post post_;
-    int64_t  window_us_;
-    bool     click_pending_ = false;
-    int64_t  last_click_us_ = 0;
+    ev::Post                       post_;
+    int64_t                        window_us_;
+    ev::Mailbox<ev::ButtonPressed> presses_;
+    ev::Flow                       flow_; // last: run() starts once the rest exist
 };
 
 } // namespace sunsim::core
