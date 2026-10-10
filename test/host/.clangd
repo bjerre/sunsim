@@ -2,3 +2,7 @@
 # from the command in CMakeLists.txt).
 CompileFlags:
   CompilationDatabase: ../../build-host
+  Remove:
+    - -fmodules-ts # GCC's module flags; clangd builds its own (--experimental-modules-support)
+    - -fmodule-mapper=*
+    - -fdeps-format=*

@@ -1,10 +1,12 @@
-#pragma once
-
-#include <ctime>
+module;
 
 #include "sunsim/ev/types.h"
 
-namespace sunsim::core {
+export module sunsim.core:day_info;
+
+import std;
+
+export namespace sunsim::core {
 
 // Day length and the next sunrise/sunset, for the status display/console.
 // Pure, like daylight.h and solar.h.

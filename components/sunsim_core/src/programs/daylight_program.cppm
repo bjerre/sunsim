@@ -1,9 +1,14 @@
-#pragma once
+module;
 
-#include "sunsim/core/math/daylight.h"
-#include "sunsim/core/programs/program.h"
+#include "sunsim/ev/events.h"
 
-namespace sunsim::core {
+export module sunsim.core:daylight_program;
+
+import std;
+import :daylight;
+import :program;
+
+export namespace sunsim::core {
 
 // The normal program: the wall bulbs' sun curve (with sun direction along
 // the wall and the amber glow), the work light's cool -> warm day, the

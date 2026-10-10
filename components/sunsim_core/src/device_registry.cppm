@@ -1,13 +1,15 @@
-#pragma once
+module;
 
-#include <array>
 #include <cstdint>
-#include <optional>
 
 #include "sunsim/ev/events.h"
 #include "sunsim/ev/flow.h"
 
-namespace sunsim::core {
+export module sunsim.core:device_registry;
+
+import std;
+
+export namespace sunsim::core {
 
 // Which device holds which role, and whether it's alive.
 //  - Pairing: a device announcing itself while a role is armed (console

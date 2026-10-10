@@ -1,13 +1,13 @@
-#include "sunsim/core/math/solar.h"
+module sunsim.core;
 
-#include <cmath>
+import std;
 
 namespace sunsim::core {
 
 namespace {
 
-constexpr double kDeg2Rad = M_PI / 180.0;
-constexpr double kRad2Deg = 180.0 / M_PI;
+constexpr double kDeg2Rad = std::numbers::pi / 180.0;
+constexpr double kRad2Deg = 180.0 / std::numbers::pi;
 
 // Horizon (90 deg) plus ~50' of atmospheric refraction plus the sun's
 // apparent radius: the standard zenith angle used to define sunrise/sunset.
@@ -78,7 +78,7 @@ SunPosition computeSunPosition(double latitude_deg, double longitude_deg, int da
     const double utc_hour = local_hour - utc_offset_hours;
 
     // Fractional year (radians).
-    const double g = 2.0 * M_PI / 365.0 * (day_of_year - 1 + (utc_hour - 12.0) / 24.0);
+    const double g = 2.0 * std::numbers::pi / 365.0 * (day_of_year - 1 + (utc_hour - 12.0) / 24.0);
 
     const double eq_time_min = 229.18 * (0.000075 + 0.001868 * std::cos(g) - 0.032077 * std::sin(g) -
                                          0.014615 * std::cos(2 * g) - 0.040849 * std::sin(2 * g));

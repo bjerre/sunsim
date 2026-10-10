@@ -1,4 +1,10 @@
-#include "sunsim/core/core.h"
+module;
+
+#include "sunsim/ev/bus.h"
+
+module sunsim.core;
+
+import std;
 
 namespace sunsim::core {
 

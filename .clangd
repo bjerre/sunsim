@@ -5,8 +5,13 @@ CompileFlags:
   CompilationDatabase: build
   Add:
     - -resource-dir=/home/bjerre/.espressif/tools/esp-clang/esp-21.1.3_20260408/esp-clang/lib/clang/21
+    - -Wno-reserved-module-identifier   # building libstdc++'s `export module std;` (and -Werror is on)
   Remove:
     - -fno-shrink-wrap
     - -fstrict-volatile-bitfields
     - -fno-tree-switch-conversion
     - -fzero-init-padding-bits=*
+    - -fno-malloc-dce
+    - -fmodules-ts          # GCC's module flags; clangd builds its own (--experimental-modules-support)
+    - -fmodule-mapper=*
+    - -fdeps-format=*

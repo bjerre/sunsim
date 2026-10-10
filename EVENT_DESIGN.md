@@ -345,7 +345,7 @@ void wireCore(ev::EventBus &bus, CoreModules &m)
     // ...
 }
 
-// main (app.cpp): the platform edges.
+// main (main.cpp): the platform edges.
 void App::wirePlatform()
 {
     bus_.on<SetLight>([this](const SetLight &e) { zigbee_.onSetLight(e); });
@@ -366,7 +366,7 @@ with the same `wireCore()`. Each test posts events and asserts on
 everything posted in response:
 
 ```
-cmake -S test/host -B build-host && cmake --build build-host && ./build-host/sunsim_tests
+cmake -S test/host -B build-host -G Ninja && cmake --build build-host && ./build-host/sunsim_tests
 ```
 
 Covered: console pairing end to end; a paired device is never re-claimed by
@@ -428,7 +428,7 @@ real button presses, console commands, status).
   Programs), `LightTarget` carries separate level/colour transitions and
   hue-sat colour, and `LightOutput` has no notion of modes.
 - **`wireCore()` lives in `sunsim_core`** so tests and firmware share it;
-  only platform edges are in `main/app.cpp`.
+  only platform edges are in `main/main.cpp`.
 
 - **Missing devices are tolerated** (added after the first build): sending
   to an unreachable bulb ties up the stack's buffers with retries; in

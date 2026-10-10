@@ -1,8 +1,13 @@
-#pragma once
+module;
 
-#include "sunsim/core/programs/program.h"
+#include "sunsim/ev/events.h"
 
-namespace sunsim::core {
+export module sunsim.core:red_alert_program;
+
+import std;
+import :program;
+
+export namespace sunsim::core {
 
 // Every bulb red, pulsing like TNG's red-alert lighting: a slow, continuous
 // glow rather than a strobe. It flips between bright and dim every Tick (a

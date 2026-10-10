@@ -1,4 +1,10 @@
-#include "sunsim/core/programs/off_program.h"
+module;
+
+#include "sunsim/ev/events.h"
+
+module sunsim.core;
+
+import std;
 
 namespace sunsim::core {
 

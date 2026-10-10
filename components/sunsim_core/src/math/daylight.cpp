@@ -1,8 +1,10 @@
-#include "sunsim/core/math/daylight.h"
+module;
 
-#include <cmath>
+#include "sunsim/ev/types.h"
 
-#include "sunsim/core/math/solar.h"
+module sunsim.core;
+
+import std;
 
 namespace sunsim::core {
 
@@ -89,14 +91,14 @@ LightState DaylightSchedule::wallState(const std::tm &local_time, double utc_off
     }
 
     const double day_progress = (hour_adj - sunrise) / (sunset - sunrise);
-    const double brightness   = std::sin(M_PI * day_progress); // 0 at edges, 1 at solar noon
+    const double brightness   = std::sin(std::numbers::pi * day_progress); // 0 at edges, 1 at solar noon
 
     // Sun direction: sin(azimuth) is the sun's east-west position (+1 due
     // East, 0 due South, -1 due West); bulbs further along the wall from it
     // dim, by up to sun_shift_percent at the opposite end (distance 2).
     const SunPosition pos =
         computeSunPosition(config_.latitude_deg, config_.longitude_deg, day_of_year, hour, utc_offset_hours);
-    const double sun_x     = std::sin(pos.azimuth_deg * M_PI / 180.0);
+    const double sun_x     = std::sin(pos.azimuth_deg * std::numbers::pi / 180.0);
     const double direction = 1.0 - (config_.sun_shift_percent / 100.0) * std::fabs(wall_position - sun_x) / 2.0;
 
     uint8_t level = static_cast<uint8_t>(std::lround(gate * direction * brightness * config_.max_level));

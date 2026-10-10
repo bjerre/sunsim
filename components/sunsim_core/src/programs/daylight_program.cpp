@@ -1,8 +1,11 @@
-#include "sunsim/core/programs/daylight_program.h"
+module;
 
-#include <cmath>
-
+#include "sunsim/ev/events.h"
 #include "sunsim/ev/log.h"
+
+module sunsim.core;
+
+import std;
 
 namespace sunsim::core {
 

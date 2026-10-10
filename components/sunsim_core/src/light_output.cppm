@@ -1,12 +1,14 @@
-#pragma once
+module;
 
-#include <array>
 #include <cstdint>
-#include <optional>
 
 #include "sunsim/ev/events.h"
 
-namespace sunsim::core {
+export module sunsim.core:light_output;
+
+import std;
+
+export namespace sunsim::core {
 
 // Turns what the bulbs *should* show (LightTarget, from whichever program is
 // running) into the ZCL commands that get them there (SetLight). Only what

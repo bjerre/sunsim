@@ -51,7 +51,9 @@ Code navigation and diagnostics come from clangd (VS Code's clangd
 extension, using ESP-IDF's own clangd; see `.clangd` and
 `.vscode/settings.json` - Microsoft's C/C++ IntelliSense is turned off). It
 reads `build/compile_commands.json`, so build once first; the host tests
-use `build-host/` (see `test/host/.clangd`).
+use `build-host/` (see `test/host/.clangd`). clangd builds its own copies of
+the C++ modules (`--experimental-modules-support`), so the first file opened
+takes a minute or two.
 
 ## Missing devices
 
@@ -233,11 +235,12 @@ by a single app task. See [EVENT_DESIGN.md](EVENT_DESIGN.md).
   types (`types.h`), every event (`events.h`), the `EventBus` (`bus.h`),
   and coroutine flows (`flow.h`: `Flow`, `Timer`, `Inbox`).
 - `components/sunsim_core/` (`sunsim::core`) - all application logic, pure
-  C++ (builds on the host):
+  C++ (builds on the host), as the C++ module `sunsim.core`: each `.cppm` is
+  a partition's interface, each `.cpp` its implementation:
   - `device_registry.*` - pairing, endpoint discovery/binding, liveness pings.
   - `mode_controller.*` - single/double/hold -> daylight / red alert / off.
   - `programs/` - the lighting programs, one per mode:
-    - `program.h` - the interface every program implements (what each bulb
+    - `program.cppm` - the interface every program implements (what each bulb
       should show); `program_host.*` runs the selected one.
     - `daylight_program.*` - sun curve, work light, active window, sun
       shift, amber, per-light intensity, clock guard.
@@ -256,8 +259,8 @@ by a single app task. See [EVENT_DESIGN.md](EVENT_DESIGN.md).
   - `console.*` - the serial REPL; `status_display.*` - the LCD.
 - `components/eventpp/` - vendored [eventpp](https://github.com/wqking/eventpp)
   (header-only, Apache-2.0).
-- `main/` - `app.*` (creates the bus and modules, platform wiring, app task),
-  `main.cpp`, menuconfig (`Kconfig.projbuild`), and the role manifest
+- `main/` - `main.cpp` (`App`: creates the bus and modules, platform wiring,
+  app task; and `app_main`), menuconfig (`Kconfig.projbuild`), and the role manifest
   (`role_manifest.json` -> `role_manifest.h` via `gen_role_manifest.py`).
 - `test/host/` - host tests for the core (see below).
 
@@ -267,5 +270,8 @@ The core logic is tested on your PC (no board, no ESP-IDF), wired exactly
 as in the firmware and driven by events:
 
 ```
-cmake -S test/host -B build-host && cmake --build build-host && ./build-host/sunsim_tests
+cmake -S test/host -B build-host -G Ninja && cmake --build build-host && ./build-host/sunsim_tests
 ```
+
+C++ modules need Ninja and GCC 15 (ESP-IDF's `export.sh` puts its Ninja on
+`PATH`).

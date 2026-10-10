@@ -1,11 +1,14 @@
-#pragma once
+module;
 
 #include <cstdint>
-#include <optional>
 
 #include "sunsim/ev/events.h"
 
-namespace sunsim::core {
+export module sunsim.core:program;
+
+import std;
+
+export namespace sunsim::core {
 
 // A lighting program: decides what every bulb should show and posts it as
 // LightTargets. It never deals with addresses, reachability or what was

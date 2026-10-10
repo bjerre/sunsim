@@ -1,8 +1,12 @@
-#pragma once
+module;
 
 #include "sunsim/ev/events.h"
 
-namespace sunsim::core {
+export module sunsim.core:status_model;
+
+import std;
+
+export namespace sunsim::core {
 
 // Gathers what the status display and console show into one snapshot,
 // published as StatusChanged once a second (after each Tick's DevicesUpdated).

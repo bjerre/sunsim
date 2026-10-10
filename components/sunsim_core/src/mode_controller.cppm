@@ -1,11 +1,13 @@
-#pragma once
-
-#include <chrono>
+module;
 
 #include "sunsim/ev/events.h"
 #include "sunsim/ev/flow.h"
 
-namespace sunsim::core {
+export module sunsim.core:mode_controller;
+
+import std;
+
+export namespace sunsim::core {
 
 // Which program the button's presses choose (ProgramHost runs it):
 //   single -> daylight                        (ModeChanged{Daylight})

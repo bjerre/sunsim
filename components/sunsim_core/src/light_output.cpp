@@ -1,4 +1,10 @@
-#include "sunsim/core/light_output.h"
+module;
+
+#include "sunsim/ev/events.h"
+
+module sunsim.core;
+
+import std;
 
 namespace sunsim::core {
 

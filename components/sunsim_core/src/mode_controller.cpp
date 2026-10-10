@@ -1,6 +1,12 @@
-#include "sunsim/core/mode_controller.h"
+module;
 
+#include "sunsim/ev/events.h"
+#include "sunsim/ev/flow.h"
 #include "sunsim/ev/log.h"
+
+module sunsim.core;
+
+import std;
 
 namespace sunsim::core {
 

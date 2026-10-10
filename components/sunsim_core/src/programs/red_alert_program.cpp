@@ -1,4 +1,10 @@
-#include "sunsim/core/programs/red_alert_program.h"
+module;
+
+#include "sunsim/ev/events.h"
+
+module sunsim.core;
+
+import std;
 
 namespace sunsim::core {
 

@@ -1,9 +1,10 @@
-#include "sunsim/core/status_model.h"
+module;
 
-#include <memory>
+#include "sunsim/ev/events.h"
 
-#include "sunsim/core/math/day_info.h"
-#include "sunsim/core/math/daylight.h"
+module sunsim.core;
+
+import std;
 
 namespace sunsim::core {
 

@@ -1,6 +1,8 @@
-#pragma once
+export module sunsim.core:solar;
 
-namespace sunsim::core {
+import std;
+
+export namespace sunsim::core {
 
 struct SunTimes {
     double sunrise_hour; // local civil time, fractional hours, normalized to [0,24)

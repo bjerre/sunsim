@@ -8,7 +8,8 @@
     "clangd.arguments": [
         "--query-driver=**/riscv32-esp-elf-*,/usr/bin/c++,/usr/bin/g++",
         "--background-index",
-        "--header-insertion=never"
+        "--header-insertion=never",
+        "--experimental-modules-support"
     ],
     "C_Cpp.intelliSenseEngine": "disabled"
 }

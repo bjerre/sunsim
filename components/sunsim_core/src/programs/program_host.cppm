@@ -1,13 +1,16 @@
-#pragma once
+module;
 
-#include <optional>
+#include "sunsim/ev/events.h"
 
-#include "sunsim/core/programs/daylight_program.h"
-#include "sunsim/core/programs/off_program.h"
-#include "sunsim/core/programs/program.h"
-#include "sunsim/core/programs/red_alert_program.h"
+export module sunsim.core:program_host;
 
-namespace sunsim::core {
+import std;
+import :daylight_program;
+import :off_program;
+import :program;
+import :red_alert_program;
+
+export namespace sunsim::core {
 
 // Owns the lighting programs and runs the one the Mode selects: it starts
 // it on ModeChanged and forwards ticks and refreshes to it alone. Settings

@@ -277,7 +277,7 @@ calculation — no GPS, just two numbers you configure once:
 
 1. **Latitude/longitude** (`CONFIG_SUNSIM_LATITUDE_DEG`/
    `CONFIG_SUNSIM_LONGITUDE_DEG`, decimal degrees, North/East positive) —
-   set via `menuconfig`, parsed with `strtod()` in `App`'s (`main/app.cpp`)
+   set via `menuconfig`, parsed with `strtod()` in `App`'s (`main/main.cpp`)
    constructor, and stored in `ev::ProgramConfig`.
 2. **Local civil UTC offset** — needed alongside longitude because the
    calculation has to know which UTC instant "today, local time" actually

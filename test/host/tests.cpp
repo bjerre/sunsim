@@ -6,7 +6,9 @@
 #include <string>
 #include <vector>
 
-#include "sunsim/core/core.h"
+#include "sunsim/ev/bus.h"
+
+import sunsim.core;
 
 using namespace sunsim;
 using namespace sunsim::ev;

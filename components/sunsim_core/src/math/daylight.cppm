@@ -1,11 +1,14 @@
-#pragma once
+module;
 
 #include <cstdint>
-#include <ctime>
 
 #include "sunsim/ev/types.h"
 
-namespace sunsim::core {
+export module sunsim.core:daylight;
+
+import std;
+
+export namespace sunsim::core {
 
 using ev::LightState;
 
