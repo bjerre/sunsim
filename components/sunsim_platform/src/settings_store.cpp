@@ -43,30 +43,73 @@ struct Key {
 
 class Nvs {
 public:
-    explicit Nvs(nvs_open_mode_t mode) : ok_(nvs_open(kNamespace, mode, &handle_) == ESP_OK) {}
+    explicit Nvs(nvs_open_mode_t mode) : err_(nvs_open(kNamespace, mode, &handle_)) {}
     ~Nvs()
     {
-        if (ok_) {
+        if (ok()) {
             nvs_close(handle_);
         }
     }
     Nvs(const Nvs &)            = delete;
     Nvs &operator=(const Nvs &) = delete;
 
-    [[nodiscard]] bool         ok() const noexcept { return ok_; }
+    [[nodiscard]] bool         ok() const noexcept { return err_ == ESP_OK; }
+    [[nodiscard]] esp_err_t    error() const noexcept { return err_; }
     [[nodiscard]] nvs_handle_t get() const noexcept { return handle_; }
 
 private:
     nvs_handle_t handle_{};
-    bool         ok_;
+    esp_err_t    err_;
 };
 
-void logError(const char *what, esp_err_t err)
-{
-    if (err != ESP_OK) {
-        ESP_LOGE(kTag, "Failed to save %s: %s", what, esp_err_to_name(err));
+// Writes key after key, skipping the rest once one fails (or NVS didn't
+// open); commit() commits if all went well and logs the first error if not.
+class NvsWriter {
+public:
+    NvsWriter(const Nvs &nvs, const char *what) : h_(nvs.get()), what_(what), err_(nvs.error()) {}
+
+    void u8(const char *key, uint8_t value)
+    {
+        if (ok()) {
+            err_ = nvs_set_u8(h_, key, value);
+        }
     }
-}
+    void u16(const char *key, uint16_t value)
+    {
+        if (ok()) {
+            err_ = nvs_set_u16(h_, key, value);
+        }
+    }
+    void u64(const char *key, uint64_t value)
+    {
+        if (ok()) {
+            err_ = nvs_set_u64(h_, key, value);
+        }
+    }
+    void erase(const char *key)
+    {
+        if (ok()) {
+            nvs_erase_key(h_, key); // ESP_ERR_NVS_NOT_FOUND if it's already gone: fine
+        }
+    }
+
+    void commit()
+    {
+        if (ok()) {
+            err_ = nvs_commit(h_);
+        }
+        if (!ok()) {
+            ESP_LOGE(kTag, "Failed to save %s: %s", what_, esp_err_to_name(err_));
+        }
+    }
+
+private:
+    [[nodiscard]] bool ok() const noexcept { return err_ == ESP_OK; }
+
+    nvs_handle_t h_;
+    const char  *what_;
+    esp_err_t    err_;
+};
 } // namespace
 
 SettingsStore::SettingsStore(ev::Post post, ev::ProgramConfig defaults) : post_(std::move(post)), config_(defaults) {}
@@ -139,38 +182,17 @@ void SettingsStore::onSetConfig(const ev::SetConfig &e)
 {
     config_ = e.config;
 
-    Nvs nvs{NVS_READWRITE};
-    if (!nvs.ok()) {
-        ESP_LOGE(kTag, "Failed to open NVS for writing settings");
-    } else {
-        const nvs_handle_t h   = nvs.get();
-        esp_err_t          err = nvs_set_u16(h, kStartKey, toMinutes(config_.active_start_hour));
-        if (err == ESP_OK) {
-            err = nvs_set_u16(h, kEndKey, toMinutes(config_.active_end_hour));
-        }
-        if (err == ESP_OK) {
-            err = nvs_set_u16(h, kFadeKey, static_cast<uint16_t>(std::lround(config_.fade_minutes)));
-        }
-        if (err == ESP_OK) {
-            err = nvs_set_u8(h, kDaysKey, config_.active_days);
-        }
-        if (err == ESP_OK) {
-            err = nvs_set_u16(h, kWorkStartKey, toMinutes(config_.work_start_hour));
-        }
-        if (err == ESP_OK) {
-            err = nvs_set_u16(h, kWorkEndKey, toMinutes(config_.work_end_hour));
-        }
-        if (err == ESP_OK) {
-            err = nvs_set_u8(h, kSunShiftKey, config_.sun_shift_percent);
-        }
-        if (err == ESP_OK) {
-            err = nvs_set_u8(h, kAmberKey, config_.amber_enabled ? 1 : 0);
-        }
-        if (err == ESP_OK) {
-            err = nvs_commit(h);
-        }
-        logError("settings", err);
-    }
+    Nvs       nvs{NVS_READWRITE};
+    NvsWriter w{nvs, "settings"};
+    w.u16(kStartKey, toMinutes(config_.active_start_hour));
+    w.u16(kEndKey, toMinutes(config_.active_end_hour));
+    w.u16(kFadeKey, static_cast<uint16_t>(std::lround(config_.fade_minutes)));
+    w.u8(kDaysKey, config_.active_days);
+    w.u16(kWorkStartKey, toMinutes(config_.work_start_hour));
+    w.u16(kWorkEndKey, toMinutes(config_.work_end_hour));
+    w.u8(kSunShiftKey, config_.sun_shift_percent);
+    w.u8(kAmberKey, config_.amber_enabled ? 1 : 0);
+    w.commit();
     publish();
 }
 
@@ -179,54 +201,36 @@ void SettingsStore::onSetIntensity(const ev::SetIntensity &e)
     const uint8_t percent = e.percent < 1 ? 1 : (e.percent > 100 ? 100 : e.percent);
 
     Nvs       nvs{NVS_READWRITE};
-    esp_err_t err = nvs.ok() ? ESP_OK : ESP_FAIL;
+    NvsWriter w{nvs, "intensity"};
     for (std::size_t i = 0; i < ev::kBulbCount; ++i) {
         if (e.role && ev::indexOf(*e.role) != i) {
             continue;
         }
         peaks_[i] = percent;
-        if (err == ESP_OK) {
-            err = nvs_set_u8(nvs.get(), Key(i, "peak").text, percent);
-        }
+        w.u8(Key(i, "peak").text, percent);
     }
-    if (err == ESP_OK) {
-        err = nvs_commit(nvs.get());
-    }
-    logError("intensity", err);
+    w.commit();
     publish();
 }
 
 void SettingsStore::onPersistRoles(const ev::PersistRoles &e)
 {
-    Nvs nvs{NVS_READWRITE};
-    if (!nvs.ok()) {
-        ESP_LOGE(kTag, "Failed to open NVS for writing roles");
-        return;
-    }
-    const nvs_handle_t h = nvs.get();
-    nvs_erase_key(h, kLegacyBlobKey); // ESP_ERR_NVS_NOT_FOUND once gone; harmless
-
-    esp_err_t err = ESP_OK;
-    for (std::size_t i = 0; i < ev::kRoleCount && err == ESP_OK; ++i) {
+    Nvs       nvs{NVS_READWRITE};
+    NvsWriter w{nvs, "roles"};
+    w.erase(kLegacyBlobKey);
+    for (std::size_t i = 0; i < ev::kRoleCount; ++i) {
         const ev::DeviceRecord &d = e.records[i];
         if (d.valid) {
-            err = nvs_set_u64(h, Key(i, "ext").text, d.ext_addr);
-            if (err == ESP_OK) {
-                err = nvs_set_u16(h, Key(i, "short").text, d.short_addr);
-            }
-            if (err == ESP_OK) {
-                err = nvs_set_u8(h, Key(i, "ep").text, d.endpoint);
-            }
+            w.u64(Key(i, "ext").text, d.ext_addr);
+            w.u16(Key(i, "short").text, d.short_addr);
+            w.u8(Key(i, "ep").text, d.endpoint);
         } else {
-            nvs_erase_key(h, Key(i, "ext").text);
-            nvs_erase_key(h, Key(i, "short").text);
-            nvs_erase_key(h, Key(i, "ep").text);
+            w.erase(Key(i, "ext").text);
+            w.erase(Key(i, "short").text);
+            w.erase(Key(i, "ep").text);
         }
     }
-    if (err == ESP_OK) {
-        err = nvs_commit(h);
-    }
-    logError("roles", err);
+    w.commit();
 }
 
 void SettingsStore::onFactoryReset()

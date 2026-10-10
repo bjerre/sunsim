@@ -21,7 +21,8 @@ namespace sunsim::core {
 //    (ReachabilityChanged): its light commands pause - sending to a missing
 //    device ties up the stack's buffers with retries and starves everything
 //    else - and it's pinged every 15 s until it answers anything, when it's
-//    marked reachable again and its light re-applied.
+//    marked reachable again and its light re-applied. Heard within 150 s
+//    (and reachable) shows as Online in DevicesUpdated, otherwise Silent.
 // Persists through PersistRoles; never touches storage or the radio itself.
 class DeviceRegistry {
 public:
@@ -57,6 +58,7 @@ private:
     void setReachable(ev::Role role, bool reachable);
     void persist();
     void discover(ev::Role role);
+    [[nodiscard]] ev::DeviceLink link(ev::Role role) const noexcept;
 
     ev::Post                                post_;
     Manifest                                manifest_;

@@ -104,11 +104,12 @@ enum class DeviceLink : uint8_t {
 };
 
 struct DeviceStatus {
-    bool    paired        = false;
-    bool    has_endpoint  = false;
-    int64_t last_heard_us = 0; // uptime; 0 = not since boot
-    int8_t  rssi          = 0; // of the last ack, if any
-    bool    reachable     = true; // false: not answering, light commands paused
+    DeviceLink link          = DeviceLink::Unpaired; // what status shows, from the registry's liveness
+    bool       paired        = false;
+    bool       has_endpoint  = false;
+    int64_t    last_heard_us = 0;    // uptime; 0 = not since boot
+    int8_t     rssi          = 0;    // of the last ack, if any
+    bool       reachable     = true; // false: not answering, light commands paused
 };
 
 // ---- Program settings -----------------------------------------------------
@@ -186,7 +187,6 @@ struct StatusSnapshot {
     DayInfo                               day{};
     Mode                                  mode             = Mode::Daylight;
     bool                                  in_active_window = false;
-    std::array<DeviceLink, kRoleCount>    links{};
     std::array<DeviceStatus, kRoleCount>  devices{};
     DeviceRecords                         records{};
     std::optional<Role>                   armed;

@@ -50,7 +50,6 @@ void ModeController::onTick(const ev::Tick &tick)
 
 void ModeController::enter(ev::Mode mode)
 {
-    mode_ = mode;
     switch (mode) {
     case ev::Mode::Daylight:
         SUNSIM_LOGI(kTag, "Resuming daylight program");

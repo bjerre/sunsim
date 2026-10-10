@@ -157,7 +157,7 @@ void ZigbeeAdapter::handleSignal(const ezb_app_signal_t *app_signal)
             if (ezb_bdb_is_factory_new()) {
                 ezb_bdb_start_top_level_commissioning(EZB_BDB_MODE_NETWORK_FORMATION);
             } else {
-                ezb_bdb_open_network(180);
+                ezb_bdb_open_network(ev::kDefaultOpenSeconds);
                 post_(ev::NetworkUp{.rejoined = true});
             }
         } else {
@@ -183,7 +183,7 @@ void ZigbeeAdapter::handleSignal(const ezb_app_signal_t *app_signal)
         const auto status = *static_cast<const ezb_bdb_comm_status_t *>(ezb_app_signal_get_params(app_signal));
         if (status == EZB_BDB_STATUS_SUCCESS) {
             ESP_LOGI(kTag, "Network formed. Type `pair <role>` (e.g. `pair WallA`), then reset that device.");
-            ezb_bdb_open_network(180);
+            ezb_bdb_open_network(ev::kDefaultOpenSeconds);
             post_(ev::NetworkUp{.rejoined = false});
         } else {
             ESP_LOGW(kTag, "Steering failed with status(0x%02x), retrying", status);

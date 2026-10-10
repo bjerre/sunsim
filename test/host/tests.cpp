@@ -255,13 +255,13 @@ int main()
         h.post(AckReceived{.short_addr = 0x0042, .rssi = -48});
         h.tick();
         auto snaps = h.all<StatusChanged>();
-        CHECK(!snaps.empty() && snaps.back().snapshot->links[indexOf(Role::Work)] == DeviceLink::Online);
+        CHECK(!snaps.empty() && snaps.back().snapshot->devices[indexOf(Role::Work)].link == DeviceLink::Online);
         CHECK(!snaps.empty() && snaps.back().snapshot->devices[indexOf(Role::Work)].rssi == -48);
 
         h.clearLog();
         h.tick(160);
         snaps = h.all<StatusChanged>();
-        CHECK(!snaps.empty() && snaps.back().snapshot->links[indexOf(Role::Work)] == DeviceLink::Silent);
+        CHECK(!snaps.empty() && snaps.back().snapshot->devices[indexOf(Role::Work)].link == DeviceLink::Silent);
         CHECK(h.all<Ping>().size() >= 2); // pinged every 60 s meanwhile
     });
 

@@ -101,8 +101,9 @@ struct PairCancelled {};
 struct UnpairRequested {
     std::optional<Role> role;    // nullopt = all
 };
+inline constexpr uint8_t kDefaultOpenSeconds = 180; // pairing, console `open`, network up
 struct OpenNetwork {
-    uint8_t seconds = 180;
+    uint8_t seconds = kDefaultOpenSeconds;
 };
 struct FactoryReset {};
 

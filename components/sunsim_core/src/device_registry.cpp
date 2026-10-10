@@ -12,7 +12,8 @@ constexpr uint32_t kFirstPingSeconds        = 15;
 constexpr uint32_t kPingSeconds             = 60; // reachable bulbs
 constexpr uint32_t kUnreachablePingSeconds  = 15; // until they answer again
 constexpr int64_t  kUnreachableSilenceUs    = 60LL * 1000 * 1000;
-constexpr uint8_t  kPairOpenSeconds       = 180;
+// Shown as online if heard within this: a couple of missed 60 s pings.
+constexpr int64_t  kOnlineWindowUs          = 150LL * 1000 * 1000;
 
 const char *name(ev::Role role) noexcept
 {
@@ -74,6 +75,18 @@ void DeviceRegistry::setReachable(ev::Role role, bool reachable)
     }
 }
 
+ev::DeviceLink DeviceRegistry::link(ev::Role role) const noexcept
+{
+    const Liveness &l = liveness_[ev::indexOf(role)];
+    if (!records_[ev::indexOf(role)].valid) {
+        return ev::DeviceLink::Unpaired;
+    }
+    if (l.reachable && l.last_heard_us != 0 && now_us_ - l.last_heard_us <= kOnlineWindowUs) {
+        return ev::DeviceLink::Online;
+    }
+    return ev::DeviceLink::Silent;
+}
+
 void DeviceRegistry::discover(ev::Role role)
 {
     post_(ev::Discover{role, records_[ev::indexOf(role)].short_addr});
@@ -82,8 +95,8 @@ void DeviceRegistry::discover(ev::Role role)
 void DeviceRegistry::assign(ev::Role role, uint64_t ext_addr, uint16_t short_addr)
 {
     records_[ev::indexOf(role)] = {.valid = true, .ext_addr = ext_addr, .short_addr = short_addr, .endpoint = 0};
-    setReachable(role, true);
-    liveness_[ev::indexOf(role)] = {};
+    Liveness &l = liveness_[ev::indexOf(role)];
+    l           = {.reachable = l.reachable}; // heard() reports it reachable if it wasn't
     persist();
     heard(role);
     post_(ev::RoleAssigned{role, records_[ev::indexOf(role)]});
@@ -220,7 +233,7 @@ void DeviceRegistry::onPairRequested(const ev::PairRequested &e)
         SUNSIM_LOGW(kTag, "%s is already assigned; the next device to join will replace it", name(e.role));
     }
     armed_ = e.role;
-    post_(ev::OpenNetwork{kPairOpenSeconds});
+    post_(ev::OpenNetwork{});
     SUNSIM_LOGI(kTag,
                 "Armed %s: factory-reset / power on the device now. The next device that joins and doesn't already "
                 "hold a role becomes %s.",
@@ -280,7 +293,8 @@ void DeviceRegistry::onTick(const ev::Tick &e)
 
     ev::DevicesUpdated u{.devices = {}, .records = records_, .armed = armed_};
     for (std::size_t i = 0; i < ev::kRoleCount; ++i) {
-        u.devices[i] = {.paired        = records_[i].valid,
+        u.devices[i] = {.link          = link(static_cast<ev::Role>(i)),
+                        .paired        = records_[i].valid,
                         .has_endpoint  = records_[i].endpoint != 0,
                         .last_heard_us = liveness_[i].last_heard_us,
                         .rssi          = liveness_[i].rssi,

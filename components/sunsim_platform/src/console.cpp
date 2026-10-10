@@ -17,8 +17,6 @@
 namespace sunsim::platform {
 
 namespace {
-constexpr uint8_t kDefaultOpenSeconds = 180;
-
 // esp_console callbacks are plain functions; this is what they reach.
 struct Context {
     ev::Post          post;
@@ -123,7 +121,7 @@ int cmdUnpair(int argc, char **argv)
 
 int cmdOpen(int argc, char **argv)
 {
-    const int seconds = argc == 2 ? std::atoi(argv[1]) : kDefaultOpenSeconds;
+    const int seconds = argc == 2 ? std::atoi(argv[1]) : ev::kDefaultOpenSeconds;
     if (seconds < 1 || seconds > 254) {
         std::printf("seconds must be 1-254\n");
         return 1;
@@ -364,7 +362,7 @@ int cmdStatus(int, char **)
     for (std::size_t i = 0; i < ev::kRoleCount; ++i) {
         const ev::DeviceStatus &d = st->devices[i];
         std::printf("  %-6s ", ev::roleName(i).data());
-        switch (st->links[i]) {
+        switch (d.link) {
         case ev::DeviceLink::Unpaired:
             std::printf("-  not paired\n");
             continue;

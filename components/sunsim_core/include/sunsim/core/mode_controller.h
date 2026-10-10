@@ -21,14 +21,11 @@ public:
     void onPress(const ev::ButtonPressed &press);
     void onTick(const ev::Tick &tick);
 
-    [[nodiscard]] ev::Mode mode() const noexcept { return mode_; }
-
 private:
     void enter(ev::Mode mode);
 
     ev::Post post_;
     int64_t  window_us_;
-    ev::Mode mode_          = ev::Mode::Daylight;
     bool     click_pending_ = false;
     int64_t  last_click_us_ = 0;
 };

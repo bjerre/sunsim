@@ -163,7 +163,7 @@ void render(Ui &ui, const ev::StatusSnapshot &st)
     }
 
     for (std::size_t i = 0; i < ev::kRoleCount; ++i) {
-        lv_obj_set_style_bg_color(ui.dots[i], linkColor(st.links[i]), 0);
+        lv_obj_set_style_bg_color(ui.dots[i], linkColor(st.devices[i].link), 0);
     }
 }
 
