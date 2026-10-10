@@ -1,0 +1,12 @@
+# clangd (VS Code's clangd extension) reading the ESP-IDF GCC build's
+# compile_commands.json: drop the GCC-only flags clang doesn't know, and
+# point it at clang's built-in headers (esp-clangd ships without them).
+CompileFlags:
+  CompilationDatabase: build
+  Add:
+    - -resource-dir=/home/bjerre/.espressif/tools/esp-clang/esp-21.1.3_20260408/esp-clang/lib/clang/21
+  Remove:
+    - -fno-shrink-wrap
+    - -fstrict-volatile-bitfields
+    - -fno-tree-switch-conversion
+    - -fzero-init-padding-bits=*

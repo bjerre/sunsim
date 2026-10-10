@@ -47,6 +47,12 @@ idf.py -p /dev/ttyACM0 flash monitor   # builds too; Ctrl+] quits the monitor
 The VS Code ESP-IDF extension's Build/Flash/Monitor buttons do the same
 without the `export.sh` step.
 
+Code navigation and diagnostics come from clangd (VS Code's clangd
+extension, using ESP-IDF's own clangd; see `.clangd` and
+`.vscode/settings.json` - Microsoft's C/C++ IntelliSense is turned off). It
+reads `build/compile_commands.json`, so build once first; the host tests
+use `build-host/` (see `test/host/.clangd`).
+
 ## Missing devices
 
 A bulb that stops answering (switched off at the wall, out of range) is

@@ -3,5 +3,12 @@
     "cmake.configureOnOpen": false,
     "cmake.configureEnvironment": {
         "IDF_PATH": "/home/bjerre/.espressif/v6.1/esp-idf"
-    }
+    },
+    "clangd.path": "/home/bjerre/.espressif/tools/esp-clangd/esp-21.1.3_20260408/esp-clangd/bin/clangd",
+    "clangd.arguments": [
+        "--query-driver=**/riscv32-esp-elf-*,/usr/bin/c++,/usr/bin/g++",
+        "--background-index",
+        "--header-insertion=never"
+    ],
+    "C_Cpp.intelliSenseEngine": "disabled"
 }

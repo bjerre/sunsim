@@ -7,6 +7,7 @@ project(sunsim_host_tests CXX)
 
 set(CMAKE_CXX_STANDARD 26) # the firmware builds as gnu++26 (ESP-IDF 6.1)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON) # for clangd (test/host/.clangd)
 add_compile_options(-Wall -Wextra -fno-exceptions -fno-rtti)
 
 set(ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../..)

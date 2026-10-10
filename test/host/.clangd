@@ -1,0 +1,4 @@
+# The host tests have their own compile database (the build-host directory
+# from the command in CMakeLists.txt).
+CompileFlags:
+  CompilationDatabase: ../../build-host
