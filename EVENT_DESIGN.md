@@ -120,7 +120,7 @@ flowchart LR
 
     ZA[ZigbeeAdapter] -->|DeviceAnnounced, EndpointFound,<br/>BindResult, PingResult, AckReceived| DR
     ZA -->|ButtonPressed| MC & DR
-    ZA -->|NetworkUp| PH
+    ZA -->|NetworkUp| PH & DR
     CO[Console] -->|ButtonPressed| MC
     CO -->|PairRequested, PairCancelled,<br/>UnpairRequested| DR
     CO -->|OpenNetwork, FactoryReset| ZA
@@ -145,7 +145,7 @@ flowchart LR
 | Module | Replaces | Listens to | Posts |
 |---|---|---|---|
 | **ZigbeeAdapter** — the only code including esp-zigbee | `SunsimApp`'s signal/ZCL/APS handlers, ZDO calls in `LightRig`, `BulbEndpoint` | `SetLight`, `Discover`, `Bind`, `Ping`, `OpenNetwork`, `FactoryReset`, `RoleAssigned`, `RoleCleared` | `NetworkUp`, `DeviceAnnounced`, `EndpointFound`, `BindResult`, `PingResult`, `AckReceived`, `ButtonPressed` |
-| **DeviceRegistry** | `RoleStore`; pairing, discovery retry, liveness in `LightRig` | `RolesLoaded`, `DeviceAnnounced`, `EndpointFound`, `BindResult`, `PingResult`, `AckReceived`, `ButtonPressed`, `PairRequested`, `PairCancelled`, `UnpairRequested`, `Tick` | `RoleAssigned`, `RoleCleared`, `Discover`, `Bind`, `Ping`, `OpenNetwork`, `PersistRoles`, `RefreshLights`, `ReachabilityChanged`, `DevicesUpdated` |
+| **DeviceRegistry** | `RoleStore`; pairing, discovery retry, liveness in `LightRig` | `RolesLoaded`, `NetworkUp`, `DeviceAnnounced`, `EndpointFound`, `BindResult`, `PingResult`, `AckReceived`, `ButtonPressed`, `PairRequested`, `PairCancelled`, `UnpairRequested`, `Tick` | `RoleAssigned`, `RoleCleared`, `Discover`, `Bind`, `Ping`, `OpenNetwork`, `PersistRoles`, `RefreshLights`, `ReachabilityChanged`, `DevicesUpdated` |
 | **ModeController** | `ButtonController` | `ButtonPressed`, `Tick` | `ModeChanged` |
 | **ProgramHost** (runs one `Program`: `DaylightProgram`, `OffProgram`, `RedAlertProgram`) | `DaylightSchedule` use, peaks, clock guard in `LightRig`; red-alert pulse | `ModeChanged`, `ConfigChanged`, `Tick`, `ProgramTick`, `RefreshLights`, `NetworkUp` | `LightTarget` |
 | **LightOutput** | applied-state cache and apply logic in `LightRig` | `LightTarget`, `RoleAssigned`, `RoleCleared`, `ReachabilityChanged` | `SetLight` |
@@ -180,6 +180,39 @@ To add a program: a `Mode` value (in `kModes`, with its name), a
 whatever selects it (`ModeController`, the console). `LightOutput`, the
 events and the wiring don't change.
 
+### Flows
+
+Behaviour that happens in steps over time is written as a coroutine
+(`ev::Flow`, `ev/flow.h`) rather than spread over handlers, flags and Tick
+counters:
+
+```cpp
+ev::Flow DeviceRegistry::findEndpoint(ev::Role role)
+{
+    for (;;) {
+        const ev::Uptime retry_at = timer_.now() + kDiscoveryRetry;
+        post_(ev::Discover{role, record(role).short_addr});
+        while (const auto found = co_await endpoints_.next(about(role), retry_at)) {
+            if (found->endpoint != 0) {
+                co_return endpointFound(role, found->endpoint);
+            }
+        }
+    }
+}
+```
+
+| Piece | What it is |
+|---|---|
+| `Flow` | a coroutine owned by its module; starts at once, and reassigning or destroying it cancels it wherever it waits |
+| `Timer` | `co_await timer.until(t)` / `after(15s)`; the module's Tick handler drives it, and timestamped events move it forward |
+| `Inbox<T>` | `co_await inbox.next(filter, deadline)`: the next `T` a flow wants, or `nullopt` at the deadline; the module's `on*` handler calls `deliver()` |
+
+Modules stay bus-agnostic: wiring still calls `onPingResult()` etc., which
+hand the event to the inbox. The flows: `ModeController::run` (single vs
+double click by timing), `DeviceRegistry::findEndpoint` (per role) and
+`keepAlive` (per bulb: ping, wait for the reply, decide reachability,
+sleep). The host tests run them unchanged, also under ASan/UBSan.
+
 `LightOutput` owns the "what's the bulb's address" map, built from
 `RoleAssigned`, so `SetLight` carries a network address and
 `ZigbeeAdapter` never needs to know about roles (except the button's
@@ -195,7 +228,7 @@ address for the synchronous APS decision).
 | `ConfigChanged` | `ProgramConfig`, per-light `Peaks` | SettingsStore (at boot, then on change) |
 | `SetConfig` / `SetIntensity` | `ProgramConfig` / role (or all) + % | Console |
 | `RolesLoaded` / `PersistRoles` | all `DeviceRecord`s | SettingsStore / DeviceRegistry |
-| `NetworkUp` | rejoined | ZigbeeAdapter |
+| `NetworkUp` | rejoined, uptime | ZigbeeAdapter |
 | `DeviceAnnounced` | ext addr, short addr | ZigbeeAdapter |
 | `EndpointFound` | role, endpoint (0 = not found) | ZigbeeAdapter |
 | `BindResult` / `PingResult` | role, ok (+ error, status) | ZigbeeAdapter |
@@ -340,8 +373,9 @@ Covered: console pairing end to end; a paired device is never re-claimed by
 `pair`; unknown devices ignored; double press -> red pulses -> single press
 re-syncs; hold -> all off and targets ignored; ambiguous On/Toggle timing;
 clock-not-set holds lights off; per-light intensity scaling; liveness
-(acks -> online, silence -> silent, pings every 60 s); discovery retry every
-15 s; button pairing binds and is never driven as a bulb; `unpair all`.
+(acks -> online, silence -> silent, pings every 60 s, an unanswered ping
+counts as failed); discovery retry every 15 s, and unpairing stops it;
+button pairing binds and is never driven as a bulb; `unpair all`.
 
 ## 9. eventpp on ESP-IDF — measured
 

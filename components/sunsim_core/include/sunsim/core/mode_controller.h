@@ -1,6 +1,6 @@
 #pragma once
 
-#include <cstdint>
+#include <chrono>
 
 #include "sunsim/ev/events.h"
 #include "sunsim/ev/flow.h"
@@ -17,19 +17,20 @@ namespace sunsim::core {
 // it's a single press once the window has passed (on the next Tick).
 class ModeController {
 public:
-    explicit ModeController(ev::Post post, int64_t double_click_window_us = 450'000);
+    explicit ModeController(ev::Post post, std::chrono::milliseconds double_click_window = std::chrono::milliseconds{450});
 
-    void onPress(const ev::ButtonPressed &press) { presses_.deliver(press, press.at_us); }
-    void onTick(const ev::Tick &tick) { presses_.tick(tick.uptime_us); }
+    void onPress(const ev::ButtonPressed &press) { presses_.deliver(press, ev::Uptime{press.at_us}); }
+    void onTick(const ev::Tick &tick) { timer_.tick(ev::Uptime{tick.uptime_us}); }
 
 private:
     ev::Flow run();
     void     enter(ev::Mode mode);
 
-    ev::Post                       post_;
-    int64_t                        window_us_;
-    ev::Mailbox<ev::ButtonPressed> presses_;
-    ev::Flow                       flow_; // last: run() starts once the rest exist
+    ev::Post                     post_;
+    ev::Uptime                   window_;
+    ev::Timer                    timer_;
+    ev::Inbox<ev::ButtonPressed> presses_{timer_};
+    ev::Flow                     flow_; // last: run() starts once the rest exist
 };
 
 } // namespace sunsim::core

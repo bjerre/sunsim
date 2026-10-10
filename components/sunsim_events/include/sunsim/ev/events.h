@@ -53,7 +53,8 @@ struct PersistRoles {            // DeviceRegistry -> SettingsStore
 // ---- From the Zigbee stack ------------------------------------------------
 
 struct NetworkUp {               // network formed, or rejoined after a reboot
-    bool rejoined = false;
+    bool    rejoined = false;
+    int64_t at_us    = 0;        // uptime
 };
 struct DeviceAnnounced {
     uint64_t ext_addr   = 0;

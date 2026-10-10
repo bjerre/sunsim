@@ -5,6 +5,7 @@
 #include <optional>
 
 #include "sunsim/ev/events.h"
+#include "sunsim/ev/flow.h"
 
 namespace sunsim::core {
 
@@ -13,16 +14,19 @@ namespace sunsim::core {
 //    `pair`) gets that role, unless it already holds one; otherwise the
 //    build-time role manifest (IEEE address -> role) decides; anything else
 //    is ignored.
-//  - Discovery: finds each device's endpoint (Discover/EndpointFound),
-//    retried every 15 s until it's known; the button is then bound (Bind).
-//  - Liveness: acks, ping replies, announces and button presses count as
-//    "heard". Bulbs are pinged 15 s after boot, then every 60 s. A failed
-//    ping with nothing heard for a minute marks a bulb unreachable
-//    (ReachabilityChanged): its light commands pause - sending to a missing
-//    device ties up the stack's buffers with retries and starves everything
-//    else - and it's pinged every 15 s until it answers anything, when it's
-//    marked reachable again and its light re-applied. Heard within 150 s
-//    (and reachable) shows as Online in DevicesUpdated, otherwise Silent.
+//  - Discovery (a flow per role): finds the device's endpoint
+//    (Discover/EndpointFound), retried every 15 s until it's known; the
+//    button is then bound (Bind).
+//  - Liveness (a flow per bulb): acks, ping replies, announces and button
+//    presses count as "heard". Bulbs are pinged 15 s after the network is up
+//    (or after pairing), then every
+//    60 s. A failed or unanswered ping with nothing heard for a minute marks
+//    a bulb unreachable (ReachabilityChanged): its light commands pause -
+//    sending to a missing device ties up the stack's buffers with retries
+//    and starves everything else - and it's pinged every 15 s until it
+//    answers anything, when it's marked reachable again and its light
+//    re-applied. Heard within 150 s (and reachable) shows as Online in
+//    DevicesUpdated, otherwise Silent.
 // Persists through PersistRoles; never touches storage or the radio itself.
 class DeviceRegistry {
 public:
@@ -31,6 +35,7 @@ public:
     DeviceRegistry(ev::Post post, Manifest manifest);
 
     void onRolesLoaded(const ev::RolesLoaded &e);
+    void onNetworkUp(const ev::NetworkUp &e);
     void onAnnounced(const ev::DeviceAnnounced &e);
     void onEndpointFound(const ev::EndpointFound &e);
     void onBindResult(const ev::BindResult &e);
@@ -44,10 +49,9 @@ public:
 
 private:
     struct Liveness {
-        int64_t  last_heard_us = 0;
-        int8_t   rssi          = 0;
-        bool     reachable     = true;
-        uint32_t next_ping_s   = 0; // 0 = first ping due kFirstPingSeconds after boot
+        ev::Uptime last_heard{}; // zero = not since boot
+        int8_t     rssi      = 0;
+        bool       reachable = true;
     };
 
     [[nodiscard]] ev::DeviceRecord &record(ev::Role role) noexcept { return records_[ev::indexOf(role)]; }
@@ -62,21 +66,27 @@ private:
     void heard(ev::Role role);
     void setReachable(ev::Role role, bool reachable);
     void persist();
-    void discover(ev::Role role);
+    void endpointFound(ev::Role role, uint8_t endpoint);
     [[nodiscard]] ev::DeviceLink link(ev::Role role) const noexcept;
-
-    // The three things a Tick does.
-    void retryDiscovery();
-    void pingDue();
     void publishDevices();
 
-    ev::Post                                post_;
-    Manifest                                manifest_;
-    ev::DeviceRecords                       records_{};
-    std::array<Liveness, ev::kRoleCount>    liveness_{};
-    std::optional<ev::Role>                 armed_;
-    int64_t                                 now_us_  = 0;
-    uint32_t                                seconds_ = 0;
+    // Flows; reassigning a slot restarts it, an empty Flow{} stops it.
+    ev::Flow findEndpoint(ev::Role role);
+    ev::Flow keepAlive(ev::Role bulb);
+
+    ev::Post                             post_;
+    Manifest                             manifest_;
+    ev::DeviceRecords                    records_{};
+    std::array<Liveness, ev::kRoleCount> liveness_{};
+    std::optional<ev::Role>              armed_;
+
+    ev::Timer                            timer_;
+    bool                                 network_up_ = false; // nothing is sent before
+    ev::Inbox<ev::NetworkUp>             network_{timer_};
+    ev::Inbox<ev::EndpointFound>         endpoints_{timer_};
+    ev::Inbox<ev::PingResult>            pings_{timer_};
+    std::array<ev::Flow, ev::kRoleCount> discovery_;  // last, so they're destroyed
+    std::array<ev::Flow, ev::kBulbCount> keep_alive_; // before what they wait on
 };
 
 } // namespace sunsim::core

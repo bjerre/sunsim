@@ -23,8 +23,8 @@ ev::Mode modeFor(ev::Press press) noexcept
 }
 } // namespace
 
-ModeController::ModeController(ev::Post post, int64_t double_click_window_us)
-    : post_(std::move(post)), window_us_(double_click_window_us), flow_(run())
+ModeController::ModeController(ev::Post post, std::chrono::milliseconds double_click_window)
+    : post_(std::move(post)), window_(double_click_window), flow_(run())
 {
 }
 
@@ -36,7 +36,7 @@ ev::Flow ModeController::run()
             enter(modeFor(press.press));
             continue;
         }
-        const auto second = co_await presses_.next(press.at_us + window_us_);
+        const auto second = co_await presses_.next(ev::Uptime{press.at_us} + window_);
         if (!second) {
             enter(ev::Mode::Daylight); // the window passed: it was a single press
         } else if (second->press == ev::Press::Ambiguous) {

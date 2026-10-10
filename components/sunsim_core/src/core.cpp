@@ -23,7 +23,10 @@ void wireCore(ev::EventBus &bus, CoreModules &m)
     bus.on<RolesLoaded>([&](const RolesLoaded &e) { m.registry.onRolesLoaded(e); });
 
     // From the radio
-    bus.on<NetworkUp>([&](const NetworkUp &) { m.programs.onRefresh(RefreshLights{}); });
+    bus.on<NetworkUp>([&](const NetworkUp &e) {
+        m.registry.onNetworkUp(e);
+        m.programs.onRefresh(RefreshLights{});
+    });
     bus.on<DeviceAnnounced>([&](const DeviceAnnounced &e) { m.registry.onAnnounced(e); });
     bus.on<EndpointFound>([&](const EndpointFound &e) { m.registry.onEndpointFound(e); });
     bus.on<BindResult>([&](const BindResult &e) { m.registry.onBindResult(e); });

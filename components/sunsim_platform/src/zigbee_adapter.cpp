@@ -164,7 +164,7 @@ void ZigbeeAdapter::handleSignal(const ezb_app_signal_t *app_signal)
                 ezb_bdb_start_top_level_commissioning(EZB_BDB_MODE_NETWORK_FORMATION);
             } else {
                 ezb_bdb_open_network(ev::kDefaultOpenSeconds);
-                post_(ev::NetworkUp{.rejoined = true});
+                post_(ev::NetworkUp{.rejoined = true, .at_us = nowUs()});
             }
         } else {
             ESP_LOGW(kTag, "%s failed with status(0x%02x), retrying", ezb_app_signal_to_string(signal_type), status);
@@ -190,7 +190,7 @@ void ZigbeeAdapter::handleSignal(const ezb_app_signal_t *app_signal)
         if (status == EZB_BDB_STATUS_SUCCESS) {
             ESP_LOGI(kTag, "Network formed. Type `pair <role>` (e.g. `pair WallA`), then reset that device.");
             ezb_bdb_open_network(ev::kDefaultOpenSeconds);
-            post_(ev::NetworkUp{.rejoined = false});
+            post_(ev::NetworkUp{.rejoined = false, .at_us = nowUs()});
         } else {
             ESP_LOGW(kTag, "Steering failed with status(0x%02x), retrying", status);
             scheduleCommissioningRetry(EZB_BDB_MODE_NETWORK_STEERING, std::chrono::milliseconds{1000});

@@ -49,6 +49,8 @@ struct Harness {
         core::wireCore(bus, core);
         // Record everything posted, including platform-bound events.
         recordAll(std::make_index_sequence<std::variant_size_v<Payload>>{});
+        post(NetworkUp{}); // at uptime 0, so "15 s after the network is up" is 15 s in
+        clearLog();
     }
 
     template <std::size_t... I> void recordAll(std::index_sequence<I...>)
@@ -296,6 +298,27 @@ int main()
         h.clearLog();
         h.tick(30);
         CHECK(h.all<Discover>().size() == 2);
+    });
+
+    test("unpairing a role mid-discovery stops its retries", [] {
+        Harness h;
+        h.post(PairRequested{Role::WallB});
+        h.post(DeviceAnnounced{.ext_addr = 0xC3, .short_addr = 0x0003}); // no EndpointFound
+        h.post(UnpairRequested{Role::WallB});
+        h.clearLog();
+        h.tick(45);
+        CHECK(h.all<Discover>().empty());
+        CHECK(h.all<Ping>().empty());
+    });
+
+    test("a ping that gets no answer at all counts as failed", [] {
+        Harness h;
+        h.tick();
+        h.pairBulb(Role::Work, 0xB2, 0x0002);
+        h.clearLog();
+        h.tick(90); // pinged at 15 s and 75 s, never answered; silent since pairing
+        const auto changes = h.all<ReachabilityChanged>();
+        CHECK(changes.size() == 1 && changes[0].role == Role::Work && !changes[0].reachable);
     });
 
     test("button pairing binds it once its endpoint is found", [] {

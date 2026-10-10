@@ -224,7 +224,8 @@ Event-driven: every module talks only through events on one bus, processed
 by a single app task. See [EVENT_DESIGN.md](EVENT_DESIGN.md).
 
 - `components/sunsim_events/` (`sunsim::ev`) - the shared vocabulary: value
-  types (`types.h`), every event (`events.h`), the `EventBus` (`bus.h`).
+  types (`types.h`), every event (`events.h`), the `EventBus` (`bus.h`),
+  and coroutine flows (`flow.h`: `Flow`, `Timer`, `Inbox`).
 - `components/sunsim_core/` (`sunsim::core`) - all application logic, pure
   C++ (builds on the host):
   - `device_registry.*` - pairing, endpoint discovery/binding, liveness pings.

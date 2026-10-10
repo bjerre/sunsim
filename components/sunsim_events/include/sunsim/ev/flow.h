@@ -1,43 +1,56 @@
 #pragma once
 
-// Coroutines for multi-step behaviour that would otherwise be spread over
-// event handlers and state flags ("wait for this, then that, or give up
-// after N ms"). Everything runs on the app task, so nothing here locks.
+// Coroutines for behaviour that happens in steps over time ("send this,
+// wait for the reply or 15 s, try again"), written top to bottom instead of
+// spread over handlers, flags and counters. Everything runs on the app
+// task, so nothing here locks.
 //
-//   class X {
-//       void onPress(const Press &p) { presses_.deliver(p, p.at_us); }
-//       void onTick(const Tick &t)   { presses_.tick(t.uptime_us); }
-//       Flow run() {
+//   class Registry {
+//       void onReply(const Reply &r) { replies_.deliver(r); }
+//       void onTick(const Tick &t)   { timer_.tick(Uptime{t.uptime_us}); }
+//
+//       Flow ask(Role role) {
 //           for (;;) {
-//               const Press first = co_await presses_.next();
-//               const std::optional<Press> second = co_await presses_.next(first.at_us + kWindowUs);
-//               ...
+//               post_(Request{role});
+//               if (const auto reply = co_await replies_.next(forRole(role), timer_.now() + 15s)) {
+//                   co_return use(*reply);
+//               }
 //           }
 //       }
-//       Mailbox<Press> presses_;
-//       Flow           flow_ = run(); // last member: starts once the rest exist
+//
+//       Timer        timer_;
+//       Inbox<Reply> replies_{timer_};
+//       Flow         asking_; // = ask(role); reassigning or destroying it cancels the flow
 //   };
 
+#include <algorithm>
+#include <chrono>
+#include <concepts>
 #include <coroutine>
 #include <cstdint>
 #include <cstdlib>
+#include <functional>
 #include <optional>
 #include <utility>
+#include <vector>
 
 namespace sunsim::ev {
 
+using Uptime = std::chrono::microseconds; // since boot
+
 // A coroutine that starts at once and runs until it returns or its owner
-// destroys it (which cancels it wherever it's waiting). Nobody awaits it.
+// destroys it, which cancels it wherever it's waiting. Nobody awaits it.
 class Flow {
 public:
     struct promise_type {
-        Flow get_return_object() noexcept { return Flow{Handle::from_promise(*this)}; }
+        Flow                get_return_object() noexcept { return Flow{Handle::from_promise(*this)}; }
         std::suspend_never  initial_suspend() noexcept { return {}; }
         std::suspend_always final_suspend() noexcept { return {}; } // the owner frees it
         void                return_void() noexcept {}
         void                unhandled_exception() noexcept { std::abort(); } // exceptions are off
     };
 
+    Flow() = default; // no flow
     Flow(Flow &&other) noexcept : handle_(std::exchange(other.handle_, {})) {}
     Flow &operator=(Flow &&other) noexcept
     {
@@ -56,76 +69,227 @@ private:
     void reset() noexcept
     {
         if (handle_) {
-            handle_.destroy();
-            handle_ = {};
+            std::exchange(handle_, {}).destroy();
         }
     }
 
     Handle handle_;
 };
 
-// Hands the next T to the one Flow waiting for it. The owning module calls
-// deliver() from its event handler and tick() from its Tick handler; times
-// are uptime in microseconds. A T that arrives while nobody waits is dropped.
-template <class T> class Mailbox {
+class Timer;
+
+namespace detail {
+// A suspended co_await with a deadline, which its Timer expires.
+class Timed {
 public:
-    // co_await next(): the next T.
-    auto next() noexcept { return Awaiter<false>{*this, kNoDeadline}; }
+    Timed(const Timed &)            = delete;
+    Timed &operator=(const Timed &) = delete;
 
-    // co_await next(deadline_us): the next T, or nullopt once deadline_us
-    // has passed (seen as a later tick(), or a T stamped after it).
-    auto next(int64_t deadline_us) noexcept { return Awaiter<true>{*this, deadline_us}; }
+    virtual void expire() = 0; // the deadline came first: resume the flow
 
-    void deliver(const T &value, int64_t at_us)
+protected:
+    Timed(Timer &timer, Uptime deadline) noexcept : timer_(timer), deadline_(deadline) {}
+    ~Timed();
+
+    void startTimer();
+    void stopTimer() noexcept;
+
+    Timer &timer_;
+    Uptime deadline_;
+
+private:
+    friend class sunsim::ev::Timer;
+    bool queued_ = false;
+};
+} // namespace detail
+
+// Time for flows. The owning module calls tick() with each Tick's uptime,
+// and events stamped with an uptime move it too (Inbox::deliver); due waits
+// resume then. Time only moves forward.
+class Timer {
+public:
+    [[nodiscard]] Uptime now() const noexcept { return now_; }
+
+    // co_await until(t) / after(d): resumes on the first tick at or after the
+    // deadline, or at once if it has already passed.
+    [[nodiscard]] auto until(Uptime deadline) noexcept { return Sleep{*this, deadline}; }
+    [[nodiscard]] auto after(Uptime delay) noexcept { return until(now_ + delay); }
+
+    void tick(Uptime now)
     {
-        if (waiting_ && at_us > deadline_us_) {
-            resume(std::nullopt); // too late for that wait: time it out first...
-        }
-        if (waiting_) {
-            resume(value); // ...then it's the next wait's
-        }
-    }
-
-    void tick(int64_t now_us)
-    {
-        if (waiting_ && now_us > deadline_us_) {
-            resume(std::nullopt);
+        now_ = std::max(now_, now);
+        // One at a time: expiring resumes a flow, which may start or cancel others.
+        for (;;) {
+            const auto due = std::ranges::find_if(timed_, [&](const detail::Timed *t) { return t->deadline_ <= now_; });
+            if (due == timed_.end()) {
+                return;
+            }
+            detail::Timed *timed = *due;
+            timed_.erase(due);
+            timed->queued_ = false;
+            timed->expire();
         }
     }
 
 private:
-    static constexpr int64_t kNoDeadline = INT64_MAX;
+    friend class detail::Timed;
 
-    template <bool kTimed> struct Awaiter {
-        Mailbox &box;
-        int64_t  deadline_us;
+    class Sleep final : public detail::Timed {
+    public:
+        Sleep(Timer &timer, Uptime deadline) noexcept : Timed(timer, deadline) {}
 
-        bool await_ready() const noexcept { return false; }
-        void await_suspend(std::coroutine_handle<> handle) noexcept
+        [[nodiscard]] bool await_ready() const noexcept { return deadline_ <= timer_.now(); }
+        void               await_suspend(std::coroutine_handle<> flow)
         {
-            box.waiting_     = handle;
-            box.deadline_us_ = deadline_us;
+            flow_ = flow;
+            startTimer();
         }
-        auto await_resume() noexcept
+        void await_resume() const noexcept {}
+
+        void expire() override { flow_.resume(); }
+
+    private:
+        std::coroutine_handle<> flow_;
+    };
+
+    Uptime                       now_{};
+    std::vector<detail::Timed *> timed_;
+};
+
+inline detail::Timed::~Timed()
+{
+    stopTimer(); // the flow was destroyed while waiting
+}
+
+inline void detail::Timed::startTimer()
+{
+    timer_.timed_.push_back(this);
+    queued_ = true;
+}
+
+inline void detail::Timed::stopTimer() noexcept
+{
+    if (queued_) {
+        std::erase(timer_.timed_, this);
+        queued_ = false;
+    }
+}
+
+// Hands each T to the flows waiting for one (each with its own filter and
+// optional deadline). The owning module calls deliver() from its handler
+// for T. A T nobody is waiting for is dropped.
+template <class T> class Inbox {
+public:
+    explicit Inbox(Timer &timer) noexcept : timer_(timer) {}
+    Inbox(const Inbox &)            = delete;
+    Inbox &operator=(const Inbox &) = delete;
+
+    // co_await next() / next(filter): the next T (that passes the filter).
+    [[nodiscard]] auto next() { return Wait<false>{*this, any, Uptime::max()}; }
+    template <std::predicate<const T &> F> [[nodiscard]] auto next(F filter)
+    {
+        return Wait<false>{*this, std::move(filter), Uptime::max()};
+    }
+
+    // co_await next(deadline) / next(filter, deadline): the same, or nullopt
+    // once the deadline has passed.
+    [[nodiscard]] auto next(Uptime deadline) { return Wait<true>{*this, any, deadline}; }
+    template <std::predicate<const T &> F> [[nodiscard]] auto next(F filter, Uptime deadline)
+    {
+        return Wait<true>{*this, std::move(filter), deadline};
+    }
+
+    // `at`, if given, is when it happened: the timer moves on to it first, so
+    // waits whose deadline had passed by then time out (and a flow that then
+    // waits again here can take this one).
+    void deliver(const T &value, std::optional<Uptime> at = std::nullopt)
+    {
+        if (at) {
+            timer_.tick(*at);
+        }
+        // Only those waiting now: a resumed flow that waits again gets the next one.
+        const uint32_t last = serial_;
+        while (Waiting *w = find([&](const Waiting *w) { return w->serial_ <= last && w->filter_(value); })) {
+            w->take(value);
+        }
+    }
+
+private:
+    using Filter                = std::function<bool(const T &)>;
+    static constexpr auto any   = [](const T &) { return true; };
+
+    class Waiting : public detail::Timed {
+    public:
+        Waiting(Inbox &inbox, Filter filter, Uptime deadline)
+            : Timed(inbox.timer_, deadline), inbox_(inbox), filter_(std::move(filter))
+        {
+        }
+        ~Waiting() { leave(); }
+
+        [[nodiscard]] bool await_ready() const noexcept { return deadline_ <= timer_.now(); }
+        void               await_suspend(std::coroutine_handle<> flow)
+        {
+            flow_   = flow;
+            serial_ = ++inbox_.serial_;
+            inbox_.waiting_.push_back(this);
+            if (deadline_ != Uptime::max()) {
+                startTimer();
+            }
+        }
+
+        void expire() override
+        {
+            leave();
+            flow_.resume();
+        }
+        void take(const T &value)
+        {
+            value_ = value;
+            leave();
+            flow_.resume();
+        }
+
+    protected:
+        std::optional<T> value_;
+
+    private:
+        friend class Inbox;
+
+        void leave() noexcept
+        {
+            std::erase(inbox_.waiting_, this);
+            stopTimer();
+        }
+
+        Inbox                  &inbox_;
+        Filter                  filter_;
+        std::coroutine_handle<> flow_;
+        uint32_t                serial_ = 0;
+    };
+
+    template <bool kTimed> class Wait final : public Waiting {
+    public:
+        using Waiting::Waiting;
+
+        auto await_resume()
         {
             if constexpr (kTimed) {
-                return std::exchange(box.value_, std::nullopt);
+                return std::move(this->value_);
             } else {
-                return *std::exchange(box.value_, std::nullopt);
+                return std::move(*this->value_);
             }
         }
     };
 
-    void resume(std::optional<T> value)
+    template <class Pred> Waiting *find(Pred pred) const
     {
-        value_ = std::move(value);
-        // Cleared first: the flow usually waits again before resume() returns.
-        std::exchange(waiting_, {}).resume();
+        const auto it = std::ranges::find_if(waiting_, pred);
+        return it == waiting_.end() ? nullptr : *it;
     }
 
-    std::coroutine_handle<> waiting_;
-    int64_t                 deadline_us_ = kNoDeadline;
-    std::optional<T>        value_;
+    Timer                 &timer_;
+    std::vector<Waiting *> waiting_;
+    uint32_t               serial_ = 0;
 };
 
 } // namespace sunsim::ev
