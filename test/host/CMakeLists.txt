@@ -5,7 +5,7 @@
 cmake_minimum_required(VERSION 3.16)
 project(sunsim_host_tests CXX)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 26) # the firmware builds as gnu++26 (ESP-IDF 6.1)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_compile_options(-Wall -Wextra -fno-exceptions -fno-rtti)
 

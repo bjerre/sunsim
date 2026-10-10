@@ -28,11 +28,12 @@ and roles work, and the math behind the daylight curve.
 
 ## Building
 
-`idf.py` only works in a shell where ESP-IDF's environment has been loaded
-(once per terminal):
+Needs ESP-IDF 6.1 (GCC 15; the code uses C++20 and later). `idf.py` only
+works in a shell where ESP-IDF's environment has been loaded (once per
+terminal):
 
 ```
-. ~/project/esp-idf/export.sh
+. ~/.espressif/v6.1/esp-idf/export.sh
 ```
 
 Then, from this directory:

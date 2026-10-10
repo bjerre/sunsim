@@ -1,7 +1,7 @@
 {
-    "idf.currentSetup": "/home/bjerre/project/esp-idf",
+    "idf.currentSetup": "/home/bjerre/.espressif/v6.1/esp-idf",
     "cmake.configureOnOpen": false,
     "cmake.configureEnvironment": {
-        "IDF_PATH": "/home/bjerre/project/esp-idf"
+        "IDF_PATH": "/home/bjerre/.espressif/v6.1/esp-idf"
     }
 }

@@ -31,6 +31,7 @@
         .storage_partition_name = SUNSIM_STORAGE_PARTITION_NAME, \
         .radio_config = {                                        \
             .radio_mode = ESP_ZIGBEE_RADIO_MODE_NATIVE,           \
+            .radio_uart_config = {},                              \
         },                                                        \
     }
 #else
