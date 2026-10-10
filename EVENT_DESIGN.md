@@ -175,10 +175,10 @@ target against what it last sent to that bulb, so switching programs sends
 just what differs (daylight -> red alert: hue/sat + level; each pulse after
 that: level only).
 
-To add a program: a `Mode` value (and its name), a `Program` subclass, a
-member and `switch` case in `ProgramHost`, and whatever selects it
-(`ModeController`, the console). `LightOutput`, the events and the wiring
-don't change.
+To add a program: a `Mode` value (in `kModes`, with its name), a
+`Program` subclass, a member and `switch` case in `ProgramHost`, and
+whatever selects it (`ModeController`, the console). `LightOutput`, the
+events and the wiring don't change.
 
 `LightOutput` owns the "what's the bulb's address" map, built from
 `RoleAssigned`, so `SetLight` carries a network address and

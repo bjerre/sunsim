@@ -98,18 +98,18 @@ display"; "Rotate the picture 180 degrees" flips it if it's upside down.
 
 ## Wi-Fi (clock sync)
 
-sunsim connects to Wi-Fi once at boot to set its clock over SNTP. Set the
-network from the serial console; it's stored on the device and survives
-reflashing:
+sunsim connects to Wi-Fi at boot (and daily) to set its clock over SNTP,
+using the strongest saved network in range. Save networks from the serial
+console; they're stored on the device and survive reflashing:
 
 ```
-sunsim> wifi "My Network" mypassword
+sunsim> wifi add "My Network" mypassword
 sunsim> restart
 ```
 
-`wifi` alone shows the current network, `wifi clear` forgets it. The Wi-Fi
-SSID/password in menuconfig still work as a fallback when none is set from
-the console.
+`wifi` alone lists the saved networks, `wifi remove <ssid>` forgets one and
+`wifi clear` forgets all. The Wi-Fi SSID/password in menuconfig still work
+as a fallback when none is saved from the console.
 
 Latitude/longitude (decimal degrees, North/East positive) drive the wall
 bulbs' sunrise/sunset calculation - see

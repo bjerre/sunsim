@@ -79,10 +79,10 @@ struct AckReceived {             // ZCL Default Response from a bulb
     uint8_t  status     = 0;
 };
 
-enum class Press : uint8_t {
-    Single,    // daylight program
-    Double,    // red alert
-    Hold,      // all off
+enum class Press : uint8_t {     // what each one does is ModeController's call
+    Single,
+    Double,
+    Hold,
     Ambiguous, // On/Toggle seen only as an attribute change: single vs double by timing
 };
 enum class Source : uint8_t { Zigbee, Console };

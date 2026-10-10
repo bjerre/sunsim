@@ -1,6 +1,5 @@
 #include "sunsim/platform/console.h"
 
-#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <optional>
@@ -11,6 +10,7 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 
+#include "format.h"
 #include "sunsim/platform/status_slot.h"
 #include "sunsim/platform/wifi_time_sync.h"
 
@@ -42,16 +42,29 @@ void printRoleNames()
     std::printf("\n");
 }
 
+// The role named by `arg`, or nullopt after saying why not.
+std::optional<ev::Role> parseRoleArg(const char *arg)
+{
+    const auto role = ev::parseRole(arg);
+    if (!role) {
+        std::printf("unknown role '%s'\n", arg);
+        printRoleNames();
+    }
+    return role;
+}
+
 void printClock(double hours)
 {
-    const long minutes = std::lround(hours * 60.0);
-    std::printf("%02ld:%02ld", minutes / 60, minutes % 60);
+    char text[16];
+    formatClock(text, sizeof(text), hours);
+    std::fputs(text, stdout);
 }
 
 void printHoursMinutes(double hours)
 {
-    const long minutes = std::lround(hours * 60.0);
-    std::printf("%ldh %02ldm", minutes / 60, minutes % 60);
+    char text[16];
+    formatDuration(text, sizeof(text), hours);
+    std::fputs(text, stdout);
 }
 
 // ---- roles / pair / unpair / open ---------------------------------------------
@@ -88,10 +101,8 @@ int cmdPair(int argc, char **argv)
         g_ctx.post(ev::PairCancelled{});
         return 0;
     }
-    const auto role = ev::parseRole(argv[1]);
+    const auto role = parseRoleArg(argv[1]);
     if (!role) {
-        std::printf("unknown role '%s'\n", argv[1]);
-        printRoleNames();
         return 1;
     }
     g_ctx.post(ev::PairRequested{*role});
@@ -109,10 +120,8 @@ int cmdUnpair(int argc, char **argv)
         g_ctx.post(ev::UnpairRequested{});
         return 0;
     }
-    const auto role = ev::parseRole(argv[1]);
+    const auto role = parseRoleArg(argv[1]);
     if (!role) {
-        std::printf("unknown role '%s'\n", argv[1]);
-        printRoleNames();
         return 1;
     }
     g_ctx.post(ev::UnpairRequested{*role});
@@ -333,9 +342,8 @@ int cmdStatus(int, char **)
         return 1;
     }
 
-    static constexpr const char *kDays[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
     if (st->time.valid) {
-        std::printf("time    %s %02d:%02d%s\n", kDays[st->time.local.tm_wday % 7], st->time.local.tm_hour,
+        std::printf("time    %s %02d:%02d%s\n", kWeekdayNames[st->time.local.tm_wday % 7], st->time.local.tm_hour,
                     st->time.local.tm_min, st->time.simulated ? "  (simulated)" : "");
     } else {
         std::printf("time    NOT SET - waiting for time sync (lights held off)\n");
@@ -459,9 +467,6 @@ int cmdWifi(int argc, char **argv)
         clearWifiNetworks();
         std::printf("all networks forgotten; falling back to menuconfig's Wi-Fi settings\n");
         return 0;
-    }
-    if (sub != "add" && sub != "remove" && sub != "clear" && argc <= 3) {
-        return addWifi(argv[1], argc == 3 ? argv[2] : ""); // the old `wifi <ssid> [password]` form
     }
     printWifiUsage();
     return 1;

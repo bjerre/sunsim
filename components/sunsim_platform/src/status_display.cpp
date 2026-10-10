@@ -4,9 +4,6 @@
 
 #if CONFIG_SUNSIM_DISPLAY
 
-#include <cmath>
-#include <cstdio>
-
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_check.h"
@@ -18,6 +15,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "format.h"
 #include "sunsim/platform/status_slot.h"
 
 namespace sunsim::platform {
@@ -69,18 +67,6 @@ lv_color_t linkColor(ev::DeviceLink link)
     return lv_color_hex(0x3a3a3a); // dim grey
 }
 
-void formatClock(char *buf, std::size_t len, double hours)
-{
-    const long minutes = std::lround(hours * 60.0) % (24 * 60);
-    std::snprintf(buf, len, "%02ld:%02ld", minutes / 60, minutes % 60);
-}
-
-void formatDuration(char *buf, std::size_t len, double hours)
-{
-    const long minutes = std::lround(hours * 60.0);
-    std::snprintf(buf, len, "%ldh %02ldm", minutes / 60, minutes % 60);
-}
-
 lv_obj_t *makeLabel(lv_obj_t *parent, const lv_font_t *font, lv_align_t align, int x, int y)
 {
     lv_obj_t *label = lv_label_create(parent);
@@ -126,13 +112,12 @@ void buildUi(Ui &ui)
 
 void render(Ui &ui, const ev::StatusSnapshot &st)
 {
-    static constexpr const char *kDays[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-    char                         a[16];
-    char                         b[16];
+    char a[16];
+    char b[16];
 
     if (st.time.valid) {
         lv_label_set_text_fmt(ui.time, "%02d:%02d", st.time.local.tm_hour, st.time.local.tm_min);
-        lv_label_set_text_fmt(ui.weekday, "%s%s", st.time.simulated ? "sim " : "", kDays[st.time.local.tm_wday % 7]);
+        lv_label_set_text_fmt(ui.weekday, "%s%s", st.time.simulated ? "sim " : "", kWeekdayNames[st.time.local.tm_wday % 7]);
 
         formatDuration(a, sizeof(a), st.day.day_length_hours);
         lv_label_set_text_fmt(ui.day_length, "Day %s", a);

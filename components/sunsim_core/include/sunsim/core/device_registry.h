@@ -50,6 +50,11 @@ private:
         uint32_t next_ping_s   = 0; // 0 = first ping due kFirstPingSeconds after boot
     };
 
+    [[nodiscard]] ev::DeviceRecord &record(ev::Role role) noexcept { return records_[ev::indexOf(role)]; }
+    [[nodiscard]] const ev::DeviceRecord &record(ev::Role role) const noexcept { return records_[ev::indexOf(role)]; }
+    [[nodiscard]] Liveness &liveness(ev::Role role) noexcept { return liveness_[ev::indexOf(role)]; }
+    [[nodiscard]] const Liveness &liveness(ev::Role role) const noexcept { return liveness_[ev::indexOf(role)]; }
+
     [[nodiscard]] std::optional<ev::Role> roleByExt(uint64_t ext_addr) const noexcept;
     [[nodiscard]] std::optional<ev::Role> roleFromManifest(uint64_t ext_addr) const noexcept;
     void assign(ev::Role role, uint64_t ext_addr, uint16_t short_addr);
@@ -59,6 +64,11 @@ private:
     void persist();
     void discover(ev::Role role);
     [[nodiscard]] ev::DeviceLink link(ev::Role role) const noexcept;
+
+    // The three things a Tick does.
+    void retryDiscovery();
+    void pingDue();
+    void publishDevices();
 
     ev::Post                                post_;
     Manifest                                manifest_;

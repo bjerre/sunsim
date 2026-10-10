@@ -27,6 +27,10 @@ enum class Role : uint8_t {
 inline constexpr std::size_t kRoleCount = 5;
 inline constexpr std::size_t kBulbCount = 4; // WallA..Work; the Button is last
 
+inline constexpr std::array<Role, kRoleCount> kRoles = {Role::WallA, Role::WallB, Role::WallC, Role::Work,
+                                                        Role::Button};
+inline constexpr std::array<Role, kBulbCount> kBulbs = {Role::WallA, Role::WallB, Role::WallC, Role::Work};
+
 inline constexpr std::array<std::string_view, kRoleCount> kRoleNames = {"WallA", "WallB", "WallC", "Work", "Button"};
 
 [[nodiscard]] constexpr std::size_t indexOf(Role role) noexcept { return static_cast<std::size_t>(role); }
@@ -41,9 +45,9 @@ inline constexpr std::array<std::string_view, kRoleCount> kRoleNames = {"WallA",
 // Case-sensitive match against kRoleNames, e.g. "WallA".
 [[nodiscard]] constexpr std::optional<Role> parseRole(std::string_view name) noexcept
 {
-    for (std::size_t i = 0; i < kRoleCount; ++i) {
-        if (kRoleNames[i] == name) {
-            return static_cast<Role>(i);
+    for (const Role role : kRoles) {
+        if (kRoleNames[indexOf(role)] == name) {
+            return role;
         }
     }
     return std::nullopt;
@@ -83,6 +87,7 @@ struct LightState {
 
 // Which lighting program is running (core::ProgramHost runs it).
 enum class Mode : uint8_t { Daylight, Off, RedAlert };
+inline constexpr std::array<Mode, 3> kModes = {Mode::Daylight, Mode::Off, Mode::RedAlert};
 
 [[nodiscard]] constexpr const char *modeName(Mode mode) noexcept
 {

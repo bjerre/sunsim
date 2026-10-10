@@ -99,8 +99,7 @@ void Clock::onHeartbeat()
         seconds_ = 0;
         // Ramp over the whole interval, so bulbs fade continuously from one
         // update to the next instead of jumping and holding.
-        const int deciseconds = update_interval_s_ * 10;
-        post_(ev::ProgramTick{.time = time, .transition_ds = static_cast<uint16_t>(deciseconds > 0xFFFF ? 0xFFFF : deciseconds)});
+        post_(ev::ProgramTick{.time = time, .transition_ds = static_cast<uint16_t>(update_interval_s_ * 10)});
     }
 }
 

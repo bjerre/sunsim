@@ -25,9 +25,9 @@ DeviceRegistry::DeviceRegistry(ev::Post post, Manifest manifest) : post_(std::mo
 
 std::optional<ev::Role> DeviceRegistry::roleByExt(uint64_t ext_addr) const noexcept
 {
-    for (std::size_t i = 0; i < ev::kRoleCount; ++i) {
-        if (records_[i].valid && records_[i].ext_addr == ext_addr) {
-            return static_cast<ev::Role>(i);
+    for (const ev::Role role : ev::kRoles) {
+        if (record(role).valid && record(role).ext_addr == ext_addr) {
+            return role;
         }
     }
     return std::nullopt;
@@ -35,9 +35,9 @@ std::optional<ev::Role> DeviceRegistry::roleByExt(uint64_t ext_addr) const noexc
 
 std::optional<ev::Role> DeviceRegistry::roleFromManifest(uint64_t ext_addr) const noexcept
 {
-    for (std::size_t i = 0; i < ev::kRoleCount; ++i) {
-        if (ext_addr != 0 && manifest_[i] == ext_addr) {
-            return static_cast<ev::Role>(i);
+    for (const ev::Role role : ev::kRoles) {
+        if (ext_addr != 0 && manifest_[ev::indexOf(role)] == ext_addr) {
+            return role;
         }
     }
     return std::nullopt;
@@ -50,13 +50,13 @@ void DeviceRegistry::persist()
 
 void DeviceRegistry::heard(ev::Role role)
 {
-    liveness_[ev::indexOf(role)].last_heard_us = now_us_ > 0 ? now_us_ : 1;
+    liveness(role).last_heard_us = now_us_ > 0 ? now_us_ : 1;
     setReachable(role, true);
 }
 
 void DeviceRegistry::setReachable(ev::Role role, bool reachable)
 {
-    Liveness &l = liveness_[ev::indexOf(role)];
+    Liveness &l = liveness(role);
     if (l.reachable == reachable) {
         return;
     }
@@ -77,8 +77,8 @@ void DeviceRegistry::setReachable(ev::Role role, bool reachable)
 
 ev::DeviceLink DeviceRegistry::link(ev::Role role) const noexcept
 {
-    const Liveness &l = liveness_[ev::indexOf(role)];
-    if (!records_[ev::indexOf(role)].valid) {
+    const Liveness &l = liveness(role);
+    if (!record(role).valid) {
         return ev::DeviceLink::Unpaired;
     }
     if (l.reachable && l.last_heard_us != 0 && now_us_ - l.last_heard_us <= kOnlineWindowUs) {
@@ -89,33 +89,33 @@ ev::DeviceLink DeviceRegistry::link(ev::Role role) const noexcept
 
 void DeviceRegistry::discover(ev::Role role)
 {
-    post_(ev::Discover{role, records_[ev::indexOf(role)].short_addr});
+    post_(ev::Discover{role, record(role).short_addr});
 }
 
 void DeviceRegistry::assign(ev::Role role, uint64_t ext_addr, uint16_t short_addr)
 {
-    records_[ev::indexOf(role)] = {.valid = true, .ext_addr = ext_addr, .short_addr = short_addr, .endpoint = 0};
-    Liveness &l = liveness_[ev::indexOf(role)];
-    l           = {.reachable = l.reachable}; // heard() reports it reachable if it wasn't
+    record(role) = {.valid = true, .ext_addr = ext_addr, .short_addr = short_addr, .endpoint = 0};
+    Liveness &l  = liveness(role);
+    l            = {.reachable = l.reachable}; // heard() reports it reachable if it wasn't
     persist();
     heard(role);
-    post_(ev::RoleAssigned{role, records_[ev::indexOf(role)]});
+    post_(ev::RoleAssigned{role, record(role)});
     discover(role);
 }
 
 void DeviceRegistry::clear(ev::Role role)
 {
-    records_[ev::indexOf(role)] = {};
-    liveness_[ev::indexOf(role)] = {};
+    record(role)   = {};
+    liveness(role) = {};
     post_(ev::RoleCleared{role});
 }
 
 void DeviceRegistry::onRolesLoaded(const ev::RolesLoaded &e)
 {
     records_ = e.records;
-    for (std::size_t i = 0; i < ev::kRoleCount; ++i) {
-        if (records_[i].valid) {
-            post_(ev::RoleAssigned{static_cast<ev::Role>(i), records_[i]});
+    for (const ev::Role role : ev::kRoles) {
+        if (record(role).valid) {
+            post_(ev::RoleAssigned{role, record(role)});
         }
     }
 }
@@ -123,7 +123,7 @@ void DeviceRegistry::onRolesLoaded(const ev::RolesLoaded &e)
 void DeviceRegistry::onAnnounced(const ev::DeviceAnnounced &e)
 {
     if (const auto existing = roleByExt(e.ext_addr)) {
-        ev::DeviceRecord &d = records_[ev::indexOf(*existing)];
+        ev::DeviceRecord &d = record(*existing);
         if (d.short_addr != e.short_addr) {
             d.short_addr = e.short_addr;
             persist();
@@ -156,7 +156,7 @@ void DeviceRegistry::onAnnounced(const ev::DeviceAnnounced &e)
                     e.short_addr, static_cast<unsigned long long>(e.ext_addr));
         return;
     }
-    if (records_[ev::indexOf(*role)].valid) {
+    if (record(*role).valid) {
         SUNSIM_LOGW(kTag, "Ignoring device 0x%04x: %s already assigned to a different device", e.short_addr,
                     name(*role));
         return;
@@ -167,7 +167,7 @@ void DeviceRegistry::onAnnounced(const ev::DeviceAnnounced &e)
 
 void DeviceRegistry::onEndpointFound(const ev::EndpointFound &e)
 {
-    ev::DeviceRecord &d = records_[ev::indexOf(e.role)];
+    ev::DeviceRecord &d = record(e.role);
     if (e.endpoint == 0 || !d.valid) {
         return; // the adapter logged why; retried every kDiscoveryRetrySeconds
     }
@@ -194,7 +194,7 @@ void DeviceRegistry::onBindResult(const ev::BindResult &e)
 
 void DeviceRegistry::onPingResult(const ev::PingResult &e)
 {
-    if (!records_[ev::indexOf(e.role)].valid) {
+    if (!record(e.role).valid) {
         return; // unpaired meanwhile
     }
     if (e.ok) {
@@ -203,7 +203,7 @@ void DeviceRegistry::onPingResult(const ev::PingResult &e)
     }
     // A lost ping alone isn't enough (a busy network drops some); it must
     // also have been silent - no acks - for a while.
-    const Liveness &l = liveness_[ev::indexOf(e.role)];
+    const Liveness &l = liveness(e.role);
     if (l.last_heard_us == 0 || now_us_ - l.last_heard_us > kUnreachableSilenceUs) {
         SUNSIM_LOGD(kTag, "Ping to %s failed (err=0x%x status=0x%x)", name(e.role), e.error, e.status);
         setReachable(e.role, false);
@@ -212,24 +212,24 @@ void DeviceRegistry::onPingResult(const ev::PingResult &e)
 
 void DeviceRegistry::onAck(const ev::AckReceived &e)
 {
-    for (std::size_t i = 0; i < ev::kRoleCount; ++i) {
-        if (records_[i].valid && records_[i].short_addr == e.short_addr) {
-            heard(static_cast<ev::Role>(i));
-            liveness_[i].rssi = e.rssi;
+    for (const ev::Role role : ev::kRoles) {
+        if (record(role).valid && record(role).short_addr == e.short_addr) {
+            heard(role);
+            liveness(role).rssi = e.rssi;
         }
     }
 }
 
 void DeviceRegistry::onButtonPressed(const ev::ButtonPressed &e)
 {
-    if (e.source == ev::Source::Zigbee && records_[ev::indexOf(ev::Role::Button)].valid) {
+    if (e.source == ev::Source::Zigbee && record(ev::Role::Button).valid) {
         heard(ev::Role::Button);
     }
 }
 
 void DeviceRegistry::onPairRequested(const ev::PairRequested &e)
 {
-    if (records_[ev::indexOf(e.role)].valid) {
+    if (record(e.role).valid) {
         SUNSIM_LOGW(kTag, "%s is already assigned; the next device to join will replace it", name(e.role));
     }
     armed_ = e.role;
@@ -252,8 +252,8 @@ void DeviceRegistry::onUnpairRequested(const ev::UnpairRequested &e)
         clear(*e.role);
         SUNSIM_LOGI(kTag, "%s cleared", name(*e.role));
     } else {
-        for (std::size_t i = 0; i < ev::kRoleCount; ++i) {
-            clear(static_cast<ev::Role>(i));
+        for (const ev::Role role : ev::kRoles) {
+            clear(role);
         }
         SUNSIM_LOGI(kTag, "All roles cleared");
     }
@@ -264,41 +264,54 @@ void DeviceRegistry::onTick(const ev::Tick &e)
 {
     now_us_ = e.uptime_us;
     ++seconds_;
-
     if (seconds_ % kDiscoveryRetrySeconds == 0) {
-        for (std::size_t i = 0; i < ev::kRoleCount; ++i) {
-            if (records_[i].valid && records_[i].endpoint == 0) {
-                SUNSIM_LOGI(kTag, "Retrying endpoint discovery for %s (short=0x%04x)", ev::roleName(i).data(),
-                            records_[i].short_addr);
-                discover(static_cast<ev::Role>(i));
-            }
+        retryDiscovery();
+    }
+    pingDue();
+    publishDevices();
+}
+
+void DeviceRegistry::retryDiscovery()
+{
+    for (const ev::Role role : ev::kRoles) {
+        const ev::DeviceRecord &d = record(role);
+        if (d.valid && d.endpoint == 0) {
+            SUNSIM_LOGI(kTag, "Retrying endpoint discovery for %s (short=0x%04x)", name(role), d.short_addr);
+            discover(role);
         }
     }
+}
 
-    for (std::size_t i = 0; i < ev::kRoleCount; ++i) {
-        // The button is a sleepy end device that won't answer; it counts as
-        // heard when it's pressed instead.
-        if (!records_[i].valid || static_cast<ev::Role>(i) == ev::Role::Button) {
+void DeviceRegistry::pingDue()
+{
+    // The button is a sleepy end device that won't answer; it counts as
+    // heard when it's pressed instead.
+    for (const ev::Role role : ev::kBulbs) {
+        if (!record(role).valid) {
             continue;
         }
-        Liveness &l = liveness_[i];
+        Liveness &l = liveness(role);
         if (l.next_ping_s == 0) {
             l.next_ping_s = kFirstPingSeconds;
         }
         if (seconds_ >= l.next_ping_s) {
             l.next_ping_s = seconds_ + (l.reachable ? kPingSeconds : kUnreachablePingSeconds);
-            post_(ev::Ping{static_cast<ev::Role>(i), records_[i].short_addr});
+            post_(ev::Ping{role, record(role).short_addr});
         }
     }
+}
 
+void DeviceRegistry::publishDevices()
+{
     ev::DevicesUpdated u{.devices = {}, .records = records_, .armed = armed_};
-    for (std::size_t i = 0; i < ev::kRoleCount; ++i) {
-        u.devices[i] = {.link          = link(static_cast<ev::Role>(i)),
-                        .paired        = records_[i].valid,
-                        .has_endpoint  = records_[i].endpoint != 0,
-                        .last_heard_us = liveness_[i].last_heard_us,
-                        .rssi          = liveness_[i].rssi,
-                        .reachable     = liveness_[i].reachable};
+    for (const ev::Role role : ev::kRoles) {
+        const Liveness &l = liveness(role);
+        u.devices[ev::indexOf(role)] = {.link          = link(role),
+                                        .paired        = record(role).valid,
+                                        .has_endpoint  = record(role).endpoint != 0,
+                                        .last_heard_us = l.last_heard_us,
+                                        .rssi          = l.rssi,
+                                        .reachable     = l.reachable};
     }
     post_(u);
 }

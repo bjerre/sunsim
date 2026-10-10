@@ -25,8 +25,8 @@ void ProgramHost::onModeChanged(const ev::ModeChanged &e)
 
 void ProgramHost::onConfig(const ev::ConfigChanged &e)
 {
-    for (Program *p : all_) {
-        p->onConfig(e);
+    for (const ev::Mode mode : ev::kModes) {
+        program(mode).onConfig(e);
     }
     running().refresh(std::nullopt, time_); // show a change now, not at the next update
 }

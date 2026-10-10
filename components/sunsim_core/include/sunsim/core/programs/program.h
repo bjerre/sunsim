@@ -38,8 +38,7 @@ protected:
     // Calls f(role) for each bulb, or only for `only` if it's given (and a bulb).
     template <class F> static void forEachBulb(std::optional<ev::Role> only, F &&f)
     {
-        for (std::size_t i = 0; i < ev::kBulbCount; ++i) {
-            const auto role = static_cast<ev::Role>(i);
+        for (const ev::Role role : ev::kBulbs) {
             if (!only || *only == role) {
                 f(role);
             }

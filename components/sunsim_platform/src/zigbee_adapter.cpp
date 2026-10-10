@@ -32,6 +32,12 @@ ev::Role roleFromCtx(void *ctx)
 {
     return static_cast<ev::Role>(reinterpret_cast<intptr_t>(ctx));
 }
+
+// A ZDO request got through and the device answered SUCCESS.
+template <class Result> bool zdoOk(const Result *result)
+{
+    return result && result->error == EZB_ERR_NONE && result->rsp && result->rsp->status == EZB_ZDP_STATUS_SUCCESS;
+}
 } // namespace
 
 ZigbeeAdapter *ZigbeeAdapter::s_self = nullptr;
@@ -333,8 +339,7 @@ bool ZigbeeAdapter::handleApsIndication(const ezb_apsde_data_ind_t *ind)
 void ZigbeeAdapter::onMatchDescResult(const ezb_zdo_match_desc_req_result_t *result, void *user_ctx)
 {
     const ev::Role role = roleFromCtx(user_ctx);
-    if (!result || result->error != EZB_ERR_NONE || !result->rsp || result->rsp->status != EZB_ZDP_STATUS_SUCCESS ||
-        result->rsp->match_length == 0) {
+    if (!zdoOk(result) || result->rsp->match_length == 0) {
         ESP_LOGW(kTag, "Could not find %s endpoint for %s (err=0x%x status=0x%x matches=%d), will retry",
                  role == ev::Role::Button ? "On/Off output" : "light", ev::roleName(role).data(),
                  result ? result->error : -1, (result && result->rsp) ? result->rsp->status : -1,
@@ -347,17 +352,13 @@ void ZigbeeAdapter::onMatchDescResult(const ezb_zdo_match_desc_req_result_t *res
 
 void ZigbeeAdapter::onBindResult(const ezb_zdp_bind_req_result_t *result, void *user_ctx)
 {
-    const bool ok = result && result->error == EZB_ERR_NONE && result->rsp &&
-                    result->rsp->status == EZB_ZDP_STATUS_SUCCESS;
-    s_self->post_(ev::BindResult{.role = roleFromCtx(user_ctx), .ok = ok});
+    s_self->post_(ev::BindResult{.role = roleFromCtx(user_ctx), .ok = zdoOk(result)});
 }
 
 void ZigbeeAdapter::onPingResult(const ezb_zdo_active_ep_req_result_t *result, void *user_ctx)
 {
-    const bool ok = result && result->error == EZB_ERR_NONE && result->rsp &&
-                    result->rsp->status == EZB_ZDP_STATUS_SUCCESS;
     s_self->post_(ev::PingResult{.role   = roleFromCtx(user_ctx),
-                                 .ok     = ok,
+                                 .ok     = zdoOk(result),
                                  .error  = result ? static_cast<int>(result->error) : -1,
                                  .status = (result && result->rsp) ? static_cast<int>(result->rsp->status) : -1});
 }
