@@ -6,6 +6,8 @@ CompileFlags:
   Add:
     - -resource-dir=/home/bjerre/.espressif/tools/esp-clang/esp-21.1.3_20260408/esp-clang/lib/clang/21
     - -Wno-reserved-module-identifier   # building libstdc++'s `export module std;` (and -Werror is on)
+    - -Wno-extern-c-compat              # ESP-IDF's sys/reent.h: an empty struct in extern "C" (clang only)
+    - -Wno-import-implementation-partition-unit-in-interface-unit # e.g. :clock using internal :fast_day_clock
   Remove:
     - -fno-shrink-wrap
     - -fstrict-volatile-bitfields

@@ -19,7 +19,7 @@ set(EVENTS ${ROOT}/components/sunsim_events)
 file(GLOB EVENTS_MODULES ${EVENTS}/src/*.cppm)
 add_library(sunsim_events STATIC)
 target_sources(sunsim_events PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${EVENTS}/src FILES ${EVENTS_MODULES})
-target_include_directories(sunsim_events PUBLIC ${EVENTS}/include PRIVATE ${ROOT}/components/eventpp/include)
+target_include_directories(sunsim_events PUBLIC ${EVENTS}/include)
 sunsim_import_std(sunsim_events)
 
 set(CORE ${ROOT}/components/sunsim_core/src)

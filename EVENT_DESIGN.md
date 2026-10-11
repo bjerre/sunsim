@@ -71,7 +71,7 @@ flowchart TB
 
 Conventions: at most two levels (`sunsim::core::X`); anonymous namespaces
 for file-private helpers (as today); `detail` only for exported
-internals such as eventpp policy structs. `core` and `platform` never
+internals such as `indexIn`, behind `kTypeId`. `core` and `platform` never
 import each other — anything both need lives in `ev`.
 
 ## 3. Threading model
@@ -82,7 +82,7 @@ flowchart LR
     TM["esp_timer<br/>1 Hz"] -->|post Tick| Q
     CON["Console REPL task"] -->|post requests| Q
     TS["Time-sync task"] -->|post ClockSynced| Q
-    Q[["eventpp EventQueue"]] --> AT
+    Q[["EventBus queue"]] --> AT
 
     subgraph AT["App task (the only consumer)"]
         direction TB
@@ -324,15 +324,17 @@ namespace sunsim::ev {
 using Payload = std::variant<Heartbeat, Tick, ProgramTick, /* ... */ StatusChanged>;
 struct Event {
     Payload data;
-    template <class T> Event(T &&payload);          // implicit: post(ev::Tick{...})
-    template <class T> const T &as() const;
+    template <class T> requires EventPayload<std::remove_cvref_t<T>>
+    Event(T &&payload);                             // implicit: post(ev::Tick{...})
+    template <EventPayload T> const T &as() const;
 };
 template <class T> inline constexpr std::size_t kTypeId = /* index of T in Payload */;
+template <class T> concept EventPayload = /* T is one of Payload's alternatives */;
 using Post = std::function<void(Event)>;            // what every module gets
 
-class EventBus {                                    // wraps eventpp::EventQueue<size_t, void(const Event&)>
+class EventBus {                                    // a mutex-guarded queue + listeners per payload type
 public:
-    template <class T, class F> void on(F listener); // bus.on<Tick>([&](const Tick &t) { ... });
+    template <EventPayload T> void on(ListenerFor<T> auto listener); // bus.on<Tick>([&](const Tick &t) { ... });
     const Post &post() const;
     void wait(); bool process(); void drain();
 };
@@ -381,24 +383,31 @@ button pairing binds and is never driven as a bulb; `unpair all` and
 unpairing a group; the role layout (names, groups, selections); the five
 wall lights dimming in order away from the sun.
 
-## 9. eventpp on ESP-IDF — measured
+## 9. The EventBus
 
-- Builds for ESP32-C6 with C++ exceptions **and** RTTI disabled (checked
-  standalone before adoption, and in the firmware).
-- Vendored under `components/eventpp` (commit `1224dd6`, headers only).
-- Standalone bus benchmark: eventpp's own cost ~3.6 KB flash over a
-  hand-rolled mutex+deque bus; host stress test (2 producer threads,
-  140k events, ThreadSanitizer) clean.
-- Whole firmware vs `master` with the same sdkconfig: **+24 KB flash,
-  +1.5 KB static RAM** (1.27 MB vs 1.25 MB of a 4 MB app slot).
-- `EventQueue::process()` swaps the pending list out under its mutex and
-  dispatches without holding it, so producers never block on listeners.
+- `bus.cppm`, standard library only: one `std::mutex`-guarded vector of
+  pending events, a `std::condition_variable` for `wait()`, and a
+  `std::function` list per payload type. Listeners are added while wiring,
+  before anything is processed, and never removed.
+- `process()` swaps the pending events out under the mutex and delivers
+  them without holding it, so producers never block on listeners. The two
+  vectors keep their capacity, so nothing is allocated once warmed up.
+- A host test posts 40k events from two threads and checks each poster's
+  order. (ThreadSanitizer can't run: GCC 15's `std` module doesn't build
+  with `-fsanitize=thread`.)
 - An `Event` is as large as its largest payload, and posting copies it a few
   times on the poster's stack. `StatusChanged` therefore carries a
   `shared_ptr` (Event: ~496 -> ~256 bytes), and every posting task has room:
   main 6 KB, esp_timer 4.5 KB, Zigbee 6 KB, console 6 KB, app 8 KB.
-- Alternative considered: ESP-IDF's `esp_event` (C-only, memcpy'd POD
-  payloads, no host build) - rejected for typed events and host testing.
+- History: the bus wrapped [eventpp](https://github.com/wqking/eventpp)'s
+  `EventQueue` until the components became C++ modules. clang (clangd)
+  can't compile eventpp's `std::shared_ptr` use next to `import std`, which
+  took every importer's code navigation down; GCC was fine. sunsim only
+  used eventpp's queue, so this targeted bus replaced it (firmware +2.3 KB
+  at -Og).
+- Alternative considered at the start: ESP-IDF's `esp_event` (C-only,
+  memcpy'd POD payloads, no host build) - rejected for typed events and
+  host testing.
 
 ## 10. Migration
 

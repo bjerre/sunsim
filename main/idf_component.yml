@@ -1,6 +1,6 @@
 ## IDF Component Manager Manifest File
 ## Third-party dependencies live with the component that uses them
-## (components/sunsim_platform/idf_component.yml); eventpp is vendored.
+## (components/sunsim_platform/idf_component.yml).
 dependencies:
   idf:
     version: '>=5.2'

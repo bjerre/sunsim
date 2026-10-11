@@ -35,8 +35,8 @@ flowchart TB
     Switch -- "On/Off: Toggle / On / Off" --> ZA
 ```
 
-Every module talks only through events on one `EventBus`
-([eventpp](https://github.com/wqking/eventpp)); a single app task processes
+Every module talks only through events on one `EventBus` (`bus.cppm`, a
+mutex-guarded queue); a single app task processes
 them while holding the Zigbee lock, so no module takes locks or calls
 another. `sunsim::core` holds all application logic and builds on the host
 (`test/host`); `sunsim::platform` is everything that touches ESP-IDF.

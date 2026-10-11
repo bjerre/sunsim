@@ -272,8 +272,6 @@ generated `role_manifest.h`.
     time, SNTP sync.
   - `settings_store.cppm` - all NVS persistence (roles, settings, intensities).
   - `console.cppm` - the serial REPL; `status_display.cppm` - the LCD.
-- `components/eventpp/` - vendored [eventpp](https://github.com/wqking/eventpp)
-  (header-only, Apache-2.0).
 - `main/` - `main.cpp` (`App`: creates the bus and modules, platform wiring,
   app task; and `app_main`), menuconfig (`Kconfig.projbuild`), and the role manifest
   (`role_manifest.json` -> `role_manifest.h` via `gen_role_manifest.py`).

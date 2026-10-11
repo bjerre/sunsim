@@ -5,8 +5,6 @@
 
 module;
 
-#include <eventpp/eventqueue.h>
-
 #include "sunsim/ev/log.h"
 
 export module sunsim.ev:bus;
@@ -16,45 +14,81 @@ import :events;
 
 export namespace sunsim::ev {
 
+// Something that can listen for payload T on the bus.
+template <class F, class T>
+concept ListenerFor = EventPayload<T> && std::invocable<F &, const T &> && std::copy_constructible<F>;
+
+// process() takes everything queued so far under the lock, then delivers it
+// without holding it, so posting never waits on a listener. Listeners are
+// added while wiring, before anything is processed, and never removed.
 class EventBus {
 public:
-    EventBus() : post_([this](Event e) { enqueue(std::move(e)); }) {}
+    EventBus() = default;
 
     EventBus(const EventBus &)            = delete;
     EventBus &operator=(const EventBus &) = delete;
 
     // Listen for payload type T: `bus.on<Tick>([&](const Tick &t) { ... });`
-    template <class T, class F> void on(F listener)
+    template <EventPayload T> void on(ListenerFor<T> auto listener)
     {
-        queue_.appendListener(kTypeId<T>, [listener = std::move(listener)](const Event &e) mutable {
-            listener(e.as<T>());
-        });
+        listeners_[kTypeId<T>].emplace_back(
+            [listener = std::move(listener)](const Event &e) mutable { listener(e.as<T>()); });
     }
 
+    // Any task.
     void enqueue(Event e)
     {
         SUNSIM_LOGD("EV", "%s", e.name()); // full event trace at DEBUG
-        queue_.enqueue(std::move(e));
+        {
+            const std::scoped_lock lock{mutex_};
+            pending_.push_back(std::move(e));
+        }
+        ready_.notify_one();
     }
 
     [[nodiscard]] const Post &post() const noexcept { return post_; }
 
-    void wait() const { queue_.wait(); }
-    bool process() { return queue_.process(); }
+    // The consumer: block until something is queued.
+    void wait() const
+    {
+        std::unique_lock lock{mutex_};
+        ready_.wait(lock, [this] { return !pending_.empty(); });
+    }
+
+    // The consumer: deliver everything queued so far; false if there was nothing.
+    bool process()
+    {
+        {
+            const std::scoped_lock lock{mutex_};
+            batch_.swap(pending_); // both keep their capacity: no allocating once warmed up
+        }
+        for (const Event &e : batch_) {
+            for (const auto &listener : listeners_[e.type()]) {
+                listener(e);
+            }
+        }
+        const bool any = !batch_.empty();
+        batch_.clear();
+        return any;
+    }
 
     // Process until no events remain, including ones posted while processing.
     void drain()
     {
-        while (queue_.process()) {
+        while (process()) {
         }
     }
 
 private:
-    struct Policy {
-        static std::size_t getEvent(const Event &e) { return e.type(); }
-    };
-    eventpp::EventQueue<std::size_t, void(const Event &), Policy> queue_;
-    Post                                                           post_;
+    using Listeners = std::vector<std::function<void(const Event &)>>;
+    std::array<Listeners, std::variant_size_v<Payload>> listeners_; // by payload type
+
+    mutable std::mutex              mutex_;
+    mutable std::condition_variable ready_;
+    std::vector<Event>              pending_; // guarded by mutex_
+    std::vector<Event>              batch_;   // the consumer's, while it delivers
+
+    Post post_ = [this](Event e) { enqueue(std::move(e)); };
 };
 
 } // namespace sunsim::ev

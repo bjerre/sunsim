@@ -409,6 +409,31 @@ int main()
         CHECK(persisted.size() == 1 && !persisted[0].records[kWallA].valid);
     });
 
+    test("the bus delivers every event posted from many threads, in each poster's order", [] {
+        EventBus         bus;
+        std::vector<int> seen[2];
+        bus.on<AckReceived>([&](const AckReceived &a) { seen[a.status].push_back(a.short_addr); });
+        constexpr int kPerThread = 20000;
+        std::vector<std::jthread> posters;
+        for (uint8_t t = 0; t < 2; ++t) {
+            posters.emplace_back([&bus, t] {
+                for (int i = 0; i < kPerThread; ++i) {
+                    bus.post()(AckReceived{.short_addr = static_cast<uint16_t>(i), .status = t});
+                }
+            });
+        }
+        std::size_t delivered = 0;
+        while (delivered < 2 * kPerThread) {
+            bus.wait();
+            bus.process();
+            delivered = seen[0].size() + seen[1].size();
+        }
+        posters.clear(); // join
+        for (const auto &s : seen) {
+            CHECK(s.size() == kPerThread && std::ranges::is_sorted(s));
+        }
+    });
+
     test("the layout: five wall lights east to west, then work and button", [] {
         static_assert(kRoleCount == 7 && kBulbCount == 6);
         static_assert(members(Group::Wall).size() == 5);

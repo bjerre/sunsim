@@ -15,7 +15,7 @@ set(modules "src/ev.cppm"
 idf_component_register(SRCS ${modules}
                        INCLUDE_DIRS "include" # sunsim/ev/log.h
                        REQUIRES log
-                       PRIV_REQUIRES eventpp esp_timer)
+                       PRIV_REQUIRES esp_timer)
 
 target_sources(${COMPONENT_LIB} PUBLIC FILE_SET CXX_MODULES BASE_DIRS src FILES ${modules})
 

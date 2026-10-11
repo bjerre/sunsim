@@ -191,14 +191,10 @@ inline constexpr const char *kEventNames[] = {
 static_assert(std::size(kEventNames) == std::variant_size_v<Payload>, "kEventNames out of sync with Payload");
 
 namespace detail {
-template <class T, class... Ts>
-constexpr std::size_t indexIn(const std::variant<Ts...> *) noexcept
+template <class T, class... Ts> constexpr std::size_t indexIn(const std::variant<Ts...> *) noexcept
 {
-    constexpr bool        matches[] = {std::is_same_v<T, Ts>...};
-    std::size_t           i         = 0;
-    for (; i < sizeof...(Ts) && !matches[i]; ++i) {
-    }
-    return i;
+    constexpr std::array matches{std::is_same_v<T, Ts>...};
+    return static_cast<std::size_t>(std::ranges::find(matches, true) - matches.begin());
 }
 } // namespace detail
 
@@ -206,19 +202,38 @@ constexpr std::size_t indexIn(const std::variant<Ts...> *) noexcept
 template <class T>
 inline constexpr std::size_t kTypeId = detail::indexIn<T>(static_cast<const Payload *>(nullptr));
 
+// A type that travels on the bus: one of Payload's alternatives.
+template <class T>
+concept EventPayload = kTypeId<T> < std::variant_size_v<Payload>;
+
 struct Event {
     Payload data;
 
-    template <class T, class = std::enable_if_t<!std::is_same_v<std::decay_t<T>, Event>>>
+    template <class T>
+        requires EventPayload<std::remove_cvref_t<T>>
     Event(T &&payload) : data(std::forward<T>(payload)) // NOLINT: implicit by design - post(ev::Tick{...})
     {
-        static_assert(kTypeId<std::decay_t<T>> < std::variant_size_v<Payload>, "not an event payload type");
     }
 
     [[nodiscard]] std::size_t type() const noexcept { return data.index(); }
     [[nodiscard]] const char *name() const noexcept { return kEventNames[data.index()]; }
-    template <class T> [[nodiscard]] const T &as() const { return *std::get_if<T>(&data); }
+    template <EventPayload T> [[nodiscard]] const T &as() const { return *std::get_if<T>(&data); }
+
+    Event(const Event &);
+    Event(Event &&) noexcept;
+    Event &operator=(const Event &);
+    Event &operator=(Event &&) noexcept;
+    ~Event();
 };
+
+// Not inline: sunsim.ev's object file has the one copy. (Implicit, GCC 15
+// left importers that move or destroy an Event linking to std::variant
+// internals nobody emitted - as with Timer's destructor in :flow.)
+Event::Event(const Event &)                = default;
+Event::Event(Event &&) noexcept            = default;
+Event &Event::operator=(const Event &)     = default;
+Event &Event::operator=(Event &&) noexcept = default;
+Event::~Event()                            = default;
 
 // What every module gets instead of a reference to the bus or to another
 // module. Thread-safe: may be called from any task.
