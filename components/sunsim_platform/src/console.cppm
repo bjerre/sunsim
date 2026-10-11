@@ -23,7 +23,7 @@ export namespace sunsim::platform {
 //   pair cancel           disarm a pending `pair`
 //   unpair <role|group|all>   forget role assignment(s)
 //   open [seconds]        open the network for joining (default 180)
-//   config                show active/work hours, fade, sun shift, amber, work days
+//   config                show active/work hours, fade, sun shift, amber, amber sweep, work days
 //   config <key> <value>  change one (see `help config`)
 //   intensity [<light|group|all> <1-100>]   per-light peak brightness, saved
 //   press single|double|hold          simulate the button
@@ -191,8 +191,8 @@ void printSchedule(const ev::ProgramConfig &c)
     std::printf("-");
     printClock(c.work_end_hour);
     std::printf("  (work light cool -> warm)\nsun   %u%% (wall dimming away from the sun)\n"
-                "amber %s (sunrise/sunset glow below %.0f deg sun elevation)\ndays ",
-                c.sun_shift_percent, c.amber_enabled ? "on" : "off", c.golden_elevation_deg);
+                "amber %s (sunrise/sunset glow below %.0f deg sun elevation; far end lags %u deg)\ndays ",
+                c.sun_shift_percent, c.amber_enabled ? "on" : "off", c.golden_elevation_deg, c.amber_sweep_deg);
     for (int d = 0; d < 7; ++d) {
         const int day = (d + 1) % 7; // list Monday first
         if ((c.active_days >> day) & 1U) {
@@ -244,7 +244,9 @@ int cmdConfig(int argc, char **argv)
     const std::string_view key{argv[1]};
     if (argc != 3) {
         std::printf("usage: config [hours HH:MM-HH:MM | workhours HH:MM-HH:MM | fade <minutes> |\n"
-                    "               sunshift <0-100> | amber on|off | days mon-fri|all|mon,tue,...]\n");
+                    "               sunshift <0-100> | amber on|off | ambersweep <0-%u> |\n"
+                    "               days mon-fri|all|mon,tue,...]\n",
+                    ev::kMaxAmberSweepDeg);
         return 1;
     }
 
@@ -289,6 +291,14 @@ int cmdConfig(int argc, char **argv)
             return 1;
         }
         c.amber_enabled = value == "on";
+    } else if (key == "ambersweep") {
+        const int degrees = std::atoi(argv[2]);
+        if (degrees < 0 || degrees > ev::kMaxAmberSweepDeg || (degrees == 0 && argv[2][0] != '0')) {
+            std::printf("ambersweep must be 0-%u (deg of sun elevation; 0 = the whole wall alike)\n",
+                        ev::kMaxAmberSweepDeg);
+            return 1;
+        }
+        c.amber_sweep_deg = static_cast<uint8_t>(degrees);
     } else if (key == "days") {
         const auto days = parseDays(argv[2]);
         if (!days) {
@@ -297,7 +307,7 @@ int cmdConfig(int argc, char **argv)
         }
         c.active_days = *days;
     } else {
-        std::printf("unknown setting '%s' (hours, workhours, fade, sunshift, amber, days)\n", argv[1]);
+        std::printf("unknown setting '%s' (hours, workhours, fade, sunshift, amber, ambersweep, days)\n", argv[1]);
         return 1;
     }
 
@@ -564,7 +574,8 @@ void startConsole(const ev::Post &post, const StatusSlot &status)
                     "<role|group|all>", &cmdUnpair);
     registerCommand("open", "Open the network for joining", "[seconds]", &cmdOpen);
     registerCommand("config", "Show or change active/work hours, fade, sun shift, amber glow and work days",
-                    "[hours|workhours HH:MM-HH:MM | fade <min> | sunshift <0-100> | amber on|off | days ...]",
+                    "[hours|workhours HH:MM-HH:MM | fade <min> | sunshift <0-100> | amber on|off |"
+                    " ambersweep <0-30> | days ...]",
                     &cmdConfig);
     registerCommand("intensity", "Show or set each light's peak brightness, 1-100%", "[<light|group|all> <1-100>]",
                     &cmdIntensity);

@@ -32,6 +32,32 @@ class DeviceRegistry {
 public:
     using Manifest = ev::PerRole<uint64_t>; // IEEE address per role; 0 = no entry
 
+    // The build-time manifest (main/role_manifest.json: entries with a role
+    // name and an ext_addr) checked against the layout, so changing
+    // ev::kLayout needs nothing else changed. An entry naming no role, a
+    // role given twice, or one address given to two roles doesn't compile.
+    // Names ignore case; a 0 address is no entry.
+    template <std::ranges::input_range Entries>
+    [[nodiscard]] static consteval Manifest manifestOf(const Entries &entries)
+    {
+        Manifest manifest{};
+        for (const auto &entry : entries) {
+            const auto role = ev::parseRole(entry.role);
+            if (!role) {
+                roleManifestNamesAnUnknownRole();
+            } else if (entry.ext_addr != 0) {
+                if (manifest[*role] != 0) {
+                    roleManifestGivesARoleTwice();
+                }
+                if (std::ranges::contains(manifest.items, entry.ext_addr)) {
+                    roleManifestGivesAnAddressTwice();
+                }
+                manifest[*role] = entry.ext_addr;
+            }
+        }
+        return manifest;
+    }
+
     DeviceRegistry(ev::Post post, Manifest manifest);
 
     void onRolesLoaded(const ev::RolesLoaded &e);
@@ -48,6 +74,12 @@ public:
     void onTick(const ev::Tick &e);
 
 private:
+    // Not constexpr: reached while building a manifest, they stop the
+    // compile, and the error names them.
+    static void roleManifestNamesAnUnknownRole() noexcept {}
+    static void roleManifestGivesARoleTwice() noexcept {}
+    static void roleManifestGivesAnAddressTwice() noexcept {}
+
     struct Liveness {
         std::optional<ev::Instant> last_heard{}; // empty: not since boot
         int8_t     rssi      = 0;

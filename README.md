@@ -10,7 +10,8 @@ simulation and responds to one physical button controller:
   17:30, then holds warm).
 - The wall bulbs sit east-to-west on the south wall (WallA east, WallE
   west): the one nearest the real sun's direction is brightest (`config sunshift`),
-  and near sunrise/sunset they glow amber (`config amber`).
+  and near sunrise/sunset they glow amber, deepest at the end nearest the
+  sun (`config amber`, `config ambersweep`).
 - All bulbs only run inside an **active window** (default Mon-Fri,
   08:00-19:00, 10 min fade at each edge) and are off outside it.
 - **1 button controller** (any simple single-button Zigbee switch):
@@ -71,6 +72,7 @@ sunsim> config hours 08:00-19:00
 sunsim> config workhours 08:30-17:30   # work light's cool -> warm span
 sunsim> config sunshift 25          # wall dimming away from the sun, % (0 = off)
 sunsim> config amber on             # amber glow when the sun is < 6 deg up
+sunsim> config ambersweep 3         # the glow follows the sun: far end lags 3 deg (0 = all alike)
 sunsim> config fade 10               # minutes to fade in/out at each edge (0 = hard on/off)
 sunsim> config days mon-fri          # or: all, or a list like mon,tue,thu
 ```
@@ -130,7 +132,8 @@ bulbs' sunrise/sunset calculation - see
 ## Pairing
 
 Roles (`WallA`-`WallE` east to west along the wall, `Work`, `Button`; the
-counts per group are `ev::kLayout` in `types.cppm`) are assigned from the serial
+counts per group are `ev::kLayout` in `types.cppm`, the one place to change
+for more or fewer wall lights) are assigned from the serial
 console (`idf.py monitor`, over the same USB cable used for flashing), one
 device at a time:
 
@@ -164,6 +167,7 @@ three-light wall renames the stored roles once, keeping each bulb's place:
 Alternatively, devices can be pre-assigned by IEEE address in
 [`main/role_manifest.json`](main/role_manifest.json) (used only when no `pair`
 is armed). Use the exact `ext=` value from the log, not a hand-copied label.
+Entries are by role name; one the layout doesn't have fails the build.
 
 You don't need all 7 devices present for sunsim to do something useful:
 whichever bulbs have joined get the program applied; missing ones are

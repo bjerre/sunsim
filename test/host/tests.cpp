@@ -483,6 +483,62 @@ int main()
         CHECK(std::ranges::is_sorted(levels, std::ranges::less{}) && levels.front() < levels.back()); // E brightest
     });
 
+    test("the role manifest is checked against the layout by name", [] {
+        struct Entry {
+            const char *role;
+            uint64_t    ext_addr;
+        };
+        constexpr std::array entries{Entry{"WallE", 0xE5}, Entry{"work", 0xB2}, Entry{"WallB", 0}};
+        constexpr auto manifest = core::DeviceRegistry::manifestOf(entries);
+        static_assert(manifest[kWallE] == 0xE5 && manifest[kWork] == 0xB2);
+        static_assert(manifest[kWallA] == 0 && manifest[kWallB] == 0); // 0: no entry
+        // Wrong names, a role given twice or an address given twice don't compile.
+
+        EventBus          bus;
+        core::CoreModules core{bus.post(), manifest};
+        std::vector<RoleAssigned> assigned;
+        core::wireCore(bus, core);
+        bus.on<RoleAssigned>([&](const RoleAssigned &e) { assigned.push_back(e); });
+        bus.post()(NetworkUp{});
+        bus.post()(DeviceAnnounced{.ext_addr = 0xE5, .short_addr = 0x0005});
+        bus.drain();
+        CHECK(assigned.size() == 1 && assigned[0].role == kWallE);
+    });
+
+    test("at sunset the amber glow sweeps the wall from the west end", [] {
+        Harness h;
+        TimeReading dusk = noon();
+        dusk.local.tm_min = 55; // 17:55 UTC at 0°E: the sun ~2° up, in the west-northwest
+        h.tick(1, dusk);
+        for (const Role wall : members(Group::Wall)) {
+            h.pairBulb(wall, 0xA0 + wall.index, static_cast<uint16_t>(0x0010 + wall.index));
+        }
+        const auto wallMireds = [&] {
+            h.clearLog();
+            h.post(ProgramTick{.time = dusk, .transition = 60s});
+            std::vector<int> mireds;
+            for (const auto &t : h.all<LightTarget>()) {
+                if (t.role.group == Group::Wall) {
+                    CHECK(t.state.color == ColorMode::Xy);
+                    mireds.push_back(t.state.mireds);
+                }
+            }
+            CHECK(mireds.size() == 5);
+            return mireds;
+        };
+
+        const auto swept = wallMireds();
+        CHECK(std::ranges::is_sorted(swept) && swept.front() < swept.back()); // the west end warmest
+
+        ProgramConfig alike;
+        alike.amber_sweep_deg = 0;
+        h.post(ConfigChanged{.config = alike});
+        const auto even = wallMireds();
+        CHECK(std::ranges::all_of(even, [&](int m) { return m == even.front(); }));
+        CHECK(std::ranges::all_of(swept, [&](int m) { return m <= even.front(); })); // the sweep only holds amber back
+        CHECK(even.front() - swept.back() < 10); // and barely at the end nearest the sun
+    });
+
     std::printf("\n%s (%d failure%s)\n", g_failures ? "FAILED" : "ALL PASSED", g_failures, g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;
 }

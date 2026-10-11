@@ -287,9 +287,13 @@ struct ProgramConfig {
     // Amber sunrise/sunset: below golden_elevation_deg of sun elevation the
     // wall colour slides along the blackbody line down to amber_kelvin at the
     // horizon (beyond most bulbs' ~2700K colour-temperature floor, so xy).
-    bool   amber_enabled        = true;
-    double golden_elevation_deg = 6.0;
-    double amber_kelvin         = 1800.0;
+    // The glow follows the sun along the wall: the bulb nearest it turns
+    // amber first, and the far end lags as if the sun were up to
+    // amber_sweep_deg higher (sunset: the west end deepest; 0 = all alike).
+    bool    amber_enabled        = true;
+    double  golden_elevation_deg = 6.0;
+    double  amber_kelvin         = 1800.0;
+    uint8_t amber_sweep_deg      = 3; // 0-kMaxAmberSweepDeg
 
     // Active window, shared by all bulbs: on only on active_days between
     // active_start_hour and active_end_hour; fade_minutes at each edge.
@@ -305,6 +309,8 @@ struct ProgramConfig {
     uint16_t work_cool_mireds = 167;  // ~6000K
     uint16_t work_warm_mireds = 333;  // ~3000K
 };
+
+inline constexpr uint8_t kMaxAmberSweepDeg = 30;
 
 // Per-light peak intensity, 1-100 (% of full brightness). Buttons unused.
 using Peaks = PerRole<uint8_t>;

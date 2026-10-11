@@ -28,7 +28,8 @@ public:
     // std::tm alone doesn't carry it (no portable tm_gmtoff on this
     // toolchain) - see platform::Clock for how it's derived.
     // wall_position: where the bulb sits along the (south) wall, +1 = east
-    // end, 0 = middle, -1 = west end; drives the sun-direction dimming.
+    // end, 0 = middle, -1 = west end; drives the sun-direction dimming and
+    // the amber sweep.
     [[nodiscard]] LightState wallState(const std::tm &local_time, double utc_offset_hours,
                                        double wall_position = 0.0) const noexcept;
     [[nodiscard]] LightState workState(const std::tm &local_time) const noexcept;
@@ -140,12 +141,14 @@ LightState DaylightSchedule::wallState(const std::tm &local_time, double utc_off
     const double brightness   = std::sin(std::numbers::pi * day_progress); // 0 at edges, 1 at solar noon
 
     // Sun direction: sin(azimuth) is the sun's east-west position (+1 due
-    // East, 0 due South, -1 due West); bulbs further along the wall from it
-    // dim, by up to sun_shift_percent at the opposite end (distance 2).
+    // East, 0 due South, -1 due West). `away` is how far along the wall the
+    // bulb is from it: 0 under the sun, 1 at the opposite end. Bulbs further
+    // away dim, by up to sun_shift_percent.
     const SunPosition pos =
         computeSunPosition(config_.latitude_deg, config_.longitude_deg, day_of_year, hour, utc_offset_hours);
     const double sun_x     = std::sin(pos.azimuth_deg * std::numbers::pi / 180.0);
-    const double direction = 1.0 - (config_.sun_shift_percent / 100.0) * std::fabs(wall_position - sun_x) / 2.0;
+    const double away      = std::fabs(wall_position - sun_x) / 2.0;
+    const double direction = 1.0 - (config_.sun_shift_percent / 100.0) * away;
 
     uint8_t level = static_cast<uint8_t>(std::lround(gate * direction * brightness * config_.max_level));
     if (level < config_.min_level) {
@@ -157,11 +160,14 @@ LightState DaylightSchedule::wallState(const std::tm &local_time, double utc_off
 
     LightState state{.on = true, .level = level, .mireds = mireds};
 
+    // The amber glow follows the sun: bulbs further away see it as if it
+    // were up to amber_sweep_deg higher, so they turn amber later and less.
+    const double amber_elevation = pos.elevation_deg + config_.amber_sweep_deg * away;
     if (config_.amber_enabled && config_.golden_elevation_deg > 0.0 &&
-        pos.elevation_deg < config_.golden_elevation_deg) {
+        amber_elevation < config_.golden_elevation_deg) {
         // 0 at golden_elevation_deg, 1 at (or below) the horizon.
         const double golden = std::fmin(
-            1.0, (config_.golden_elevation_deg - pos.elevation_deg) / config_.golden_elevation_deg);
+            1.0, (config_.golden_elevation_deg - amber_elevation) / config_.golden_elevation_deg);
         const double amber_mireds = 1e6 / config_.amber_kelvin;
         const double m            = mireds + golden * (amber_mireds - mireds);
         state.mireds              = static_cast<uint16_t>(std::lround(m));

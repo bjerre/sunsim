@@ -24,6 +24,9 @@ namespace {
 
 constexpr const char *kTag = "APP";
 
+// role_manifest.json, checked against the role layout at compile time.
+constexpr core::DeviceRegistry::Manifest kManifest = core::DeviceRegistry::manifestOf(kRoleManifest);
+
 ev::ProgramConfig defaultProgram()
 {
     ev::ProgramConfig c;
@@ -61,7 +64,7 @@ private:
 
 App::App()
     : settings_(bus_.post(), defaultProgram()), clock_(bus_.post()), zigbee_(bus_.post()),
-      core_(bus_.post(), {kRoleManifest})
+      core_(bus_.post(), kManifest)
 {
     core::wireCore(bus_, core_);
     wirePlatform();

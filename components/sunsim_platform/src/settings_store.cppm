@@ -15,7 +15,8 @@ export namespace sunsim::platform {
 // default):
 //   roles     "<role>.ext" / ".short" / ".ep"   (a role is assigned iff .ext exists)
 //   program   "act.start" "act.end" "act.fade" "act.days" "work.start"
-//             "work.end" "sun.shift" "sun.amber"  (hours stored as minutes)
+//             "work.end" "sun.shift" "sun.amber" "sun.sweep"
+//             (hours stored as minutes)
 //   intensity "<role>.peak"
 //   "layout"  which role layout the keys follow (see migrateLayout())
 // Wi-Fi credentials are kept separately (:wifi_time_sync).
@@ -62,6 +63,7 @@ constexpr const char *kWorkStartKey = "work.start";
 constexpr const char *kWorkEndKey   = "work.end";
 constexpr const char *kSunShiftKey  = "sun.shift";
 constexpr const char *kAmberKey     = "sun.amber";
+constexpr const char *kSweepKey     = "sun.sweep";
 
 uint16_t toMinutes(double hours) noexcept
 {
@@ -265,6 +267,9 @@ void SettingsStore::loadAll()
         if (nvs_get_u8(h, kAmberKey, &byte) == ESP_OK) {
             config_.amber_enabled = byte != 0;
         }
+        if (nvs_get_u8(h, kSweepKey, &byte) == ESP_OK && byte <= ev::kMaxAmberSweepDeg) {
+            config_.amber_sweep_deg = byte;
+        }
         for (const ev::Role role : ev::kRoles) {
             if (nvs_get_u8(h, Key(role, "peak").text, &byte) == ESP_OK && byte >= 1 && byte <= 100) {
                 peaks_[role] = byte;
@@ -290,6 +295,7 @@ void SettingsStore::onSetConfig(const ev::SetConfig &e)
     w.u16(kWorkEndKey, toMinutes(config_.work_end_hour));
     w.u8(kSunShiftKey, config_.sun_shift_percent);
     w.u8(kAmberKey, config_.amber_enabled ? 1 : 0);
+    w.u8(kSweepKey, config_.amber_sweep_deg);
     w.commit();
     publish();
 }

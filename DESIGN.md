@@ -64,6 +64,12 @@ up `ext_addr` in the optional build-time table
 [`main/role_manifest.json`](main/role_manifest.json). Pairing order never
 matters.
 
+The manifest is keyed by role name and checked against `ev::kLayout` at
+compile time (`DeviceRegistry::manifestOf`): a name the layout doesn't
+have, a role listed twice or an address given to two roles fails the
+build. So `kLayout` is the only thing to change for a bigger or smaller
+wall; the names, positions, display dots and manifest checks follow.
+
 ```mermaid
 sequenceDiagram
     participant Dev as New device
@@ -112,7 +118,7 @@ W (12345) LIGHT_RIG: Ignoring unknown device 0x1a2b (ext=0x00124b00223344aa): no
 
 Workflow: open `idf.py monitor`, put one bulb into pairing mode at a time
 (so you know which log line is which physical device), copy the `ext=`
-value into the right slot in `role_manifest.json`, rebuild/reflash, then
+value into the right role's entry in `role_manifest.json`, rebuild/reflash, then
 re-trigger pairing on that bulb so it rejoins and matches.
 
 ## 3. Button input handling
@@ -190,7 +196,8 @@ gives the sun's compass azimuth; its east-west component
 bulb's level is then scaled by
 
 ```
-direction = 1 - k · |x_bulb - sun_x| / 2          k = sun_shift_percent / 100 (default 0.25)
+away      = |x_bulb - sun_x| / 2                  0 under the sun, 1 at the opposite end
+direction = 1 - k · away                          k = sun_shift_percent / 100 (default 0.25)
 ```
 
 so the bulb under the sun gets the full curve and the far end down to
@@ -206,9 +213,17 @@ along the blackbody (Planckian) locus from the curve's value down to
 `amber_kelvin` (1800K) at the horizon:
 
 ```
-g      = min(1, (6° - elevation) / 6°)
+e      = elevation + amber_sweep_deg · away       amber_sweep_deg default 3°
+g      = min(1, (6° - e) / 6°)
 mireds = curve_mireds + g · (1e6/1800 - curve_mireds)
 ```
+
+The glow follows the sun along the wall: each bulb sees the sun as if it
+were up to `amber_sweep_deg` higher the further away it is, so the end
+nearest the sun turns amber first and deepest and the colour sweeps across
+the wall. At sunset in June at the equator (sun ~293°) the five bulbs land
+at about 2400K (east end) through 1980K (west end); at sunrise it runs the
+other way. `amber_sweep_deg = 0` turns the whole wall amber together.
 
 Most bulbs' colour-temperature mode stops around 2700K, so in this band the
 colour is sent as CIE 1931 xy (`BulbEndpoint::setColorXY`, Kim et al.
