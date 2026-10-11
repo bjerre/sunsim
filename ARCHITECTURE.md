@@ -31,7 +31,8 @@ flowchart TB
     end
     subgraph platform["components/sunsim_platform — module sunsim.platform"]
         ZA[ZigbeeAdapter]
-        CK["Clock<br/>(+ WifiTimeSync, FastDayClock)"]
+        CK["Clock<br/>(+ FastDayClock)"]
+        IS["InternetSync<br/>(+ WifiSession)"]
         ST["SettingsStore (NVS)"]
         CO[Console]
         DI[StatusDisplay]
@@ -60,7 +61,7 @@ flowchart TB
 |---|---|---|
 | `sunsim::ev` (`sunsim.ev`) | every event, the `Event` variant, `Post`, `EventBus`; coroutine flows (`Flow`, `Timer`, `Inbox`); value types (`Role` and the layout, `LightState`, `ProgramConfig`, `StatusSnapshot`, ...) | `std` |
 | `sunsim::core` (`sunsim.core`) | `DeviceRegistry`, `ModeController`, `ProgramHost` and the programs, `LightOutput`, `StatusModel`, the daylight/solar math; `CoreModules` and `wireCore()` | `ev` |
-| `sunsim::platform` (`sunsim.platform`) | `ZigbeeAdapter`, `Clock`, `SettingsStore`, the console, the status display, `StatusSlot` | `ev`, ESP-IDF |
+| `sunsim::platform` (`sunsim.platform`) | `ZigbeeAdapter`, `Clock`, `InternetSync`, `SettingsStore`, the console, the status display, `StatusSlot` | `ev`, ESP-IDF |
 | `sunsim` (`main/main.cpp`) | `App`, `app_main` | all |
 
 `core` and `platform` never import each other; anything both need lives in
@@ -331,6 +332,7 @@ classDiagram
         -EventBus bus_
         -SettingsStore settings_
         -Clock clock_
+        -InternetSync internet_
         -ZigbeeAdapter zigbee_
         -StatusSlot status_
         -CoreModules core_
@@ -357,13 +359,27 @@ classDiagram
     class Clock {
         -ProgramConfig config_
         -unique_ptr~FastDayClock~ fast_day_
-        +startTimeSync() / start()
+        +start()
         +onHeartbeat()
         +onConfig(ConfigChanged)
+        +onSetFastDay(SetFastDay)
         -read() TimeReading
     }
-    class WifiTimeSync {
-        +run() bool
+    class InternetSync {
+        -atomic sync window
+        -last_try_, last_ok_
+        +syncNow()
+        +start()
+        +onConfig(ConfigChanged)
+        +onSyncRequested(SyncRequested)
+        -run()
+        -due(now) bool
+    }
+    class WifiSession {
+        <<scoped>>
+        connects to the best saved network
+        disconnects and stops Wi-Fi when it ends
+        +connected() bool
     }
     class FastDayClock {
         +now(ProgramConfig) tm
@@ -392,13 +408,14 @@ classDiagram
 
     App *-- ZigbeeAdapter
     App *-- Clock
+    App *-- InternetSync
     App *-- SettingsStore
     App *-- StatusSlot
     App *-- CoreModules
     App *-- EventBus
     ZigbeeAdapter ..> BulbEndpoint : SetLight as ZCL
-    Clock ..> WifiTimeSync : SNTP at boot, then daily
-    Clock *-- FastDayClock : debug fast-day only
+    InternetSync ..> WifiSession : one per sync
+    Clock *-- FastDayClock : in fast-day mode
     Console ..> StatusSlot : reads
     StatusDisplay ..> StatusSlot : reads
 ```
@@ -417,7 +434,7 @@ flowchart LR
         TM["esp_timer, 1 Hz"]
         CON["console REPL task<br/>pair, config, press, ..."]
     end
-    TS["time_sync task<br/>SNTP: retry 10 min, resync daily"] -.->|sets| SYS[("system clock")]
+    TS["internet task<br/>boot, daily window, on request"] -.->|"sets (SNTP)"| SYS[("system clock")]
 
     ZT -->|radio events| Q
     TM -->|Heartbeat| Q
@@ -455,7 +472,7 @@ flowchart LR
      `StatusSnapshot` from `StatusSlot`, which a `StatusChanged` listener
      fills under a mutex.
 - Stacks: main 6 KB, esp_timer 4.5 KB, Zigbee 6 KB, console 6 KB, app 8 KB,
-  display 4 KB, time_sync 4 KB. An `Event` is as big as its largest payload
+  display 4 KB, internet 4 KB. An `Event` is as big as its largest payload
   (~256 bytes) and is copied a few times on the poster's stack.
 
 ## 5. Event flow
@@ -467,6 +484,10 @@ type.
 flowchart LR
     CK[Clock] -->|"Tick (1 Hz)"| MC & DR & PH & SM
     CK -->|"ProgramTick (60 s)"| PH
+    CK -->|"SyncRequested<br/>(fast-day switched)"| IS[InternetSync]
+    CO -->|SyncRequested| IS
+    CO -->|SetFastDay| CK
+    ST -->|ConfigChanged| IS
     TMR(["esp_timer"]) -->|Heartbeat| CK
 
     ST[SettingsStore] -->|ConfigChanged| PH & SM & CK
@@ -505,7 +526,8 @@ flowchart LR
 | **ProgramHost** (runs one `Program`) | `ModeChanged`, `ConfigChanged`, `Tick`, `ProgramTick`, `RefreshLights`, `NetworkUp` | `LightTarget` |
 | **LightOutput** | `LightTarget`, `RoleAssigned`, `RoleCleared`, `ReachabilityChanged` | `SetLight` |
 | **StatusModel** | `ConfigChanged`, `ModeChanged`, `DevicesUpdated`, `Tick` | `StatusChanged` |
-| **Clock** | `Heartbeat`, `ConfigChanged` | `Heartbeat` (from its timer), `Tick`, `ProgramTick` |
+| **Clock** | `Heartbeat`, `ConfigChanged`, `SetFastDay` | `Heartbeat` (from its timer), `Tick`, `ProgramTick`; on a fast-day switch also `RefreshLights`, `SyncRequested` |
+| **InternetSync** | `ConfigChanged` (the sync window), `SyncRequested` | — (sets the system clock; runs on its own task) |
 | **SettingsStore** | `SetConfig`, `SetIntensity`, `PersistRoles`, `FactoryReset` | `RolesLoaded`, `ConfigChanged` |
 | **Console** | — (REPL task; reads `StatusSlot`) | the requests above |
 | **StatusDisplay** | — (display task; reads `StatusSlot`) | — |
@@ -588,7 +610,7 @@ sequenceDiagram
     M->>M: nvs_flash_init, TZ, construct modules, wire
     M->>ST: loadAll()
     ST-->>Q: RolesLoaded, ConfigChanged (queued)
-    M->>CK: startTimeSync() - Wi-Fi + SNTP, blocking
+    M->>M: InternetSync.syncNow() - Wi-Fi + SNTP, blocking, then its task
     M->>CK: start() - 1 Hz Heartbeat
     M->>ZA: start() - Zigbee task forms / rejoins the network
     M->>Q: app task: waits for the stack, then processes
@@ -674,6 +696,8 @@ Pairing a device (console `pair` or the role manifest) is in DESIGN.md §2.
 | `Heartbeat` | — | Clock's 1 Hz esp_timer |
 | `Tick` | `at` (boot time), `TimeReading` (local time, UTC offset, valid, simulated) | Clock, 1 Hz |
 | `ProgramTick` | `TimeReading`, transition | Clock, every 60 s (1 s in fast-day) |
+| `SetFastDay` | on, real seconds per simulated day | Console (`fastday`) |
+| `SyncRequested` | — | Console (`sync`), Clock (fast-day switched) |
 | `ConfigChanged` | `ProgramConfig`, per-light `Peaks` | SettingsStore (at boot, then on change) |
 | `SetConfig` | `ProgramConfig` | Console (`config`) |
 | `SetIntensity` | `Selection` (all, a group or a role), percent | Console (`intensity`) |

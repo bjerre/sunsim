@@ -55,6 +55,7 @@ private:
     ev::EventBus            bus_;
     platform::SettingsStore settings_;
     platform::Clock         clock_;
+    platform::InternetSync  internet_;
     platform::ZigbeeAdapter zigbee_;
     platform::StatusSlot    status_;
     core::CoreModules       core_;
@@ -77,7 +78,14 @@ void App::wirePlatform()
 
     // Clock
     bus_.on<Heartbeat>([this](const Heartbeat &) { clock_.onHeartbeat(); });
-    bus_.on<ConfigChanged>([this](const ConfigChanged &e) { clock_.onConfig(e); });
+    bus_.on<ConfigChanged>([this](const ConfigChanged &e) {
+        clock_.onConfig(e);
+        internet_.onConfig(e);
+    });
+    bus_.on<SetFastDay>([this](const SetFastDay &e) { clock_.onSetFastDay(e); });
+
+    // Internet
+    bus_.on<SyncRequested>([this](const SyncRequested &e) { internet_.onSyncRequested(e); });
 
     // Settings
     bus_.on<SetConfig>([this](const SetConfig &e) { settings_.onSetConfig(e); });
@@ -107,7 +115,8 @@ void App::run()
 {
     settings_.loadAll(); // queued until the app task starts processing
 
-    clock_.startTimeSync(); // before the radio starts, so Wi-Fi has it to itself at boot
+    internet_.syncNow(); // before the radio starts, so Wi-Fi has it to itself at boot
+    internet_.start();
     clock_.start();
     zigbee_.start();
 

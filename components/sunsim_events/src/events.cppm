@@ -20,6 +20,10 @@ struct ProgramTick {             // every daylight update interval (60 s, 1 s in
     TimeReading time{};
     Transition  transition{};    // ramp over the whole interval
 };
+struct SetFastDay {              // console `fastday`: the debug fast-day clock on or off
+    bool                 on = false;
+    std::chrono::seconds day_length{120}; // real seconds per simulated active window
+};
 
 // ---- Settings -------------------------------------------------------------
 
@@ -99,6 +103,7 @@ struct OpenNetwork {
     OpenTime duration = kDefaultOpenTime;
 };
 struct FactoryReset {};
+struct SyncRequested {};         // fetch from the internet now (clock, ...): console `sync`, fast-day switches
 
 // ---- DeviceRegistry -------------------------------------------------------
 
@@ -167,11 +172,12 @@ struct StatusChanged {           // shared, not copied: it's by far the largest 
 
 // ---- The event type ------------------------------------------------------
 
-using Payload = std::variant<Heartbeat, Tick, ProgramTick,                                             //
+using Payload = std::variant<Heartbeat, Tick, ProgramTick, SetFastDay,                                 //
                              ConfigChanged, SetConfig, SetIntensity, RolesLoaded, PersistRoles,       //
                              NetworkUp, DeviceAnnounced, EndpointFound, BindResult, PingResult,       //
                              AckReceived, ButtonPressed,                                              //
                              PairRequested, PairCancelled, UnpairRequested, OpenNetwork, FactoryReset, //
+                             SyncRequested,                                                           //
                              RoleAssigned, RoleCleared, Discover, Bind, Ping, ReachabilityChanged,    //
                              DevicesUpdated,                                                          //
                              ModeChanged, RefreshLights, LightTarget, SetLight,                      //
@@ -179,11 +185,12 @@ using Payload = std::variant<Heartbeat, Tick, ProgramTick,                      
 
 // Names for tracing, in Payload order.
 inline constexpr const char *kEventNames[] = {
-    "Heartbeat", "Tick", "ProgramTick",
+    "Heartbeat", "Tick", "ProgramTick", "SetFastDay",
     "ConfigChanged", "SetConfig", "SetIntensity", "RolesLoaded", "PersistRoles",
     "NetworkUp", "DeviceAnnounced", "EndpointFound", "BindResult", "PingResult",
     "AckReceived", "ButtonPressed",
     "PairRequested", "PairCancelled", "UnpairRequested", "OpenNetwork", "FactoryReset",
+    "SyncRequested",
     "RoleAssigned", "RoleCleared", "Discover", "Bind", "Ping", "ReachabilityChanged", "DevicesUpdated",
     "ModeChanged", "RefreshLights", "LightTarget", "SetLight",
     "StatusChanged",

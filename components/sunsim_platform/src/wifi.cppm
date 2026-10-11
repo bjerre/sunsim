@@ -1,21 +1,22 @@
 module;
 
+#include "esp_coexist.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
-#include "esp_netif_sntp.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "nvs.h"
+#include "sdkconfig.h"
 
-module sunsim.platform:wifi_time_sync; // internal: not exported
+module sunsim.platform:wifi; // internal: not exported
 
 import std.compat;
 
 namespace sunsim::platform {
 
-// Wi-Fi networks for the SNTP clock sync, e.g. home and work. Saved from
+// Wi-Fi networks for the internet sync, e.g. home and work. Saved from
 // the console (`wifi add`), stored in NVS so they survive reflashing. When
 // none are saved, the menuconfig CONFIG_SUNSIM_WIFI_* network is used.
 struct WifiNetwork {
@@ -39,17 +40,18 @@ WifiSaveResult addWifiNetwork(std::string_view ssid, std::string_view password);
 bool removeWifiNetwork(std::string_view ssid);
 void clearWifiNetworks();
 
-// One clock sync: scans, connects to the strongest saved network in range
-// (then any others), syncs the clock over SNTP, then disconnects and stops
-// Wi-Fi so it doesn't contend with the 802.15.4 Zigbee radio. One instance
-// per sync attempt; safe to run() again later (retries, daily resync).
-class WifiTimeSync {
+// A Wi-Fi connection for as long as the session lives: starts Wi-Fi and
+// connects to the best saved network, then disconnects and stops Wi-Fi when
+// it ends, so it shares the radio with Zigbee no longer than needed.
+class WifiSession {
 public:
-    // Returns true if time was synced, false if it gave up (device still
-    // boots and runs, just using whatever wall-clock time it had - likely
-    // the 1970 epoch on a device with no RTC battery).
-    bool run(std::chrono::milliseconds connect_timeout = std::chrono::milliseconds{15000},
-              std::chrono::milliseconds sntp_timeout    = std::chrono::milliseconds{10000});
+    explicit WifiSession(std::chrono::milliseconds connect_timeout = std::chrono::milliseconds{15000});
+    ~WifiSession();
+
+    WifiSession(const WifiSession &)            = delete;
+    WifiSession &operator=(const WifiSession &) = delete;
+
+    [[nodiscard]] bool connected() const noexcept { return connected_; }
 
 private:
     // Saved networks to try, best first: those seen in a scan by signal
@@ -59,9 +61,13 @@ private:
 
     static void onWifiEvent(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data);
 
-    EventGroupHandle_t event_group_ = nullptr;
-    int                retry_count_ = 0;
-    bool               connecting_  = false; // reconnect on drop only while trying a network
+    EventGroupHandle_t           event_group_  = nullptr;
+    esp_event_handler_instance_t wifi_handler_ = nullptr;
+    esp_event_handler_instance_t ip_handler_   = nullptr;
+    bool                         started_      = false;
+    bool                         connected_    = false;
+    int                          retry_count_  = 0;
+    bool                         connecting_   = false; // reconnect on drop only while trying a network
 };
 
 } // namespace sunsim::platform
@@ -70,7 +76,7 @@ namespace sunsim::platform {
 
 namespace {
 
-constexpr const char *kTag = "WIFI_TIME";
+constexpr const char *kTag = "WIFI";
 
 constexpr int kGotIpBit   = BIT0;
 constexpr int kFailBit    = BIT1;
@@ -189,6 +195,11 @@ bool ensureWifiStackInitialized()
     if (esp_wifi_init(&cfg) != ESP_OK) {
         return false;
     }
+#if CONFIG_ESP_COEX_SW_COEXIST_ENABLE && CONFIG_SOC_IEEE802154_SUPPORTED
+    // Wi-Fi and Zigbee share the C6's one radio. Without this, Wi-Fi gets
+    // no airtime once Zigbee runs: a scan finds no networks at all.
+    esp_coex_wifi_i154_enable();
+#endif
 
     initialized = true;
     return true;
@@ -242,13 +253,13 @@ void clearWifiNetworks()
     writeSaved({});
 }
 
-void WifiTimeSync::onWifiEvent(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
+void WifiSession::onWifiEvent(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
-    auto *self = static_cast<WifiTimeSync *>(arg);
+    auto *self = static_cast<WifiSession *>(arg);
 
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         if (!self->connecting_) {
-            return; // our own disconnect between networks, or after the sync
+            return; // our own disconnect between networks, or at the end
         }
         // e.g. 201 = no AP found, 15/204 = handshake failed (usually a wrong password)
         const auto *d = static_cast<const wifi_event_sta_disconnected_t *>(event_data);
@@ -264,7 +275,7 @@ void WifiTimeSync::onWifiEvent(void *arg, esp_event_base_t event_base, int32_t e
     }
 }
 
-std::vector<WifiNetwork> WifiTimeSync::candidates(const std::vector<WifiNetwork> &saved)
+std::vector<WifiNetwork> WifiSession::candidates(const std::vector<WifiNetwork> &saved)
 {
     if (saved.size() == 1) {
         return saved; // nothing to choose between; skip the scan
@@ -306,7 +317,7 @@ std::vector<WifiNetwork> WifiTimeSync::candidates(const std::vector<WifiNetwork>
     return seen;
 }
 
-bool WifiTimeSync::connect(const WifiNetwork &network, std::chrono::milliseconds timeout)
+bool WifiSession::connect(const WifiNetwork &network, std::chrono::milliseconds timeout)
 {
     wifi_config_t wifi_config{};
     std::strncpy(reinterpret_cast<char *>(wifi_config.sta.ssid), network.ssid.c_str(), kMaxSsidLen);
@@ -330,66 +341,45 @@ bool WifiTimeSync::connect(const WifiNetwork &network, std::chrono::milliseconds
     return false;
 }
 
-bool WifiTimeSync::run(std::chrono::milliseconds connect_timeout, std::chrono::milliseconds sntp_timeout)
+WifiSession::WifiSession(std::chrono::milliseconds connect_timeout)
 {
     const WifiNetworks saved = loadWifiNetworks();
     if (saved.networks.empty()) {
-        ESP_LOGW(kTag, "No Wi-Fi network configured (use `wifi add <ssid> <password>`), skipping time sync");
-        return false;
+        ESP_LOGW(kTag, "No Wi-Fi network configured (use `wifi add <ssid> <password>`)");
+        return;
     }
     if (!ensureWifiStackInitialized()) {
         ESP_LOGE(kTag, "Failed to bring up Wi-Fi netif");
-        return false;
+        return;
     }
 
     event_group_ = xEventGroupCreate();
-
-    esp_event_handler_instance_t wifi_handler_instance;
-    esp_event_handler_instance_t ip_handler_instance;
-    esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &WifiTimeSync::onWifiEvent, this,
-                                         &wifi_handler_instance);
-    esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &WifiTimeSync::onWifiEvent, this,
-                                         &ip_handler_instance);
-
+    esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &WifiSession::onWifiEvent, this, &wifi_handler_);
+    esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &WifiSession::onWifiEvent, this, &ip_handler_);
     esp_wifi_set_mode(WIFI_MODE_STA);
     esp_wifi_start();
+    started_ = true;
 
-    bool connected = false;
     for (const WifiNetwork &n : candidates(saved.networks)) {
         if (connect(n, connect_timeout)) {
-            connected = true;
-            break;
+            connected_ = true;
+            return;
         }
     }
+    ESP_LOGW(kTag, "No Wi-Fi network reachable");
+}
 
-    bool synced = false;
-    if (connected) {
-        ESP_LOGI(kTag, "Connected, syncing time over SNTP");
-        esp_sntp_config_t sntp_cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
-        esp_netif_sntp_init(&sntp_cfg);
-        if (esp_netif_sntp_sync_wait(pdMS_TO_TICKS(sntp_timeout.count())) == ESP_OK) {
-            synced                = true;
-            const std::time_t now = std::time(nullptr);
-            ESP_LOGI(kTag, "Time synced: %s", std::ctime(&now));
-        } else {
-            ESP_LOGW(kTag, "SNTP sync timed out");
-        }
-        esp_netif_sntp_deinit();
-    } else {
-        ESP_LOGW(kTag, "No Wi-Fi network reachable, proceeding without time sync");
+WifiSession::~WifiSession()
+{
+    if (!started_) {
+        return;
     }
-
     connecting_ = false;
     esp_wifi_disconnect();
     esp_wifi_stop();
-
-    esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_handler_instance);
-    esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, ip_handler_instance);
-
+    esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_handler_);
+    esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, ip_handler_);
     vEventGroupDelete(event_group_);
-    event_group_ = nullptr;
-
-    return synced;
 }
 
 } // namespace sunsim::platform

@@ -3,6 +3,7 @@ module;
 #include "esp_console.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "sdkconfig.h"
 
 export module sunsim.platform:console;
 
@@ -10,7 +11,7 @@ import std.compat;
 import sunsim.ev;
 import :status_slot;
 import :format;
-import :wifi_time_sync;
+import :wifi;
 
 export namespace sunsim::platform {
 
@@ -23,10 +24,12 @@ export namespace sunsim::platform {
 //   pair cancel           disarm a pending `pair`
 //   unpair <role|group|all>   forget role assignment(s)
 //   open [seconds]        open the network for joining (default 180)
-//   config                show active/work hours, fade, sun shift, amber, amber sweep, work days
+//   config                show active/work/sync hours, fade, sun shift, amber, amber sweep, work days
 //   config <key> <value>  change one (see `help config`)
 //   intensity [<light|group|all> <1-100>]   per-light peak brightness, saved
 //   press single|double|hold          simulate the button
+//   fastday [on [seconds] | off]      the debug fast-day clock (a whole day in seconds)
+//   sync                  sync the clock (and fetch internet data) now
 //   wifi                  list saved Wi-Fi networks (the strongest in range is used)
 //   wifi add <ssid> [pw]  add a network (up to 5), or change its password
 //   wifi remove <ssid>    forget one; `wifi clear` forgets all
@@ -199,7 +202,11 @@ void printSchedule(const ev::ProgramConfig &c)
             std::printf(" %s", kDayNames[day].data());
         }
     }
-    std::printf("\n");
+    std::printf("\nsync  ");
+    printClock(c.sync_start_hour);
+    std::printf("-");
+    printClock(c.sync_end_hour);
+    std::printf("  (daily: clock and internet data)\n");
 }
 
 // "mon-fri", "all", or a comma list like "mon,wed,sat".
@@ -243,14 +250,14 @@ int cmdConfig(int argc, char **argv)
     }
     const std::string_view key{argv[1]};
     if (argc != 3) {
-        std::printf("usage: config [hours HH:MM-HH:MM | workhours HH:MM-HH:MM | fade <minutes> |\n"
+        std::printf("usage: config [hours | workhours | syncwindow HH:MM-HH:MM | fade <minutes> |\n"
                     "               sunshift <0-100> | amber on|off | ambersweep <0-%u> |\n"
                     "               days mon-fri|all|mon,tue,...]\n",
                     ev::kMaxAmberSweepDeg);
         return 1;
     }
 
-    if (key == "hours" || key == "workhours") {
+    if (key == "hours" || key == "workhours" || key == "syncwindow") {
         int sh = 0, sm = 0, eh = 0, em = 0;
         if (std::sscanf(argv[2], "%d:%d-%d:%d", &sh, &sm, &eh, &em) != 4 || sm < 0 || sm > 59 || em < 0 ||
             em > 59) {
@@ -266,9 +273,12 @@ int cmdConfig(int argc, char **argv)
         if (key == "hours") {
             c.active_start_hour = start;
             c.active_end_hour   = end;
-        } else {
+        } else if (key == "workhours") {
             c.work_start_hour = start;
             c.work_end_hour   = end;
+        } else {
+            c.sync_start_hour = start;
+            c.sync_end_hour   = end;
         }
     } else if (key == "fade") {
         const int minutes = std::atoi(argv[2]);
@@ -307,7 +317,7 @@ int cmdConfig(int argc, char **argv)
         }
         c.active_days = *days;
     } else {
-        std::printf("unknown setting '%s' (hours, workhours, fade, sunshift, amber, ambersweep, days)\n", argv[1]);
+        std::printf("unknown setting '%s' (hours, workhours, syncwindow, fade, sunshift, amber, ambersweep, days)\n", argv[1]);
         return 1;
     }
 
@@ -379,6 +389,44 @@ int cmdPress(int argc, char **argv)
         return 1;
     }
     g_ctx.post(ev::ButtonPressed{.press = press, .source = ev::Source::Console, .at = ev::BootClock::now()});
+    return 0;
+}
+
+// ---- fastday / sync -------------------------------------------------------------
+
+int cmdFastDay(int argc, char **argv)
+{
+    const std::string_view what = argc >= 2 ? argv[1] : "";
+    if (argc == 1) {
+        const auto st = snapshot();
+        if (!st) {
+            return 1;
+        }
+        std::printf("fast-day %s\n", st->time.simulated ? "on" : "off");
+        return 0;
+    }
+    if (what == "off" && argc == 2) {
+        g_ctx.post(ev::SetFastDay{.on = false});
+        return 0;
+    }
+    if (what == "on" && argc <= 3) {
+        const int seconds = argc == 3 ? std::atoi(argv[2]) : CONFIG_SUNSIM_DEBUG_DAY_SECONDS;
+        if (seconds < 10 || seconds > 3600) {
+            std::printf("seconds per day must be 10-3600\n");
+            return 1;
+        }
+        g_ctx.post(ev::SetFastDay{.on = true, .day_length = std::chrono::seconds{seconds}});
+        return 0;
+    }
+    std::printf("usage: fastday [on [seconds] | off]   (on: one active window every %d s by default)\n",
+                CONFIG_SUNSIM_DEBUG_DAY_SECONDS);
+    return 1;
+}
+
+int cmdSync(int, char **)
+{
+    g_ctx.post(ev::SyncRequested{});
+    std::printf("syncing in the background (see the INTERNET log lines)\n");
     return 0;
 }
 
@@ -574,14 +622,17 @@ void startConsole(const ev::Post &post, const StatusSlot &status)
                     "<role|group|all>", &cmdUnpair);
     registerCommand("open", "Open the network for joining", "[seconds]", &cmdOpen);
     registerCommand("config", "Show or change active/work hours, fade, sun shift, amber glow and work days",
-                    "[hours|workhours HH:MM-HH:MM | fade <min> | sunshift <0-100> | amber on|off |"
-                    " ambersweep <0-30> | days ...]",
+                    "[hours|workhours|syncwindow HH:MM-HH:MM | fade <min> | sunshift <0-100> |"
+                    " amber on|off | ambersweep <0-30> | days ...]",
                     &cmdConfig);
     registerCommand("intensity", "Show or set each light's peak brightness, 1-100%", "[<light|group|all> <1-100>]",
                     &cmdIntensity);
     registerCommand("press", "Simulate the button: single = resume daylight, double = red alert, hold = all off",
                     "single|double|hold", &cmdPress);
-    registerCommand("wifi", "List, add or remove the Wi-Fi networks used for the clock sync (e.g. home and work)",
+    registerCommand("fastday", "Debug: run a whole active window every few seconds, or back to real time",
+                    "[on [seconds] | off]", &cmdFastDay);
+    registerCommand("sync", "Sync the clock (and fetch internet data) now, over Wi-Fi", nullptr, &cmdSync);
+    registerCommand("wifi", "List, add or remove the Wi-Fi networks used for the internet sync (e.g. home and work)",
                     "[add <ssid> [password] | remove <ssid> | clear]", &cmdWifi);
     registerCommand("restart", "Reboot (keeps roles, network and Wi-Fi settings)", nullptr, &cmdRestart);
     registerCommand("factory_reset", "Forget all roles AND the Zigbee network, then restart", nullptr,

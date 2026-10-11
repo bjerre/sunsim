@@ -15,11 +15,11 @@ export namespace sunsim::platform {
 // default):
 //   roles     "<role>.ext" / ".short" / ".ep"   (a role is assigned iff .ext exists)
 //   program   "act.start" "act.end" "act.fade" "act.days" "work.start"
-//             "work.end" "sun.shift" "sun.amber" "sun.sweep"
-//             (hours stored as minutes)
+//             "work.end" "sun.shift" "sun.amber" "sun.sweep" "sync.start"
+//             "sync.end"  (hours stored as minutes)
 //   intensity "<role>.peak"
 //   "layout"  which role layout the keys follow (see migrateLayout())
-// Wi-Fi credentials are kept separately (:wifi_time_sync).
+// Wi-Fi credentials are kept separately (:wifi).
 class SettingsStore {
 public:
     // `defaults`: the program settings before anything was saved (location
@@ -64,6 +64,8 @@ constexpr const char *kWorkEndKey   = "work.end";
 constexpr const char *kSunShiftKey  = "sun.shift";
 constexpr const char *kAmberKey     = "sun.amber";
 constexpr const char *kSweepKey     = "sun.sweep";
+constexpr const char *kSyncStartKey = "sync.start";
+constexpr const char *kSyncEndKey   = "sync.end";
 
 uint16_t toMinutes(double hours) noexcept
 {
@@ -257,6 +259,12 @@ void SettingsStore::loadAll()
         if (nvs_get_u16(h, kWorkEndKey, &minutes) == ESP_OK) {
             config_.work_end_hour = minutes / 60.0;
         }
+        if (nvs_get_u16(h, kSyncStartKey, &minutes) == ESP_OK) {
+            config_.sync_start_hour = minutes / 60.0;
+        }
+        if (nvs_get_u16(h, kSyncEndKey, &minutes) == ESP_OK) {
+            config_.sync_end_hour = minutes / 60.0;
+        }
         uint8_t byte = 0;
         if (nvs_get_u8(h, kDaysKey, &byte) == ESP_OK) {
             config_.active_days = byte;
@@ -293,6 +301,8 @@ void SettingsStore::onSetConfig(const ev::SetConfig &e)
     w.u8(kDaysKey, config_.active_days);
     w.u16(kWorkStartKey, toMinutes(config_.work_start_hour));
     w.u16(kWorkEndKey, toMinutes(config_.work_end_hour));
+    w.u16(kSyncStartKey, toMinutes(config_.sync_start_hour));
+    w.u16(kSyncEndKey, toMinutes(config_.sync_end_hour));
     w.u8(kSunShiftKey, config_.sun_shift_percent);
     w.u8(kAmberKey, config_.amber_enabled ? 1 : 0);
     w.u8(kSweepKey, config_.amber_sweep_deg);

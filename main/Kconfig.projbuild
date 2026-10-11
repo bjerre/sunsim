@@ -47,24 +47,24 @@ menu "Sunsim Configuration"
             Copenhagen.
 
     config SUNSIM_DEBUG_FAST_DAY
-        bool "Debug: compress a full day into a short demo loop"
+        bool "Debug: boot in fast-day mode"
         default n
         help
-            For bench-testing without waiting for a real sunrise/sunset: the
-            daylight program runs one active window (the `config hours`,
-            e.g. 08:00-19:00, on the next active day - off hours and
-            weekends are skipped) every SUNSIM_DEBUG_DAY_SECONDS of real
-            time, looping continuously, and
-            updates lights every second instead of every minute so the
-            gradient is visibly animated. Skips the Wi-Fi/SNTP time sync.
-            Works fine with only some of the 5 devices paired - whichever
-            bulbs you've joined will still run the sped-up program.
+            Fast-day mode is for bench-testing without waiting for a real
+            sunrise/sunset: the daylight program runs one active window
+            (the `config hours`, e.g. 08:00-19:00, on the next active day -
+            off hours and weekends are skipped) every
+            SUNSIM_DEBUG_DAY_SECONDS of real time, looping, and updates the
+            lights every second so the gradient visibly animates. Switch it
+            at runtime with the console's `fastday on|off`; this only picks
+            how the board boots.
 
     config SUNSIM_DEBUG_DAY_SECONDS
-        int "Debug: real seconds per simulated day"
-        depends on SUNSIM_DEBUG_FAST_DAY
+        int "Debug: real seconds per simulated day in fast-day mode"
         range 10 3600
         default 120
+        help
+            The default for `fastday on` (and for booting in fast-day mode).
 
     menu "Status display"
 

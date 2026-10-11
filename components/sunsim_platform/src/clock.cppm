@@ -5,8 +5,6 @@ module;
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 #include "sdkconfig.h"
 
 export module sunsim.platform:clock;
@@ -14,15 +12,15 @@ export module sunsim.platform:clock;
 import std.compat;
 import sunsim.ev;
 import :fast_day_clock;
-import :wifi_time_sync;
 
 export namespace sunsim::platform {
 
 // Time for the whole app. A 1 Hz esp_timer posts Heartbeat; onHeartbeat()
 // (app task) reads the clock and posts Tick, plus ProgramTick every update
-// interval (60 s; 1 s in the debug fast-day mode, whose synthetic clock
-// follows the configured active window). Also keeps the real clock set:
-// SNTP over Wi-Fi at boot, then retries/daily resyncs on a background task.
+// interval: 60 s, or 1 s in the debug fast-day mode, whose synthetic clock
+// loops the configured active window. Fast-day is switched at runtime
+// (SetFastDay, console `fastday`; menuconfig picks how it boots). The real
+// clock is kept set by InternetSync.
 class Clock {
 public:
     explicit Clock(ev::Post post);
@@ -31,25 +29,21 @@ public:
     Clock(const Clock &)            = delete;
     Clock &operator=(const Clock &) = delete;
 
-    // Blocking first sync (call before the Zigbee stack starts, so the radio
-    // isn't shared at boot), then the background retry/resync task.
-    // No-op in fast-day mode.
-    void startTimeSync();
     void start();
 
     void onHeartbeat();
     void onConfig(const ev::ConfigChanged &e);
+    void onSetFastDay(const ev::SetFastDay &e);
 
 private:
     [[nodiscard]] ev::TimeReading read() const;
     static void heartbeatTrampoline(void *arg);
-    static void timeSyncTask(void *arg);
 
     ev::Post                      post_;
     esp_timer_handle_t            timer_ = nullptr;
     ev::ProgramConfig             config_{};
     std::unique_ptr<FastDayClock> fast_day_; // set in fast-day mode
-    std::chrono::seconds          update_interval_{60};
+    std::chrono::seconds          update_interval_{60}; // 1 s in fast-day mode
     std::chrono::seconds          since_update_{};
 };
 
@@ -60,10 +54,8 @@ namespace sunsim::platform {
 namespace {
 constexpr const char *kTag = "CLOCK";
 
-// Time sync: retry soon after a failure (router still booting after a power
-// cut, Wi-Fi not configured yet), otherwise resync daily to cancel drift.
-constexpr auto kSyncRetryDelay = std::chrono::minutes{10};
-constexpr auto kResyncInterval = std::chrono::hours{24};
+constexpr auto kUpdateInterval        = std::chrono::seconds{60};
+constexpr auto kFastDayUpdateInterval = std::chrono::seconds{1}; // the gradient visibly animates
 
 // SNTP-synced time is always well past this; an unsynced clock starts at 1970.
 constexpr int kMinValidYear = 2024;
@@ -84,24 +76,14 @@ double utcOffsetHours(std::time_t at, const std::tm &local) noexcept
 Clock::Clock(ev::Post post) : post_(std::move(post))
 {
 #if CONFIG_SUNSIM_DEBUG_FAST_DAY
-    fast_day_          = std::make_unique<FastDayClock>(std::chrono::seconds{CONFIG_SUNSIM_DEBUG_DAY_SECONDS});
-    update_interval_   = std::chrono::seconds{1};
-    ESP_LOGW(kTag, "DEBUG FAST DAY MODE: simulating one active window (work day) every %d seconds",
+    fast_day_        = std::make_unique<FastDayClock>(std::chrono::seconds{CONFIG_SUNSIM_DEBUG_DAY_SECONDS});
+    update_interval_ = kFastDayUpdateInterval;
+    ESP_LOGW(kTag, "DEBUG FAST DAY MODE: one active window every %d s (`fastday off` for real time)",
              CONFIG_SUNSIM_DEBUG_DAY_SECONDS);
 #endif
 }
 
 Clock::~Clock() = default;
-
-void Clock::startTimeSync()
-{
-    // Compiled out (not just skipped) in fast-day mode, so the Wi-Fi stack
-    // isn't linked into a build that never uses it.
-#if !CONFIG_SUNSIM_DEBUG_FAST_DAY
-    const bool synced = WifiTimeSync{}.run();
-    xTaskCreate(&Clock::timeSyncTask, "time_sync", 4096, reinterpret_cast<void *>(synced ? 1 : 0), 3, nullptr);
-#endif
-}
 
 void Clock::start()
 {
@@ -153,25 +135,35 @@ void Clock::onConfig(const ev::ConfigChanged &e)
     config_ = e.config;
 }
 
+void Clock::onSetFastDay(const ev::SetFastDay &e)
+{
+    const bool was_on = fast_day_ != nullptr;
+    if (e.on) {
+        fast_day_        = std::make_unique<FastDayClock>(e.day_length); // (re)starts the loop
+        update_interval_ = kFastDayUpdateInterval;
+        ESP_LOGW(kTag, "Fast-day mode: one active window every %lld s", static_cast<long long>(e.day_length.count()));
+    } else if (was_on) {
+        fast_day_.reset();
+        update_interval_ = kUpdateInterval;
+        ESP_LOGI(kTag, "Fast-day mode off: real time");
+    } else {
+        return; // already off
+    }
+    since_update_ = {};
+
+    // Show the new time now, with the quick transition, rather than at the
+    // next update: programs refresh from the latest Tick's time.
+    post_(ev::Tick{.at = ev::BootClock::now(), .time = read()});
+    post_(ev::RefreshLights{});
+    if (e.on != was_on) {
+        post_(ev::SyncRequested{}); // switching modes: a moment to sync and fetch
+    }
+}
+
 void Clock::heartbeatTrampoline(void *arg)
 {
     auto *self = static_cast<Clock *>(arg);
     self->post_(ev::Heartbeat{});
-}
-
-void Clock::timeSyncTask([[maybe_unused]] void *arg)
-{
-#if !CONFIG_SUNSIM_DEBUG_FAST_DAY
-    bool synced = arg != nullptr;
-    for (;;) {
-        const auto wait = synced ? std::chrono::duration_cast<std::chrono::minutes>(kResyncInterval) : kSyncRetryDelay;
-        // One minute at a time: a full day in ticks can overflow pdMS_TO_TICKS.
-        for (auto m = wait.count(); m > 0; --m) {
-            vTaskDelay(pdMS_TO_TICKS(60'000));
-        }
-        synced = WifiTimeSync{}.run();
-    }
-#endif
 }
 
 } // namespace sunsim::platform

@@ -18,7 +18,8 @@ flowchart TB
         end
         subgraph Platform["sunsim::platform (ESP-IDF)"]
             ZA[ZigbeeAdapter]
-            Clk["Clock + WifiTimeSync"]
+            Clk[Clock]
+            Net[InternetSync]
             Set["SettingsStore (NVS)"]
             Con[Console]
             Disp[StatusDisplay]
@@ -35,7 +36,7 @@ flowchart TB
 
     ZA == "ZCL: On/Off, Level,<br/>Color Control" ==> Wall & Work
     Switch -- "On/Off: Toggle / On / Off" --> ZA
-    NTP -. "time, at boot and daily" .-> Clk
+    NTP -. "boot, daily window, on request" .-> Net
     User <--> Con
 ```
 
@@ -364,8 +365,8 @@ calculation — no GPS, just two numbers you configure once:
    constructor, and stored in `ev::ProgramConfig`.
 2. **Local civil UTC offset** — needed alongside longitude because the
    calculation has to know which UTC instant "today, local time" actually
-   is. `WifiTimeSync` syncs the clock to UTC over SNTP once at boot; from
-   there, `platform::Clock` derives the offset in effect
+   is. `InternetSync` sets the clock to UTC over SNTP (at boot, then in the
+   daily sync window); from there, `platform::Clock` derives the offset in effect
    *today* (DST included) without a portable `tm_gmtoff` field (not
    available on this toolchain's `struct tm` — confirmed by test
    compile): it takes the current instant's local calendar fields

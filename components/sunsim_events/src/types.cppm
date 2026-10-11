@@ -270,7 +270,8 @@ struct DeviceStatus {
 inline constexpr uint8_t kMondayToFriday = 0b0111110; // bit n = tm_wday n (0 = Sunday)
 inline constexpr uint8_t kEveryDay       = 0b1111111;
 
-// Everything the daylight program can be tuned with. See DESIGN.md §4.
+// Everything the programs (and the internet sync) can be tuned with. See
+// DESIGN.md §4.
 struct ProgramConfig {
     double   latitude_deg  = 0.0; // degrees North (negative = South); 0 = equator
     double   longitude_deg = 0.0; // degrees East (negative = West); 0 = Greenwich
@@ -308,6 +309,12 @@ struct ProgramConfig {
     double   work_end_hour    = 17.5; // 17:30
     uint16_t work_cool_mireds = 167;  // ~6000K
     uint16_t work_warm_mireds = 333;  // ~3000K
+
+    // Internet sync window: once a day in it, the clock is synced (and the
+    // day's internet data fetched), retrying every 10 min within it on
+    // failure. Before the active window, so the data is ready for the day.
+    double sync_start_hour = 4.0;
+    double sync_end_hour   = 5.0;
 };
 
 inline constexpr uint8_t kMaxAmberSweepDeg = 30;

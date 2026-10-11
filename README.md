@@ -95,6 +95,7 @@ sunsim> config amber on             # amber glow when the sun is < 6 deg up
 sunsim> config ambersweep 3         # the glow follows the sun: far end lags 3 deg (0 = all alike)
 sunsim> config fade 10               # minutes to fade in/out at each edge (0 = hard on/off)
 sunsim> config days mon-fri          # or: all, or a list like mon,tue,thu
+sunsim> config syncwindow 04:00-05:00   # daily clock sync and internet data
 ```
 
 Settings are stored on the device and survive reflashing; changes apply
@@ -129,16 +130,29 @@ The `status` console command prints the same information. Pins and
 orientation are under menuconfig, "Sunsim Configuration" -> "Status
 display"; "Rotate the picture 180 degrees" flips it if it's upside down.
 
-## Wi-Fi (clock sync)
+## Wi-Fi (internet sync)
 
-sunsim connects to Wi-Fi at boot (and daily) to set its clock over SNTP,
-using the strongest saved network in range. Save networks from the serial
-console; they're stored on the device and survive reflashing:
+sunsim connects to Wi-Fi briefly to set its clock over SNTP (and, later,
+fetch the day's internet data), using the strongest saved network in
+range, then turns Wi-Fi off again. It does this:
+
+- at boot, before the Zigbee radio starts;
+- once a day in the sync window (default 04:00-05:00, before the lights'
+  day), retrying every 10 minutes within it if it fails;
+- whenever asked: `sync`, or switching fast-day mode on or off;
+- every 10 minutes while the clock has never been set (the lights stay off
+  until it is).
 
 ```
 sunsim> wifi add "My Network" mypassword
-sunsim> restart
+sunsim> sync                          # now (watch the INTERNET log lines)
+sunsim> config syncwindow 04:00-05:00
 ```
+
+Networks are stored on the device and survive reflashing. Wi-Fi shares the
+C6's one radio with Zigbee (ESP-IDF's Wi-Fi/802.15.4 coexistence), so a
+sync while Zigbee runs takes 10-20 s rather than the few seconds at boot;
+the clock sync waits up to 2 minutes for an answer.
 
 `wifi` alone lists the saved networks, `wifi remove <ssid>` forgets one and
 `wifi clear` forgets all. The Wi-Fi SSID/password in menuconfig still work
@@ -232,19 +246,24 @@ sunsim> press hold     # all lights off
 
 ## Debug fast-day mode
 
-To bench-test the daylight curve without waiting for a real sunrise/sunset,
-enable `SUNSIM_DEBUG_FAST_DAY` in menuconfig (and tune
-`SUNSIM_DEBUG_DAY_SECONDS`, default 120). This:
+To bench-test the daylight curve without waiting for a real sunrise/sunset:
 
-- replaces the wall-clock time source with a synthetic clock that loops
-  the active window (`config hours`, e.g. 08:00-19:00) every
-  `SUNSIM_DEBUG_DAY_SECONDS` of real time, stepping through the active
-  days only - the off hours and weekends are skipped
-- updates lights every second instead of every minute, so the gradient is
-  visibly animated
-- skips the Wi-Fi/SNTP time sync at boot
+```
+sunsim> fastday on        # one active window every 120 s
+sunsim> fastday on 30     # ... every 30 s
+sunsim> fastday off       # back to real time
+sunsim> fastday           # which is it?
+```
 
-It works with any subset of the 7 devices paired.
+In fast-day mode the program's clock loops the active window (`config
+hours`, e.g. 08:00-19:00) every so many seconds of real time, stepping
+through the active days only (the off hours and weekends are skipped), and
+the lights update every second instead of every minute so the gradient
+visibly animates. The display shows "sim" by the weekday; `status` says
+"(simulated)". Switching shows the new time within 2 s and runs an
+internet sync. It isn't saved: the board boots in real time unless
+`SUNSIM_DEBUG_FAST_DAY` is set in menuconfig (`SUNSIM_DEBUG_DAY_SECONDS` is
+the default length). It works with any subset of the devices paired.
 
 ## Smooth transitions
 
@@ -290,11 +309,12 @@ generated `role_manifest.h`.
   - `core.cppm` - `CoreModules` and `wireCore()`, every core-to-core edge.
 - `components/sunsim_platform/` (`sunsim::platform`, module
   `sunsim.platform`) - everything ESP-IDF; `bulb_endpoint`,
-  `fast_day_clock` and `format` are internal partitions, not exported:
+  `fast_day_clock`, `format` and `wifi` are internal partitions, not exported:
   - `zigbee_adapter.cppm` - the only code using esp-zigbee-lib (stack,
     commissioning, discovery/bind/ping, button frames, bulb commands).
-  - `clock.cppm`, `fast_day_clock.cppm`, `wifi_time_sync.cppm` - heartbeat, program
-    time, SNTP sync.
+  - `clock.cppm`, `fast_day_clock.cppm` - heartbeat, program time, fast-day mode.
+  - `internet_sync.cppm`, `wifi.cppm` - the daily / on-request internet jobs
+    (SNTP now) over a short Wi-Fi session; the saved networks.
   - `settings_store.cppm` - all NVS persistence (roles, settings, intensities).
   - `console.cppm` - the serial REPL; `status_display.cppm` - the LCD.
 - `main/` - `main.cpp` (`App`: creates the bus and modules, platform wiring,
