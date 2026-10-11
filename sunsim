@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Everyday commands, with ESP-IDF's environment loaded for you (no `source
-# export.sh` first). See `./sunsim help`.
+# export.sh` first), and any console command straight to the board. See
+# `./sunsim help`.
 #
 # SUNSIM_IDF   the ESP-IDF checkout (default ~/.espressif/v6.1/esp-idf). Its
 #              export.sh, not the activate_idf script: build/ was configured
@@ -19,10 +20,27 @@ usage: ./sunsim <command> [args]
   flash            build and flash
   monitor          serial monitor and console (Ctrl+] quits)
   go               build, flash, then monitor
-  cmd <command>    run one console command on the board, print its reply
-                   (e.g. `./sunsim cmd status`, `./sunsim cmd pair WallB`)
+  <console command>   anything else runs on the board and prints its reply
+                   (e.g. `./sunsim status`, `./sunsim intensity all 100`)
+  cmd <command>    the same, for a name the script uses itself (`./sunsim cmd help`)
   test             build and run the host tests
   idf <args>       any idf.py command (e.g. `./sunsim idf menuconfig`)
+
+Console commands (also in `monitor`); `./sunsim cmd help` lists them all:
+
+  status                                 time, sunrise/sunset, sky, mode, device links
+  roles | pair <role> | unpair <role|group|all>
+  config [<setting> <value>]             hours, workhours, syncwindow, fade, sunshift,
+                                         amber, ambersweep, clouds, clouddim, cloudcool, days
+  intensity [<light|group|all> <1-100>]  each light's peak brightness, %
+  minlevel [<light|group|all> <1-254>]   each light's minimum level while on
+  tune [<light|group|all> <level> [K] | save | off]   find each bulb's lowest visible level
+  press single|double|hold               the button: daylight, red alert, all off
+  fastday [on [seconds] | off]           a whole day in seconds, for testing
+  sync                                   clock + cloud forecast now
+  wifi [add <ssid> [pw] | remove <ssid>]
+
+<light> is WallA-WallE (east to west) or Work; <group> is wall. Case doesn't matter.
 EOF
 }
 
@@ -92,7 +110,10 @@ text = buf.decode(errors="replace")
 start = text.find(command)
 start = text.find("\n", start) + 1 if start >= 0 else 0
 end = text.find(prompt.decode(), start)
-print(text[start:end if end >= 0 else None].rstrip("\r\n").replace("\r", ""))
+reply = text[start:end if end >= 0 else None].rstrip("\r\n").replace("\r", "")
+print(reply)
+# esp_console's words for an unknown command, or one that returned an error.
+sys.exit(1 if "Unrecognized command" in reply or "non-zero error code" in reply else 0)
 EOF
 }
 
@@ -114,5 +135,5 @@ cmd)     shift; [[ $# -gt 0 ]] || { usage >&2; exit 1; }; idf_env; console_cmd "
 test)    idf_env; host_tests ;;
 idf)     shift; idf_env; idf.py "$@" ;;
 help | -h | --help) usage ;;
-*)       usage >&2; exit 1 ;;
+*)       idf_env; console_cmd "$@" ;; # a console command
 esac
