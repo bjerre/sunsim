@@ -301,11 +301,13 @@ calculation — no GPS, just two numbers you configure once:
    there, `platform::Clock` derives the offset in effect
    *today* (DST included) without a portable `tm_gmtoff` field (not
    available on this toolchain's `struct tm` — confirmed by test
-   compile): it takes the current instant, reads its UTC calendar fields
-   via `gmtime_r`, then feeds those same field values back through
-   `mktime()` — which interprets them as *local* time under the process's
-   `TZ` (`CONFIG_SUNSIM_TZ`) — and the difference between the two
-   `time_t`s is the local UTC offset.
+   compile): it takes the current instant's local calendar fields
+   (`localtime_r`, under the process's `TZ`, `CONFIG_SUNSIM_TZ`), reads
+   them back as if they were UTC (`std::chrono::sys_days`), and the
+   difference from the instant itself is the offset. (An earlier version
+   fed `gmtime_r`'s fields to `mktime()`; `gmtime_r` sets `tm_isdst = 0`,
+   so that always gave the standard offset and put every sunrise/sunset an
+   hour early under DST.)
 
 `solar.cppm` implements the "Sunrise/Sunset Algorithm" from the
 *Almanac for Computers, 1990* (Nautical Almanac Office, US Naval

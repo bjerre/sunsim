@@ -17,9 +17,8 @@ struct SunTimes {
 //   longitude_deg     degrees East (negative = West).
 //   day_of_year       1-366 (e.g. tm_yday + 1).
 //   utc_offset_hours  the local civil UTC offset in effect on that day,
-//                     including DST, positive = East of Greenwich (e.g.
-//                     derive from comparing a known instant's gmtime_r vs.
-//                     mktime representation - see platform::Clock).
+//                     including DST, positive = East of Greenwich (see
+//                     platform::Clock for how it's derived).
 //
 // At latitudes where the sun doesn't rise/set that day (inside a polar
 // circle in local winter/summer), the underlying angle is clamped rather

@@ -1,6 +1,6 @@
 module;
 
-#include <time.h> // gmtime_r, localtime_r (POSIX)
+#include <time.h> // localtime_r (POSIX)
 
 #include "esp_check.h"
 #include "esp_log.h"
@@ -68,17 +68,16 @@ constexpr auto kResyncInterval = std::chrono::hours{24};
 // SNTP-synced time is always well past this; an unsynced clock starts at 1970.
 constexpr int kMinValidYear = 2024;
 
-// The current local civil UTC offset (including DST), derived without a
-// portable tm_gmtoff: reinterpreting today's UTC calendar fields as if they
-// were local time tells mktime() how far local time has drifted from UTC
-// under the process's TZ rules.
-double currentUtcOffsetHours() noexcept
+// The local civil UTC offset (including DST) at `at`, whose local time is
+// `local`: the local calendar fields read as if they were UTC, less the
+// instant itself. (Without a portable tm_gmtoff. mktime() on gmtime()'s
+// fields would be off by the DST hour: gmtime() sets tm_isdst = 0.)
+double utcOffsetHours(std::time_t at, const std::tm &local) noexcept
 {
-    const auto now_c = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-    std::tm    utc_tm{};
-    gmtime_r(&now_c, &utc_tm);
-    const std::time_t utc_as_if_local = std::mktime(&utc_tm);
-    return std::difftime(now_c, utc_as_if_local) / 3600.0;
+    using namespace std::chrono;
+    const sys_seconds as_if_utc = sys_days{year{local.tm_year + 1900} / (local.tm_mon + 1) / local.tm_mday} +
+                                  hours{local.tm_hour} + minutes{local.tm_min} + seconds{local.tm_sec};
+    return duration<double, std::ratio<3600>>{as_if_utc - sys_seconds{seconds{at}}}.count();
 }
 } // namespace
 
@@ -119,15 +118,18 @@ void Clock::start()
 
 ev::TimeReading Clock::read() const
 {
+    const auto now_c = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    std::tm    local{};
+    localtime_r(&now_c, &local);
+
     ev::TimeReading t;
-    t.utc_offset_hours = currentUtcOffsetHours();
+    t.utc_offset_hours = utcOffsetHours(now_c, local);
     if (fast_day_) {
         t.local     = fast_day_->now(config_);
         t.valid     = true;
         t.simulated = true;
     } else {
-        const auto now_c = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-        localtime_r(&now_c, &t.local);
+        t.local = local;
         t.valid = t.local.tm_year + 1900 >= kMinValidYear;
     }
     return t;
