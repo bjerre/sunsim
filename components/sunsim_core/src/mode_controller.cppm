@@ -9,7 +9,8 @@ import sunsim.ev;
 
 export namespace sunsim::core {
 
-// Which program the button's presses choose (ProgramHost runs it):
+// Which program runs (ProgramHost runs it): the console can ask for one
+// (ModeRequested: `tune`), and the button's presses choose:
 //   single -> daylight                        (ModeChanged{Daylight})
 //   double -> red alert                       (ModeChanged{RedAlert})
 //   hold   -> all lights off                  (ModeChanged{Off})
@@ -22,6 +23,7 @@ public:
     explicit ModeController(ev::Post post, std::chrono::milliseconds double_click_window = std::chrono::milliseconds{450});
 
     void onPress(const ev::ButtonPressed &press) { presses_.deliver(press, press.at); }
+    void onModeRequested(const ev::ModeRequested &e) { enter(e.mode); } // the console's `tune`
     void onTick(const ev::Tick &tick) { timer_.tick(tick.at); }
 
 private:
@@ -93,6 +95,9 @@ void ModeController::enter(ev::Mode mode)
         break;
     case ev::Mode::RedAlert:
         SUNSIM_LOGW(kTag, "RED ALERT");
+        break;
+    case ev::Mode::Tuning:
+        SUNSIM_LOGI(kTag, "Tuning: every bulb steady at its minimum level (`tune`; press to resume)");
         break;
     }
     post_(ev::ModeChanged{mode});

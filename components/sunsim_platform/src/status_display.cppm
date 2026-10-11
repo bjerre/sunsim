@@ -26,7 +26,7 @@ export namespace sunsim::platform {
 
 // Drives the on-board ST7789 LCD (Waveshare ESP32-C6-GEEK by default, see
 // the "Status display" menuconfig): current time, day length, countdown to
-// the next sunrise/sunset, mode, and one dot per device for its link state,
+// the next sunrise/sunset, mode, cloud cover, and one dot per device for its link state,
 // grouped: "D ●●●●●  W ●  B ●" (the daylight wall east to west, the work
 // light, the button).
 // Redraws once a second from the latest StatusSnapshot - the same data as
@@ -62,6 +62,7 @@ struct Ui {
     lv_obj_t *mode;
     lv_obj_t *day_length;
     lv_obj_t *next_event;
+    lv_obj_t *cloud;
     ev::PerRole<lv_obj_t *> dots;
 };
 
@@ -138,6 +139,8 @@ void buildUi(Ui &ui)
     ui.mode       = makeLabel(scr, &lv_font_montserrat_14, LV_ALIGN_TOP_RIGHT, -6, 32);
     ui.day_length = makeLabel(scr, &lv_font_montserrat_20, LV_ALIGN_TOP_LEFT, 6, 54);
     ui.next_event = makeLabel(scr, &lv_font_montserrat_20, LV_ALIGN_TOP_LEFT, 6, 80);
+    ui.cloud      = makeLabel(scr, &lv_font_montserrat_14, LV_ALIGN_TOP_RIGHT, -6, 58);
+    lv_obj_set_style_text_color(ui.cloud, lv_color_hex(0x9ab8d8), 0); // sky grey-blue
 
     int x = kDotsLeft;
     for (const ev::GroupSpec &g : ev::kLayout) {
@@ -197,6 +200,16 @@ void render(Ui &ui, const ev::StatusSnapshot &st)
         lv_label_set_text(ui.mode, "RED ALERT");
         lv_obj_set_style_text_color(ui.mode, lv_color_hex(0xff3030), 0);
         break;
+    case ev::Mode::Tuning:
+        lv_label_set_text(ui.mode, "tuning");
+        lv_obj_set_style_text_color(ui.mode, lv_color_hex(0x7fd4ff), 0);
+        break;
+    }
+
+    if (st.cloud_percent) {
+        lv_label_set_text_fmt(ui.cloud, "cloud %u%%", *st.cloud_percent);
+    } else {
+        lv_label_set_text(ui.cloud, "");
     }
 
     for (const ev::Role role : ev::kRoles) {

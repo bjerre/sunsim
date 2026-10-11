@@ -220,6 +220,8 @@ enum class ColorMode : uint8_t {
     HueSat,      // `hue`/`saturation`: saturated colours (red alert)
 };
 
+inline constexpr uint8_t kMaxLevel = 254; // Zigbee's brightest
+
 struct LightState {
     bool      on     = false;
     uint8_t   level  = 0; // 0-254; this and the colour are meaningful only if `on`
@@ -234,8 +236,8 @@ struct LightState {
 // ---- Modes and links ------------------------------------------------------
 
 // Which lighting program is running (core::ProgramHost runs it).
-enum class Mode : uint8_t { Daylight, Off, RedAlert };
-inline constexpr std::array<Mode, 3> kModes = {Mode::Daylight, Mode::Off, Mode::RedAlert};
+enum class Mode : uint8_t { Daylight, Off, RedAlert, Tuning };
+inline constexpr std::array<Mode, 4> kModes = {Mode::Daylight, Mode::Off, Mode::RedAlert, Mode::Tuning};
 
 [[nodiscard]] constexpr const char *modeName(Mode mode) noexcept
 {
@@ -246,6 +248,8 @@ inline constexpr std::array<Mode, 3> kModes = {Mode::Daylight, Mode::Off, Mode::
         return "off";
     case Mode::RedAlert:
         return "RED ALERT";
+    case Mode::Tuning:
+        return "tuning";
     }
     return "?";
 }
@@ -315,6 +319,14 @@ struct ProgramConfig {
     // failure. Before the active window, so the data is ready for the day.
     double sync_start_hour = 4.0;
     double sync_end_hour   = 5.0;
+
+    // Cloud cover over the wall (the hourly forecast, CloudCover): under
+    // full overcast the wall is up to cloud_dim_percent dimmer and its
+    // colour up to cloud_cool_percent of the way to cool_mireds, and the
+    // sun-direction dimming and amber glow fade out (diffuse light).
+    bool    clouds_enabled     = true;
+    uint8_t cloud_dim_percent  = 40;
+    uint8_t cloud_cool_percent = 50;
 };
 
 inline constexpr uint8_t kMaxAmberSweepDeg = 30;
@@ -328,6 +340,35 @@ inline constexpr Peaks kDefaultPeaks = [] {
     }
     return peaks;
 }();
+
+// Per-light minimum level, 1-254 (raw Zigbee level): the lowest a light is
+// sent while on, so it stays visibly lit down to sunset. Bulbs differ in
+// where they go dark; find it with the console's `tune`.
+using MinLevels = PerRole<uint8_t>;
+inline constexpr MinLevels kDefaultMinLevels = [] {
+    MinLevels levels{};
+    for (const Role role : kRoles) {
+        levels[role] = 1;
+    }
+    return levels;
+}();
+
+// ---- Weather --------------------------------------------------------------
+
+// The hourly cloud cover forecast (InternetSync fetches it each sync): 48
+// local hours from 00:00 of the day it was fetched. year == 0: none yet.
+struct CloudCover {
+    static constexpr uint8_t     kNoData = 0xFF;
+    static constexpr std::size_t kHours  = 48;
+
+    int16_t                       year = 0; // the local date of hour 0
+    int16_t                       yday = 0; // tm_yday
+    std::array<uint8_t, kHours>   percent = [] {
+        std::array<uint8_t, kHours> a{};
+        a.fill(kNoData);
+        return a;
+    }();
+};
 
 // ---- Time -----------------------------------------------------------------
 
@@ -363,7 +404,9 @@ struct StatusSnapshot {
     DeviceRecords                         records{};
     std::optional<Role>                   armed;
     ProgramConfig                         config{};
-    Peaks                                 peaks = kDefaultPeaks;
+    Peaks                                 peaks      = kDefaultPeaks;
+    MinLevels                             min_levels = kDefaultMinLevels;
+    std::optional<uint8_t>                cloud_percent; // now, from the forecast (none: no data)
 };
 
 } // namespace sunsim::ev

@@ -64,7 +64,8 @@ private:
 } // namespace
 
 App::App()
-    : settings_(bus_.post(), defaultProgram()), clock_(bus_.post()), zigbee_(bus_.post()),
+    : settings_(bus_.post(), defaultProgram()), clock_(bus_.post()),
+      internet_(bus_.post(), defaultProgram().latitude_deg, defaultProgram().longitude_deg), zigbee_(bus_.post()),
       core_(bus_.post(), kManifest)
 {
     core::wireCore(bus_, core_);
@@ -90,6 +91,7 @@ void App::wirePlatform()
     // Settings
     bus_.on<SetConfig>([this](const SetConfig &e) { settings_.onSetConfig(e); });
     bus_.on<SetIntensity>([this](const SetIntensity &e) { settings_.onSetIntensity(e); });
+    bus_.on<SetMinLevel>([this](const SetMinLevel &e) { settings_.onSetMinLevel(e); });
     bus_.on<PersistRoles>([this](const PersistRoles &e) { settings_.onPersistRoles(e); });
 
     // Radio
@@ -115,8 +117,7 @@ void App::run()
 {
     settings_.loadAll(); // queued until the app task starts processing
 
-    internet_.syncNow(); // before the radio starts, so Wi-Fi has it to itself at boot
-    internet_.start();
+    internet_.start(); // waits for the boot sync: before the radio starts, so Wi-Fi has it to itself
     clock_.start();
     zigbee_.start();
 

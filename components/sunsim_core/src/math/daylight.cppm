@@ -8,6 +8,11 @@ export namespace sunsim::core {
 
 using ev::LightState;
 
+// CIE 1931 xy of a blackbody at `kelvin` (Kim et al. cubic spline
+// approximation of the Planckian locus, valid 1667-25000K): for colours
+// below most bulbs' ~2700K colour-temperature floor.
+void planckianXy(double kelvin, float &x_out, float &y_out) noexcept;
+
 // Astronomical daylight model for the wall bulbs: warm and dim at the real
 // sunrise/sunset for a configured location, brightest and coolest (bluest)
 // at the window's midpoint ("solar noon"); a cool-to-warm work light that
@@ -29,9 +34,9 @@ public:
     // toolchain) - see platform::Clock for how it's derived.
     // wall_position: where the bulb sits along the (south) wall, +1 = east
     // end, 0 = middle, -1 = west end; drives the sun-direction dimming and
-    // the amber sweep.
+    // the amber sweep. cloud: the cloud cover now, 0 (clear) to 1 (overcast).
     [[nodiscard]] LightState wallState(const std::tm &local_time, double utc_offset_hours,
-                                       double wall_position = 0.0) const noexcept;
+                                       double wall_position = 0.0, double cloud = 0.0) const noexcept;
     [[nodiscard]] LightState workState(const std::tm &local_time) const noexcept;
 
     // True inside the active window (lights may be on), including its fades.
@@ -61,8 +66,8 @@ double hourOfDay(const std::tm &t) noexcept
     return t.tm_hour + t.tm_min / 60.0 + t.tm_sec / 3600.0;
 }
 
-// CIE 1931 xy of a blackbody at `kelvin` (Kim et al. cubic spline
-// approximation of the Planckian locus, valid 1667-25000K).
+} // namespace
+
 void planckianXy(double kelvin, float &x_out, float &y_out) noexcept
 {
     const double t  = std::fmin(25000.0, std::fmax(1667.0, kelvin));
@@ -87,7 +92,6 @@ void planckianXy(double kelvin, float &x_out, float &y_out) noexcept
     x_out = static_cast<float>(x);
     y_out = static_cast<float>(y);
 }
-} // namespace
 
 double DaylightSchedule::activeGate(const std::tm &local_time) const noexcept
 {
@@ -108,8 +112,12 @@ double DaylightSchedule::activeGate(const std::tm &local_time) const noexcept
 }
 
 LightState DaylightSchedule::wallState(const std::tm &local_time, double utc_offset_hours,
-                                       double wall_position) const noexcept
+                                       double wall_position, double cloud) const noexcept
 {
+    // Clouds make the light diffuse: dimmer, cooler, no sun direction and
+    // no golden glow, each in proportion to the cover.
+    const double overcast = config_.clouds_enabled ? std::clamp(cloud, 0.0, 1.0) : 0.0;
+
     const double gate = activeGate(local_time);
     if (gate <= 0.0) {
         return {.on = false, .level = 0, .mireds = config_.warm_mireds};
@@ -148,15 +156,17 @@ LightState DaylightSchedule::wallState(const std::tm &local_time, double utc_off
         computeSunPosition(config_.latitude_deg, config_.longitude_deg, day_of_year, hour, utc_offset_hours);
     const double sun_x     = std::sin(pos.azimuth_deg * std::numbers::pi / 180.0);
     const double away      = std::fabs(wall_position - sun_x) / 2.0;
-    const double direction = 1.0 - (config_.sun_shift_percent / 100.0) * away;
+    const double direction = 1.0 - (config_.sun_shift_percent / 100.0) * away * (1.0 - overcast);
+    const double sky       = 1.0 - (config_.cloud_dim_percent / 100.0) * overcast;
 
-    uint8_t level = static_cast<uint8_t>(std::lround(gate * direction * brightness * config_.max_level));
+    uint8_t level = static_cast<uint8_t>(std::lround(gate * direction * sky * brightness * config_.max_level));
     if (level < config_.min_level) {
         level = config_.min_level;
     }
 
-    const uint16_t mireds = static_cast<uint16_t>(
-        std::lround(config_.warm_mireds - brightness * (config_.warm_mireds - config_.cool_mireds)));
+    const double sun_mireds = config_.warm_mireds - brightness * (config_.warm_mireds - config_.cool_mireds);
+    const auto   mireds     = static_cast<uint16_t>(std::lround(
+        sun_mireds + (config_.cool_mireds - sun_mireds) * (config_.cloud_cool_percent / 100.0) * overcast));
 
     LightState state{.on = true, .level = level, .mireds = mireds};
 
@@ -166,8 +176,9 @@ LightState DaylightSchedule::wallState(const std::tm &local_time, double utc_off
     if (config_.amber_enabled && config_.golden_elevation_deg > 0.0 &&
         amber_elevation < config_.golden_elevation_deg) {
         // 0 at golden_elevation_deg, 1 at (or below) the horizon.
-        const double golden = std::fmin(
-            1.0, (config_.golden_elevation_deg - amber_elevation) / config_.golden_elevation_deg);
+        const double golden =
+            std::fmin(1.0, (config_.golden_elevation_deg - amber_elevation) / config_.golden_elevation_deg) *
+            (1.0 - overcast); // no glow under a grey sky
         const double amber_mireds = 1e6 / config_.amber_kelvin;
         const double m            = mireds + golden * (amber_mireds - mireds);
         state.mireds              = static_cast<uint16_t>(std::lround(m));

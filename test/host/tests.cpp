@@ -539,6 +539,146 @@ int main()
         CHECK(even.front() - swept.back() < 10); // and barely at the end nearest the sun
     });
 
+    // A forecast for noon()'s date (tm_year 0 = 1900, yday 171): 20% at
+    // 12:00, 60% at 13:00, the next day's noon 90%.
+    const auto forecast = [] {
+        CloudCover f;
+        f.year       = 1900;
+        f.yday       = 171;
+        f.percent[12] = 20;
+        f.percent[13] = 60;
+        f.percent[36] = 90;
+        return f;
+    }();
+
+    test("cloud cover: interpolated by local hour; fast-day reads today's", [&] {
+        TimeReading t = noon();
+        t.local.tm_min = 30;
+        const auto half = core::cloudCover(forecast, t);
+        CHECK(half && std::abs(*half - 0.40) < 1e-9);
+
+        TimeReading tomorrow = noon();
+        tomorrow.local.tm_yday = 172;
+        const auto next = core::cloudCover(forecast, tomorrow);
+        CHECK(next && std::abs(*next - 0.90) < 1e-9); // hour 36, with no data at 37
+
+        TimeReading sim = noon();
+        sim.local.tm_yday = 0; // fast-day's January 1
+        sim.simulated     = true;
+        const auto today = core::cloudCover(forecast, sim);
+        CHECK(today && std::abs(*today - 0.20) < 1e-9);
+
+        sim.simulated = false;
+        CHECK(!core::cloudCover(forecast, sim));               // a date the forecast doesn't cover
+        CHECK(!core::cloudCover(CloudCover{}, noon()));        // no forecast yet
+        TimeReading early = noon();
+        early.local.tm_hour = 3;
+        CHECK(!core::cloudCover(forecast, early));             // no data for 03:00
+    });
+
+    test("clouds dim the wall, cool it and flatten its sun direction", [] {
+        const auto wall = [](Harness &h) {
+            h.clearLog();
+            h.post(ProgramTick{.time = noon(), .transition = 60s});
+            std::vector<LightState> states;
+            for (const auto &t : h.all<LightTarget>()) {
+                if (t.role.group == Group::Wall) {
+                    states.push_back(t.state);
+                }
+            }
+            return states;
+        };
+        Harness clear;
+        clear.tick();
+        const auto sunny = wall(clear);
+
+        Harness grey;
+        grey.tick();
+        CloudCover overcast;
+        overcast.year = 1900;
+        overcast.yday = 171;
+        overcast.percent.fill(100);
+        grey.post(CloudCoverUpdated{overcast});
+        const auto cloudy = wall(grey);
+
+        CHECK(sunny.size() == 5 && cloudy.size() == 5);
+        if (sunny.size() == 5 && cloudy.size() == 5) {
+            CHECK(sunny.front().level < sunny.back().level);  // clear: brighter towards the sun
+            CHECK(cloudy.front().level == cloudy.back().level); // overcast: diffuse, even
+            CHECK(cloudy.back().level < sunny.back().level);    // and dimmer
+            CHECK(cloudy.back().mireds < sunny.back().mireds);  // and cooler
+        }
+
+        ProgramConfig off;
+        off.clouds_enabled = false;
+        grey.post(ConfigChanged{.config = off});
+        const auto ignored = wall(grey);
+        CHECK(ignored.size() == 5 && ignored.back().level == sunny.back().level);
+    });
+
+    test("minimum levels keep the wall lit down to sunset, then off", [] {
+        TimeReading dusk = noon();
+        dusk.local.tm_min = 55; // the sun ~2 deg up
+        const auto westLevel = [](Harness &h, const TimeReading &t) {
+            h.clearLog();
+            h.post(ProgramTick{.time = t, .transition = 60s});
+            const auto targets = h.all<LightTarget>();
+            const auto it      = std::ranges::find(targets, kWallE, &LightTarget::role);
+            return it == targets.end() ? -1 : (it->state.on ? it->state.level : 0);
+        };
+        Harness h;
+        h.tick();
+        const int dim = westLevel(h, dusk);
+
+        MinLevels mins = kDefaultMinLevels;
+        mins[kWallE]   = 40;
+        h.post(ConfigChanged{.config = {}, .min_levels = mins});
+        const int floored = westLevel(h, dusk);
+        CHECK(dim >= 1 && dim < 40);
+        CHECK(floored >= 40);
+
+        TimeReading night = noon();
+        night.local.tm_hour = 13;
+        night.local.tm_min  = 30; // after sunset
+        CHECK(westLevel(h, night) == 0);
+    });
+
+    test("tuning: bulbs at their minimums, `tune` sets levels, save makes them the minimums", [] {
+        Harness h;
+        h.tick();
+        MinLevels mins = kDefaultMinLevels;
+        mins[kWork]    = 12;
+        h.post(ConfigChanged{.config = {}, .min_levels = mins});
+        h.clearLog();
+
+        h.post(ModeRequested{Mode::Tuning});
+        const auto start = h.all<LightTarget>();
+        CHECK(start.size() == kBulbCount);
+        for (const auto &t : start) {
+            CHECK(t.state.on && t.state.color == ColorMode::Xy); // the sunset's amber
+            CHECK(t.state.level == (t.role == kWork ? 12 : 1));
+        }
+
+        h.clearLog();
+        h.post(TuneLights{.lights = Group::Wall, .level = 9});
+        for (const auto &t : h.all<LightTarget>()) {
+            CHECK(t.state.level == (t.role.group == Group::Wall ? 9 : 12));
+        }
+
+        h.clearLog();
+        h.post(TuneSave{});
+        const auto saved = h.all<SetMinLevel>();
+        CHECK(saved.size() == members(Group::Wall).size());
+        CHECK(std::ranges::all_of(saved, [](const SetMinLevel &s) {
+            return s.level == 9 && std::holds_alternative<Role>(s.lights) && std::get<Role>(s.lights).group == Group::Wall;
+        }));
+
+        h.clearLog();
+        h.post(ButtonPressed{.press = Press::Single, .at = h.now});
+        const auto modes = h.all<ModeChanged>();
+        CHECK(modes.size() == 1 && modes[0].mode == Mode::Daylight); // daylight, sky and all
+    });
+
     std::printf("\n%s (%d failure%s)\n", g_failures ? "FAILED" : "ALL PASSED", g_failures, g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;
 }

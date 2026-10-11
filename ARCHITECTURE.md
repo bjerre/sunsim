@@ -41,10 +41,10 @@ flowchart TB
         CM["CoreModules + wireCore()"]
         DR[DeviceRegistry]
         MC[ModeController]
-        PH["ProgramHost<br/>Daylight / Off / RedAlert"]
+        PH["ProgramHost<br/>Daylight / Off / RedAlert / Tuning"]
         LO[LightOutput]
         SM[StatusModel]
-        MA["math: daylight, solar, day_info"]
+        MA["math: daylight, solar, sky, day_info"]
     end
     subgraph events["components/sunsim_events — module sunsim.ev"]
         EV["events + value types<br/>EventBus, Flow / Timer / Inbox"]
@@ -145,6 +145,13 @@ classDiagram
         optional~Role~ armed
         ProgramConfig config
         Peaks peaks
+        MinLevels min_levels
+        optional~uint8~ cloud_percent
+    }
+    class CloudCover {
+        int16 year, yday
+        uint8 percent[48]
+        48 local hours from 00:00, 0-100 or kNoData
     }
 
     kLayout "1" *-- "3" GroupSpec
@@ -157,7 +164,9 @@ classDiagram
     StatusSnapshot ..> PerRole~T~ : devices, records, peaks
 ```
 
-`DeviceRecords` is `PerRole<DeviceRecord>` and `Peaks` is `PerRole<uint8_t>`.
+`DeviceRecords` is `PerRole<DeviceRecord>`; `Peaks` (percent) and
+`MinLevels` (raw level) are `PerRole<uint8_t>`. `CloudCover` is the hourly
+forecast, fetched by `InternetSync` each sync.
 A wall light's place on the wall is its index: light `i` of `n` sits at
 `x = 1 - 2i/(n-1)`, east (+1) to west (-1).
 
@@ -263,6 +272,9 @@ classDiagram
         +onTick(Tick)
         +onProgramTick(ProgramTick)
         +onRefresh(RefreshLights)
+        +onCloudCover(CloudCoverUpdated)
+        +onTune(TuneLights)
+        +onTuneSave(TuneSave)
     }
     class Program {
         <<abstract>>
@@ -271,18 +283,29 @@ classDiagram
         +onTick(Tick)
         +onProgramTick(ProgramTick)
         +onConfig(ConfigChanged)
+        +onCloudCover(CloudCoverUpdated)
         #target(role, LightState, transitions)
     }
     class DaylightProgram {
         -DaylightSchedule schedule_
         -Peaks peaks_
+        -MinLevels min_levels_
+        -CloudCover forecast_
+        -outputLevel(role, level) uint8
+    }
+    class TuningProgram {
+        -MinLevels min_levels_
+        -PerRole~optional~ tuned_
+        -double kelvin_
+        +onTune(TuneLights)
+        +takeTuned()
     }
     class OffProgram
     class RedAlertProgram {
         -bool bright_
     }
     class DaylightSchedule {
-        +wallState(time, utc_offset, wall_position) LightState
+        +wallState(time, utc_offset, wall_position, cloud) LightState
         +workState(time) LightState
         +inActiveWindow(time) bool
     }
@@ -291,6 +314,7 @@ classDiagram
         computeSunTimes()
         computeSunPosition()
         computeDayInfo()
+        cloudCover(forecast, time)
     }
     class LightOutput {
         -PerRole~Bulb~ bulbs_
@@ -311,12 +335,15 @@ classDiagram
     ProgramHost *-- DaylightProgram
     ProgramHost *-- OffProgram
     ProgramHost *-- RedAlertProgram
+    ProgramHost *-- TuningProgram
     Program <|-- DaylightProgram
     Program <|-- OffProgram
     Program <|-- RedAlertProgram
+    Program <|-- TuningProgram
     DaylightProgram *-- DaylightSchedule
     DaylightSchedule ..> solar
-    StatusModel ..> solar : day info
+    StatusModel ..> solar : day info, cloud now
+    DaylightProgram ..> solar : cloud now
 ```
 
 The modules share nothing: each only knows the events it handles and what
@@ -368,11 +395,12 @@ classDiagram
     class InternetSync {
         -atomic sync window
         -last_try_, last_ok_
-        +syncNow()
-        +start()
+        +start() waits for the boot sync
         +onConfig(ConfigChanged)
         +onSyncRequested(SyncRequested)
         -run()
+        -syncClock() bool
+        -fetchCloudCover() bool
         -due(now) bool
     }
     class WifiSession {
@@ -472,7 +500,7 @@ flowchart LR
      `StatusSnapshot` from `StatusSlot`, which a `StatusChanged` listener
      fills under a mutex.
 - Stacks: main 6 KB, esp_timer 4.5 KB, Zigbee 6 KB, console 6 KB, app 8 KB,
-  display 4 KB, internet 4 KB. An `Event` is as big as its largest payload
+  display 4 KB, internet 8 KB (TLS). An `Event` is as big as its largest payload
   (~256 bytes) and is copied a few times on the poster's stack.
 
 ## 5. Event flow
@@ -488,6 +516,11 @@ flowchart LR
     CO -->|SyncRequested| IS
     CO -->|SetFastDay| CK
     ST -->|ConfigChanged| IS
+    IS -->|CloudCoverUpdated| PH & SM
+    CO -->|ModeRequested| MC
+    CO -->|"TuneLights, TuneSave"| PH
+    CO -->|SetMinLevel| ST
+    PH -->|"SetMinLevel (tune save)"| ST
     TMR(["esp_timer"]) -->|Heartbeat| CK
 
     ST[SettingsStore] -->|ConfigChanged| PH & SM & CK
@@ -522,13 +555,13 @@ flowchart LR
 |---|---|---|
 | **ZigbeeAdapter** | `SetLight`, `Discover`, `Bind`, `Ping`, `OpenNetwork`, `FactoryReset`, `RoleAssigned`, `RoleCleared` | `NetworkUp`, `DeviceAnnounced`, `EndpointFound`, `BindResult`, `PingResult`, `AckReceived`, `ButtonPressed` |
 | **DeviceRegistry** | `RolesLoaded`, `NetworkUp`, `DeviceAnnounced`, `EndpointFound`, `BindResult`, `PingResult`, `AckReceived`, `ButtonPressed`, `PairRequested`, `PairCancelled`, `UnpairRequested`, `Tick` | `RoleAssigned`, `RoleCleared`, `Discover`, `Bind`, `Ping`, `OpenNetwork`, `PersistRoles`, `RefreshLights`, `ReachabilityChanged`, `DevicesUpdated` |
-| **ModeController** | `ButtonPressed`, `Tick` | `ModeChanged` |
-| **ProgramHost** (runs one `Program`) | `ModeChanged`, `ConfigChanged`, `Tick`, `ProgramTick`, `RefreshLights`, `NetworkUp` | `LightTarget` |
+| **ModeController** | `ButtonPressed`, `ModeRequested`, `Tick` | `ModeChanged` |
+| **ProgramHost** (runs one `Program`) | `ModeChanged`, `ConfigChanged`, `CloudCoverUpdated`, `Tick`, `ProgramTick`, `RefreshLights`, `NetworkUp`, `TuneLights`, `TuneSave` | `LightTarget`, `SetMinLevel` (on `TuneSave`) |
 | **LightOutput** | `LightTarget`, `RoleAssigned`, `RoleCleared`, `ReachabilityChanged` | `SetLight` |
-| **StatusModel** | `ConfigChanged`, `ModeChanged`, `DevicesUpdated`, `Tick` | `StatusChanged` |
+| **StatusModel** | `ConfigChanged`, `ModeChanged`, `DevicesUpdated`, `CloudCoverUpdated`, `Tick` | `StatusChanged` |
 | **Clock** | `Heartbeat`, `ConfigChanged`, `SetFastDay` | `Heartbeat` (from its timer), `Tick`, `ProgramTick`; on a fast-day switch also `RefreshLights`, `SyncRequested` |
-| **InternetSync** | `ConfigChanged` (the sync window), `SyncRequested` | — (sets the system clock; runs on its own task) |
-| **SettingsStore** | `SetConfig`, `SetIntensity`, `PersistRoles`, `FactoryReset` | `RolesLoaded`, `ConfigChanged` |
+| **InternetSync** | `ConfigChanged` (the sync window), `SyncRequested` | `CloudCoverUpdated` (and sets the system clock; runs on its own task) |
+| **SettingsStore** | `SetConfig`, `SetIntensity`, `SetMinLevel`, `PersistRoles`, `FactoryReset` | `RolesLoaded`, `ConfigChanged` |
 | **Console** | — (REPL task; reads `StatusSlot`) | the requests above |
 | **StatusDisplay** | — (display task; reads `StatusSlot`) | — |
 
@@ -538,13 +571,18 @@ Every mode is a `core::Program`: it decides what each bulb should show and
 posts `LightTarget`s, nothing else. `ProgramHost` owns them and runs the
 one the `Mode` selects.
 
-| Hook | Called on | Daylight | Off | Red alert |
-|---|---|---|---|---|
-| `start(now)` | `ModeChanged` | refresh all | refresh all | bright, refresh all |
-| `refresh(role, now)` | `RefreshLights`, `NetworkUp`, `ConfigChanged` | sun curve now, 2 s | off | red at the current level |
-| `onTick` | `Tick` | — | — | flip bright/dim, 0.9 s fade |
-| `onProgramTick` | `ProgramTick` | sun curve, ramped over the interval | — | — |
-| `onConfig` | `ConfigChanged` (every program, running or not) | schedule, peaks | — | — |
+| Hook | Called on | Daylight | Off | Red alert | Tuning |
+|---|---|---|---|---|---|
+| `start(now)` | `ModeChanged` | refresh all | refresh all | bright, refresh all | every bulb at its minimum, amber |
+| `refresh(role, now)` | `RefreshLights`, `NetworkUp`, `ConfigChanged` | sun curve now, 2 s | off | red at the current level | the tuned / minimum level |
+| `onTick` | `Tick` | — | — | flip bright/dim, 0.9 s fade | — |
+| `onProgramTick` | `ProgramTick` | sun curve, ramped over the interval | — | — | — |
+| `onConfig` | `ConfigChanged` (every program, running or not) | schedule, peaks, minimums | — | — | minimums, amber colour |
+| `onCloudCover` | `CloudCoverUpdated` (every program) | the forecast | — | — | — |
+
+The tuning program also takes `TuneLights` (through `ProgramHost`); on
+`TuneSave`, `ProgramHost` takes its tuned levels and posts them as
+`SetMinLevel`, so programs still post only `LightTarget`s.
 
 Only the running program gets ticks and refreshes, so no program checks
 the mode. `LightOutput` doesn't know programs exist: it diffs each target
@@ -610,7 +648,8 @@ sequenceDiagram
     M->>M: nvs_flash_init, TZ, construct modules, wire
     M->>ST: loadAll()
     ST-->>Q: RolesLoaded, ConfigChanged (queued)
-    M->>M: InternetSync.syncNow() - Wi-Fi + SNTP, blocking, then its task
+    M->>M: InternetSync.start() - its task syncs the clock and fetches the forecast, App waits
+    Note over M,Q: CloudCoverUpdated (queued)
     M->>CK: start() - 1 Hz Heartbeat
     M->>ZA: start() - Zigbee task forms / rejoins the network
     M->>Q: app task: waits for the stack, then processes
@@ -619,7 +658,7 @@ sequenceDiagram
     Note over DR: discovery / keep-alive flows wait for NetworkUp
     Q->>LO: RoleAssigned: bulb addresses
     Q->>ZA: RoleAssigned: the button's address
-    Q->>PH: ConfigChanged
+    Q->>PH: ConfigChanged, CloudCoverUpdated
     loop every second
         Q->>CK: Heartbeat
         CK-->>Q: Tick (+ ProgramTick every 60 s)
@@ -698,9 +737,13 @@ Pairing a device (console `pair` or the role manifest) is in DESIGN.md §2.
 | `ProgramTick` | `TimeReading`, transition | Clock, every 60 s (1 s in fast-day) |
 | `SetFastDay` | on, real seconds per simulated day | Console (`fastday`) |
 | `SyncRequested` | — | Console (`sync`), Clock (fast-day switched) |
-| `ConfigChanged` | `ProgramConfig`, per-light `Peaks` | SettingsStore (at boot, then on change) |
+| `ConfigChanged` | `ProgramConfig`, per-light `Peaks` and `MinLevels` | SettingsStore (at boot, then on change) |
+| `CloudCoverUpdated` | `CloudCover` (48 local hours) | InternetSync, each sync |
 | `SetConfig` | `ProgramConfig` | Console (`config`) |
 | `SetIntensity` | `Selection` (all, a group or a role), percent | Console (`intensity`) |
+| `SetMinLevel` | `Selection`, level 1-254 | Console (`minlevel`), ProgramHost (`tune save`) |
+| `ModeRequested` | `Mode` | Console (`tune`, `tune off`) |
+| `TuneLights` / `TuneSave` | `Selection`, level, optional kelvin / — | Console (`tune`) |
 | `RolesLoaded` / `PersistRoles` | every `DeviceRecord` | SettingsStore / DeviceRegistry |
 | `NetworkUp` | rejoined, `at` | ZigbeeAdapter |
 | `DeviceAnnounced` | ext addr, short addr | ZigbeeAdapter |
@@ -766,6 +809,8 @@ silent, pings, an unanswered ping counts as failed); discovery retry and
 unpairing stopping it; button pairing binds; `unpair all` and unpairing a
 group; the role layout; the wall dimming in order away from the sun; the
 name-keyed role manifest; the amber sweep across the wall at sunset; the
+cloud forecast lookup and its overlay (dimmer, cooler, diffuse); minimum
+levels keeping the wall lit to sunset; tuning mode and `tune save`; the
 bus delivering 40k events from two threads in each poster's order.
 
 ## 10. The EventBus

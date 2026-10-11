@@ -16,8 +16,8 @@ export namespace sunsim::platform {
 //   roles     "<role>.ext" / ".short" / ".ep"   (a role is assigned iff .ext exists)
 //   program   "act.start" "act.end" "act.fade" "act.days" "work.start"
 //             "work.end" "sun.shift" "sun.amber" "sun.sweep" "sync.start"
-//             "sync.end"  (hours stored as minutes)
-//   intensity "<role>.peak"
+//             "sync.end" "sky.on" "sky.dim" "sky.cool"  (hours stored as minutes)
+//   intensity "<role>.peak" (percent), "<role>.min" (minimum level)
 //   "layout"  which role layout the keys follow (see migrateLayout())
 // Wi-Fi credentials are kept separately (:wifi).
 class SettingsStore {
@@ -31,6 +31,7 @@ public:
 
     void onSetConfig(const ev::SetConfig &e);
     void onSetIntensity(const ev::SetIntensity &e);
+    void onSetMinLevel(const ev::SetMinLevel &e);
     void onPersistRoles(const ev::PersistRoles &e);
     void onFactoryReset();
 
@@ -39,7 +40,8 @@ private:
 
     ev::Post          post_;
     ev::ProgramConfig config_;
-    ev::Peaks         peaks_ = ev::kDefaultPeaks;
+    ev::Peaks         peaks_      = ev::kDefaultPeaks;
+    ev::MinLevels     min_levels_ = ev::kDefaultMinLevels;
 };
 
 } // namespace sunsim::platform
@@ -64,6 +66,9 @@ constexpr const char *kWorkEndKey   = "work.end";
 constexpr const char *kSunShiftKey  = "sun.shift";
 constexpr const char *kAmberKey     = "sun.amber";
 constexpr const char *kSweepKey     = "sun.sweep";
+constexpr const char *kCloudsKey    = "sky.on";
+constexpr const char *kCloudDimKey  = "sky.dim";
+constexpr const char *kCloudCoolKey = "sky.cool";
 constexpr const char *kSyncStartKey = "sync.start";
 constexpr const char *kSyncEndKey   = "sync.end";
 
@@ -184,6 +189,7 @@ bool moveRole(nvs_handle_t h, std::string_view from, std::string_view to)
     moved |= moveKey<uint16_t, nvs_get_u16, nvs_set_u16>(h, Key(from, "short"), Key(to, "short"));
     moved |= moveKey<uint8_t, nvs_get_u8, nvs_set_u8>(h, Key(from, "ep"), Key(to, "ep"));
     moved |= moveKey<uint8_t, nvs_get_u8, nvs_set_u8>(h, Key(from, "peak"), Key(to, "peak"));
+    moved |= moveKey<uint8_t, nvs_get_u8, nvs_set_u8>(h, Key(from, "min"), Key(to, "min"));
     return moved;
 }
 
@@ -216,7 +222,7 @@ SettingsStore::SettingsStore(ev::Post post, ev::ProgramConfig defaults) : post_(
 
 void SettingsStore::publish()
 {
-    post_(ev::ConfigChanged{.config = config_, .peaks = peaks_});
+    post_(ev::ConfigChanged{.config = config_, .peaks = peaks_, .min_levels = min_levels_});
 }
 
 void SettingsStore::loadAll()
@@ -278,9 +284,21 @@ void SettingsStore::loadAll()
         if (nvs_get_u8(h, kSweepKey, &byte) == ESP_OK && byte <= ev::kMaxAmberSweepDeg) {
             config_.amber_sweep_deg = byte;
         }
+        if (nvs_get_u8(h, kCloudsKey, &byte) == ESP_OK) {
+            config_.clouds_enabled = byte != 0;
+        }
+        if (nvs_get_u8(h, kCloudDimKey, &byte) == ESP_OK && byte <= 100) {
+            config_.cloud_dim_percent = byte;
+        }
+        if (nvs_get_u8(h, kCloudCoolKey, &byte) == ESP_OK && byte <= 100) {
+            config_.cloud_cool_percent = byte;
+        }
         for (const ev::Role role : ev::kRoles) {
             if (nvs_get_u8(h, Key(role, "peak").text, &byte) == ESP_OK && byte >= 1 && byte <= 100) {
                 peaks_[role] = byte;
+            }
+            if (nvs_get_u8(h, Key(role, "min").text, &byte) == ESP_OK && byte >= 1 && byte <= ev::kMaxLevel) {
+                min_levels_[role] = byte;
             }
         }
     }
@@ -306,6 +324,9 @@ void SettingsStore::onSetConfig(const ev::SetConfig &e)
     w.u8(kSunShiftKey, config_.sun_shift_percent);
     w.u8(kAmberKey, config_.amber_enabled ? 1 : 0);
     w.u8(kSweepKey, config_.amber_sweep_deg);
+    w.u8(kCloudsKey, config_.clouds_enabled ? 1 : 0);
+    w.u8(kCloudDimKey, config_.cloud_dim_percent);
+    w.u8(kCloudCoolKey, config_.cloud_cool_percent);
     w.commit();
     publish();
 }
@@ -320,6 +341,22 @@ void SettingsStore::onSetIntensity(const ev::SetIntensity &e)
         if (ev::selects(e.lights, role)) {
             peaks_[role] = percent;
             w.u8(Key(role, "peak").text, percent);
+        }
+    }
+    w.commit();
+    publish();
+}
+
+void SettingsStore::onSetMinLevel(const ev::SetMinLevel &e)
+{
+    const uint8_t level = std::clamp<uint8_t>(e.level, 1, ev::kMaxLevel);
+
+    Nvs       nvs{NVS_READWRITE};
+    NvsWriter w{nvs, "minimum level"};
+    for (const ev::Role role : ev::bulbs()) {
+        if (ev::selects(e.lights, role)) {
+            min_levels_[role] = level;
+            w.u8(Key(role, "min").text, level);
         }
     }
     w.commit();

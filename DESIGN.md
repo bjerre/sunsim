@@ -192,26 +192,31 @@ time and the light's place on the wall:
 flowchart TB
     T["TimeReading<br/>local time, UTC offset (DST included)"]
     X["wall position x<br/>+1 east ... -1 west"]
-    CFG["ProgramConfig<br/>location, window, shift, amber"]
+    CFG["ProgramConfig<br/>location, window, shift, amber, clouds"]
+    FC["CloudCover forecast<br/>(fetched each morning)"]
 
     T & CFG --> G["activeGate<br/>0 outside days/hours, ramps over the fade"]
     T & CFG --> ST["computeSunTimes<br/>sunrise, sunset"]
     T & CFG --> SP["computeSunPosition<br/>azimuth, elevation"]
+    T & FC --> CC["c = cloudCover(forecast, time)<br/>0 clear ... 1 overcast"]
 
     ST --> BR["b = sin(pi * progress through daylight)"]
     SP --> AW["away = abs(x - sin(azimuth)) / 2"]
     X --> AW
 
-    BR --> LV["level = gate * direction * b * max_level<br/>direction = 1 - shift * away"]
+    BR --> LV["level = gate * direction * sky * b * max_level<br/>direction = 1 - shift * away * (1 - c)<br/>sky = 1 - clouddim * c"]
     G --> LV
     AW --> LV
-    BR --> MI["mireds: warm at the edges, cool at noon"]
+    CC --> LV
+    BR --> MI["mireds: warm at the edges, cool at noon,<br/>then cloudcool * c of the way to cool"]
+    CC --> MI
 
-    SP --> AM["amber: below 6 deg of (elevation + sweep * away)<br/>slide to 1800K, sent as xy"]
+    SP --> AM["amber: below 6 deg of (elevation + sweep * away),<br/>times (1 - c); slide to 1800K, sent as xy"]
     AW --> AM
     MI --> AM
+    CC --> AM
 
-    LV --> PK["DaylightProgram: level * peak %"]
+    LV --> PK["DaylightProgram: onto min level ... peak"]
     AM --> PK
     PK --> LT(["LightTarget(role, LightState, 60 s)"])
 ```
@@ -322,19 +327,47 @@ Defaults: `work_cool_mireds=167` (~6000K), `work_warm_mireds=333`
 off. Interpolating in mireds rather than kelvin
 keeps the steps perceptually closer to even.
 
-### Per-light peak intensity (`core::DaylightProgram`)
+### Cloud cover (`core::cloudCover`, `sky.cppm`)
 
-After the schedule computes a bulb's level, `DaylightProgram` scales it by that
-light's peak percentage (`intensity` console command, NVS key
-`<role>.peak`, defaults walls 100 / work 90):
+Each internet sync (§5) fetches Open-Meteo's hourly cloud cover for the
+configured location and posts it as a `CloudCover`: 48 local hours from
+00:00 of the day it was fetched. `cloudCover()` interpolates it linearly
+between hours to `c`, 0 (clear) to 1 (overcast); no data means clear. The
+wall then gets what an overcast sky gives a room - less light, cooler,
+from everywhere at once:
 
 ```
-level_out = max(1, round(level · peak / 100))
+sky        = 1 - (clouddim / 100) · c              default clouddim 40
+direction  = 1 - k · away · (1 - c)                no sun direction under overcast
+mireds    += (cool_mireds - mireds) · (cloudcool / 100) · c    default cloudcool 50
+golden    *= 1 - c                                 no golden glow under a grey sky
+```
+
+The work light is task lighting and ignores the sky. In fast-day mode the
+simulated day reads the forecast's first day, so the sped-up loop shows
+today's sky. `config clouds off` ignores the forecast.
+
+### Per-light range: minimum level to peak (`core::DaylightProgram`)
+
+After the schedule computes a bulb's level (`min_level` ... `max_level`,
+1 ... 254), `DaylightProgram` maps it onto that light's own range: from its
+**minimum level** (`minlevel`, raw 1-254, NVS `<role>.min`, default 1) up to
+its **peak** (`intensity`, % of full, NVS `<role>.peak`, defaults walls 100
+/ work 90):
+
+```
+top       = 254 · peak / 100
+f         = (level - min_level) / (max_level - min_level)
+level_out = round(minimum + (top - minimum) · f)
 ```
 
 So `peak` is the brightness at the curve's maximum (solar noon for wall
-bulbs, mid-window for the work bulb), and every other point scales in
-proportion. Colour temperature is untouched; red alert is not scaled.
+bulbs, mid-window for the work bulb), and the dim end stops at the lowest
+level the bulb visibly shows instead of fading below it: bulbs stay lit
+until the curve really ends (sunset, or the active window's end), then
+turn off. Find the minimums with tuning mode (`TuningProgram`: every bulb
+steady at its minimum in the sunset's amber; `tune <light> <level>`, then
+`tune save`). Colour is untouched; red alert is not scaled.
 
 ### Active window (`DaylightSchedule::activeGate`)
 
@@ -363,6 +396,7 @@ calculation — no GPS, just two numbers you configure once:
    `CONFIG_SUNSIM_LONGITUDE_DEG`, decimal degrees, North/East positive) —
    set via `menuconfig`, parsed with `strtod()` in `App`'s (`main/main.cpp`)
    constructor, and stored in `ev::ProgramConfig`.
+   The same location is used for the cloud-cover forecast (§4).
 2. **Local civil UTC offset** — needed alongside longitude because the
    calculation has to know which UTC instant "today, local time" actually
    is. `InternetSync` sets the clock to UTC over SNTP (at boot, then in the

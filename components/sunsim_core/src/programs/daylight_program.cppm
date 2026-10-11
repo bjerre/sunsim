@@ -8,15 +8,17 @@ import std.compat;
 import sunsim.ev;
 import :daylight;
 import :program;
+import :sky;
 
 export namespace sunsim::core {
 
 // The normal program: the wall bulbs' sun curve (with sun direction along
-// the wall and the amber glow), the work light's cool -> warm day, the
-// active window, and each light's peak intensity. Every ProgramTick ramps
-// over the update interval; refreshes and setting changes re-apply at once
-// with a quick transition. Until the clock has been set (no SNTP yet) every
-// bulb is held off.
+// the wall, the amber glow and the forecast's cloud cover), the work
+// light's cool -> warm day, the active window, and each light's range from
+// its minimum level to its peak intensity. Every ProgramTick ramps over the
+// update interval; refreshes and setting changes re-apply at once with a
+// quick transition. Until the clock has been set (no SNTP yet) every bulb
+// is held off.
 class DaylightProgram final : public Program {
 public:
     using Program::Program;
@@ -24,12 +26,16 @@ public:
     void refresh(std::optional<ev::Role> role, const std::optional<ev::TimeReading> &now) override;
     void onProgramTick(const ev::ProgramTick &e) override;
     void onConfig(const ev::ConfigChanged &e) override;
+    void onCloudCover(const ev::CloudCoverUpdated &e) override;
 
 private:
     void emit(ev::Role role, const ev::TimeReading &time, ev::Transition transition);
+    [[nodiscard]] uint8_t outputLevel(ev::Role role, uint8_t level) const noexcept;
 
     DaylightSchedule schedule_;
     ev::Peaks        peaks_        = ev::kDefaultPeaks;
+    ev::MinLevels    min_levels_   = ev::kDefaultMinLevels;
+    ev::CloudCover   forecast_{};
     bool             clock_warned_ = false;
 };
 
@@ -69,7 +75,26 @@ void DaylightProgram::onProgramTick(const ev::ProgramTick &e)
 void DaylightProgram::onConfig(const ev::ConfigChanged &e)
 {
     schedule_.setConfig(e.config);
-    peaks_ = e.peaks;
+    peaks_      = e.peaks;
+    min_levels_ = e.min_levels;
+}
+
+void DaylightProgram::onCloudCover(const ev::CloudCoverUpdated &e)
+{
+    forecast_ = e.forecast;
+}
+
+// The schedule's level (min_level..max_level) mapped onto the light's own
+// range: its minimum level (the lowest it visibly shows) up to its peak. So
+// a light stays lit, dimly, until the curve really ends at sunset.
+uint8_t DaylightProgram::outputLevel(ev::Role role, uint8_t level) const noexcept
+{
+    const ev::ProgramConfig &c     = schedule_.config();
+    const double             top   = std::max(1.0, ev::kMaxLevel * peaks_[role] / 100.0);
+    const double             floor = std::min<double>(min_levels_[role], top);
+    const double             span  = std::max(1, c.max_level - c.min_level);
+    const double             f     = std::clamp((level - c.min_level) / span, 0.0, 1.0);
+    return static_cast<uint8_t>(std::lround(floor + (top - floor) * f));
 }
 
 void DaylightProgram::emit(ev::Role role, const ev::TimeReading &time, ev::Transition transition)
@@ -79,14 +104,14 @@ void DaylightProgram::emit(ev::Role role, const ev::TimeReading &time, ev::Trans
         clock_warned_ = false;
         state         = role.group == ev::Group::Work
                             ? schedule_.workState(time.local)
-                            : schedule_.wallState(time.local, time.utc_offset_hours, wallPosition(role));
+                            : schedule_.wallState(time.local, time.utc_offset_hours, wallPosition(role),
+                                                  cloudCover(forecast_, time).value_or(0.0));
     } else if (!clock_warned_) {
         clock_warned_ = true;
         SUNSIM_LOGW(kTag, "Clock not set yet (no time sync) - holding lights off");
     }
     if (state.on) {
-        const long scaled = std::lround(state.level * peaks_[role] / 100.0);
-        state.level       = static_cast<uint8_t>(scaled < 1 ? 1 : scaled);
+        state.level = outputLevel(role, state.level);
     }
     target(role, state, transition);
 }

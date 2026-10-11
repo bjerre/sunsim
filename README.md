@@ -12,6 +12,9 @@ simulation and responds to one physical button controller:
   west): the one nearest the real sun's direction is brightest (`config sunshift`),
   and near sunrise/sunset they glow amber, deepest at the end nearest the
   sun (`config amber`, `config ambersweep`).
+- The **real sky** shapes the wall: the hourly cloud-cover forecast,
+  fetched each morning, makes cloudy hours dimmer, cooler and diffuse
+  (no sun direction, no golden glow) - `config clouds`.
 - All bulbs only run inside an **active window** (default Mon-Fri,
   08:00-19:00, 10 min fade at each edge) and are off outside it.
 - **1 button controller** (any simple single-button Zigbee switch):
@@ -95,7 +98,10 @@ sunsim> config amber on             # amber glow when the sun is < 6 deg up
 sunsim> config ambersweep 3         # the glow follows the sun: far end lags 3 deg (0 = all alike)
 sunsim> config fade 10               # minutes to fade in/out at each edge (0 = hard on/off)
 sunsim> config days mon-fri          # or: all, or a list like mon,tue,thu
-sunsim> config syncwindow 04:00-05:00   # daily clock sync and internet data
+sunsim> config syncwindow 04:00-05:00   # daily clock sync and cloud forecast
+sunsim> config clouds on            # cloud cover shapes the wall (off: always clear sky)
+sunsim> config clouddim 40          # full overcast: up to 40% dimmer
+sunsim> config cloudcool 50         # ... and 50% of the way to the cool end
 ```
 
 Settings are stored on the device and survive reflashing; changes apply
@@ -115,6 +121,26 @@ sunsim> intensity wall 60      # every wall light
 sunsim> intensity all 75
 ```
 
+## Minimum levels and tuning
+
+Most bulbs go dark below some low level (and it differs by bulb), which
+cuts them off before the real sunset. Each light has a **minimum level**
+(1-254, raw Zigbee level, default 1): while it's on, its daylight curve
+runs from that minimum up to its peak, so it stays visibly lit until
+sunset (or the end of the active window), then turns off.
+
+Find each bulb's minimum in tuning mode, near sunset or in a dark room:
+
+```
+sunsim> tune                  # every bulb steady at its minimum, in sunset amber (1800K)
+sunsim> tune wall 6           # try 6 on the whole wall
+sunsim> tune WallC 9          # WallC needs more
+sunsim> tune WallA 8 2200     # a level and a colour (1700-6500K; below 2700K is sent as xy)
+sunsim> tune save             # the levels set since `tune` become the minimums
+sunsim> tune off              # back to daylight (or press the button once)
+sunsim> minlevel              # list; `minlevel WallB 7` sets one directly
+```
+
 ## Status display
 
 The board's LCD (Waveshare ESP32-C6-GEEK, 1.14" ST7789) shows:
@@ -132,9 +158,10 @@ display"; "Rotate the picture 180 degrees" flips it if it's upside down.
 
 ## Wi-Fi (internet sync)
 
-sunsim connects to Wi-Fi briefly to set its clock over SNTP (and, later,
-fetch the day's internet data), using the strongest saved network in
-range, then turns Wi-Fi off again. It does this:
+sunsim connects to Wi-Fi briefly to set its clock over SNTP and fetch the
+hourly cloud-cover forecast for today and tomorrow (Open-Meteo, free, no
+key; for the menuconfig latitude/longitude), using the strongest saved
+network in range, then turns Wi-Fi off again. It does this:
 
 - at boot, before the Zigbee radio starts;
 - once a day in the sync window (default 04:00-05:00, before the lights'
@@ -300,12 +327,14 @@ generated `role_manifest.h`.
     - `program.cppm` - the interface every program implements (what each bulb
       should show); `program_host.cppm` runs the selected one.
     - `daylight_program.cppm` - sun curve, work light, active window, sun
-      shift, amber, per-light intensity, clock guard.
-    - `red_alert_program.cppm`, `off_program.cppm` - the other two modes.
+      shift, amber, cloud cover, per-light minimum-to-peak range, clock guard.
+    - `red_alert_program.cppm`, `off_program.cppm`, `tuning_program.cppm` -
+      the other modes.
   - `light_output.cppm` - turns any program's targets into ZCL commands, diffed
     against what was last sent.
   - `status_model.cppm` - the snapshot shown by `status` and the display.
-  - `math/` - `daylight.cppm`, `solar.cppm`, `day_info.cppm`: the pure math.
+  - `math/` - `daylight.cppm`, `solar.cppm`, `sky.cppm` (the cloud forecast
+    by hour), `day_info.cppm`: the pure math.
   - `core.cppm` - `CoreModules` and `wireCore()`, every core-to-core edge.
 - `components/sunsim_platform/` (`sunsim::platform`, module
   `sunsim.platform`) - everything ESP-IDF; `bulb_endpoint`,
@@ -314,8 +343,10 @@ generated `role_manifest.h`.
     commissioning, discovery/bind/ping, button frames, bulb commands).
   - `clock.cppm`, `fast_day_clock.cppm` - heartbeat, program time, fast-day mode.
   - `internet_sync.cppm`, `wifi.cppm` - the daily / on-request internet jobs
-    (SNTP now) over a short Wi-Fi session; the saved networks.
-  - `settings_store.cppm` - all NVS persistence (roles, settings, intensities).
+    (SNTP, the cloud forecast over HTTPS) over a short Wi-Fi session; the
+    saved networks.
+  - `settings_store.cppm` - all NVS persistence (roles, settings, intensities,
+    minimum levels).
   - `console.cppm` - the serial REPL; `status_display.cppm` - the LCD.
 - `main/` - `main.cpp` (`App`: creates the bus and modules, platform wiring,
   app task; and `app_main`), menuconfig (`Kconfig.projbuild`), and the role manifest

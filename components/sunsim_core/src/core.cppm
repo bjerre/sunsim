@@ -16,7 +16,9 @@ export import :program;
 export import :program_host;
 export import :red_alert_program;
 export import :solar;
+export import :sky;
 export import :status_model;
+export import :tuning_program;
 
 export namespace sunsim::core {
 
@@ -61,6 +63,10 @@ void wireCore(ev::EventBus &bus, CoreModules &m)
         m.programs.onConfig(e);
         m.status.onConfig(e);
     });
+    bus.on<CloudCoverUpdated>([&](const CloudCoverUpdated &e) {
+        m.programs.onCloudCover(e);
+        m.status.onCloudCover(e);
+    });
     bus.on<RolesLoaded>([&](const RolesLoaded &e) { m.registry.onRolesLoaded(e); });
 
     // From the radio
@@ -82,6 +88,9 @@ void wireCore(ev::EventBus &bus, CoreModules &m)
     bus.on<PairRequested>([&](const PairRequested &e) { m.registry.onPairRequested(e); });
     bus.on<PairCancelled>([&](const PairCancelled &e) { m.registry.onPairCancelled(e); });
     bus.on<UnpairRequested>([&](const UnpairRequested &e) { m.registry.onUnpairRequested(e); });
+    bus.on<ModeRequested>([&](const ModeRequested &e) { m.mode.onModeRequested(e); });
+    bus.on<TuneLights>([&](const TuneLights &e) { m.programs.onTune(e); });
+    bus.on<TuneSave>([&](const TuneSave &e) { m.programs.onTuneSave(e); });
 
     // Registry
     bus.on<RoleAssigned>([&](const RoleAssigned &e) { m.output.onRoleAssigned(e); });

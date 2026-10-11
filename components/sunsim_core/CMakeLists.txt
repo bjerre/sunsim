@@ -9,6 +9,7 @@ set(modules "src/core.cppm"
             "src/light_output.cppm"
             "src/math/day_info.cppm"
             "src/math/daylight.cppm"
+            "src/math/sky.cppm"
             "src/math/solar.cppm"
             "src/mode_controller.cppm"
             "src/programs/daylight_program.cppm"
@@ -16,6 +17,7 @@ set(modules "src/core.cppm"
             "src/programs/program.cppm"
             "src/programs/program_host.cppm"
             "src/programs/red_alert_program.cppm"
+            "src/programs/tuning_program.cppm"
             "src/status_model.cppm")
 
 idf_component_register(SRCS ${modules}

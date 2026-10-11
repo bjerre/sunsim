@@ -31,6 +31,7 @@ public:
     virtual void onTick(const ev::Tick &) {}               // 1 Hz, while running
     virtual void onProgramTick(const ev::ProgramTick &) {} // update interval, while running
     virtual void onConfig(const ev::ConfigChanged &) {}    // always, running or not
+    virtual void onCloudCover(const ev::CloudCoverUpdated &) {} // always, running or not
 
 protected:
     // Calls f(role) for each bulb, or only for `only` if it's given (and a bulb).

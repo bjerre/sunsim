@@ -29,7 +29,8 @@ struct SetFastDay {              // console `fastday`: the debug fast-day clock 
 
 struct ConfigChanged {           // at boot from NVS, then after every change
     ProgramConfig config{};
-    Peaks         peaks = kDefaultPeaks;
+    Peaks         peaks      = kDefaultPeaks;
+    MinLevels     min_levels = kDefaultMinLevels;
 };
 struct SetConfig {               // console `config ...`
     ProgramConfig config{};
@@ -37,6 +38,13 @@ struct SetConfig {               // console `config ...`
 struct SetIntensity {            // console `intensity ...`
     Selection lights;            // non-bulbs in it are skipped
     uint8_t   percent = 100;
+};
+struct SetMinLevel {             // console `minlevel ...`, `tune save`
+    Selection lights;            // non-bulbs in it are skipped
+    uint8_t   level = 1;         // 1-254
+};
+struct CloudCoverUpdated {       // InternetSync, after each fetch
+    CloudCover forecast{};
 };
 struct RolesLoaded {             // at boot from NVS
     DeviceRecords records{};
@@ -104,6 +112,15 @@ struct OpenNetwork {
 };
 struct FactoryReset {};
 struct SyncRequested {};         // fetch from the internet now (clock, ...): console `sync`, fast-day switches
+struct ModeRequested {           // console: `tune`, `tune off`
+    Mode mode = Mode::Daylight;
+};
+struct TuneLights {              // console `tune <lights> <level> [kelvin]`: the tuning program's levels
+    Selection               lights;
+    uint8_t                 level = 1;
+    std::optional<uint16_t> kelvin; // none: keep the colour
+};
+struct TuneSave {};              // console `tune save`: the tuned levels become the minimums
 
 // ---- DeviceRegistry -------------------------------------------------------
 
@@ -173,11 +190,12 @@ struct StatusChanged {           // shared, not copied: it's by far the largest 
 // ---- The event type ------------------------------------------------------
 
 using Payload = std::variant<Heartbeat, Tick, ProgramTick, SetFastDay,                                 //
-                             ConfigChanged, SetConfig, SetIntensity, RolesLoaded, PersistRoles,       //
+                             ConfigChanged, SetConfig, SetIntensity, SetMinLevel, CloudCoverUpdated,  //
+                             RolesLoaded, PersistRoles,                                               //
                              NetworkUp, DeviceAnnounced, EndpointFound, BindResult, PingResult,       //
                              AckReceived, ButtonPressed,                                              //
                              PairRequested, PairCancelled, UnpairRequested, OpenNetwork, FactoryReset, //
-                             SyncRequested,                                                           //
+                             SyncRequested, ModeRequested, TuneLights, TuneSave,                      //
                              RoleAssigned, RoleCleared, Discover, Bind, Ping, ReachabilityChanged,    //
                              DevicesUpdated,                                                          //
                              ModeChanged, RefreshLights, LightTarget, SetLight,                      //
@@ -186,11 +204,12 @@ using Payload = std::variant<Heartbeat, Tick, ProgramTick, SetFastDay,          
 // Names for tracing, in Payload order.
 inline constexpr const char *kEventNames[] = {
     "Heartbeat", "Tick", "ProgramTick", "SetFastDay",
-    "ConfigChanged", "SetConfig", "SetIntensity", "RolesLoaded", "PersistRoles",
+    "ConfigChanged", "SetConfig", "SetIntensity", "SetMinLevel", "CloudCoverUpdated",
+    "RolesLoaded", "PersistRoles",
     "NetworkUp", "DeviceAnnounced", "EndpointFound", "BindResult", "PingResult",
     "AckReceived", "ButtonPressed",
     "PairRequested", "PairCancelled", "UnpairRequested", "OpenNetwork", "FactoryReset",
-    "SyncRequested",
+    "SyncRequested", "ModeRequested", "TuneLights", "TuneSave",
     "RoleAssigned", "RoleCleared", "Discover", "Bind", "Ping", "ReachabilityChanged", "DevicesUpdated",
     "ModeChanged", "RefreshLights", "LightTarget", "SetLight",
     "StatusChanged",

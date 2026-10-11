@@ -24,9 +24,11 @@ export namespace sunsim::platform {
 //   pair cancel           disarm a pending `pair`
 //   unpair <role|group|all>   forget role assignment(s)
 //   open [seconds]        open the network for joining (default 180)
-//   config                show active/work/sync hours, fade, sun shift, amber, amber sweep, work days
+//   config                show active/work/sync hours, fade, sun shift, amber, amber sweep, clouds, work days
 //   config <key> <value>  change one (see `help config`)
 //   intensity [<light|group|all> <1-100>]   per-light peak brightness, saved
+//   minlevel [<light|group|all> <1-254>]    per-light minimum level while on, saved
+//   tune [<light|group|all> <1-254> [kelvin] | save | off]   find each bulb's lowest visible level
 //   press single|double|hold          simulate the button
 //   fastday [on [seconds] | off]      the debug fast-day clock (a whole day in seconds)
 //   sync                  sync the clock (and fetch internet data) now
@@ -194,8 +196,10 @@ void printSchedule(const ev::ProgramConfig &c)
     std::printf("-");
     printClock(c.work_end_hour);
     std::printf("  (work light cool -> warm)\nsun   %u%% (wall dimming away from the sun)\n"
-                "amber %s (sunrise/sunset glow below %.0f deg sun elevation; far end lags %u deg)\ndays ",
+                "amber %s (sunrise/sunset glow below %.0f deg sun elevation; far end lags %u deg)\n",
                 c.sun_shift_percent, c.amber_enabled ? "on" : "off", c.golden_elevation_deg, c.amber_sweep_deg);
+    std::printf("clouds %s (overcast: up to %u%% dimmer, %u%% of the way to cool)\ndays ",
+                c.clouds_enabled ? "on" : "off", c.cloud_dim_percent, c.cloud_cool_percent);
     for (int d = 0; d < 7; ++d) {
         const int day = (d + 1) % 7; // list Monday first
         if ((c.active_days >> day) & 1U) {
@@ -251,6 +255,7 @@ int cmdConfig(int argc, char **argv)
     const std::string_view key{argv[1]};
     if (argc != 3) {
         std::printf("usage: config [hours | workhours | syncwindow HH:MM-HH:MM | fade <minutes> |\n"
+                    "               clouds on|off | clouddim <0-100> | cloudcool <0-100> |\n"
                     "               sunshift <0-100> | amber on|off | ambersweep <0-%u> |\n"
                     "               days mon-fri|all|mon,tue,...]\n",
                     ev::kMaxAmberSweepDeg);
@@ -294,6 +299,20 @@ int cmdConfig(int argc, char **argv)
             return 1;
         }
         c.sun_shift_percent = static_cast<uint8_t>(percent);
+    } else if (key == "clouds") {
+        const std::string_view value{argv[2]};
+        if (value != "on" && value != "off") {
+            std::printf("clouds must be on or off\n");
+            return 1;
+        }
+        c.clouds_enabled = value == "on";
+    } else if (key == "clouddim" || key == "cloudcool") {
+        const int percent = std::atoi(argv[2]);
+        if (percent < 0 || percent > 100 || (percent == 0 && argv[2][0] != '0')) {
+            std::printf("%s must be 0-100 (%%, under full overcast)\n", argv[1]);
+            return 1;
+        }
+        (key == "clouddim" ? c.cloud_dim_percent : c.cloud_cool_percent) = static_cast<uint8_t>(percent);
     } else if (key == "amber") {
         const std::string_view value{argv[2]};
         if (value != "on" && value != "off") {
@@ -317,7 +336,7 @@ int cmdConfig(int argc, char **argv)
         }
         c.active_days = *days;
     } else {
-        std::printf("unknown setting '%s' (hours, workhours, syncwindow, fade, sunshift, amber, ambersweep, days)\n", argv[1]);
+        std::printf("unknown setting '%s' (hours, workhours, syncwindow, fade, sunshift, amber, ambersweep, clouds, clouddim, cloudcool, days)\n", argv[1]);
         return 1;
     }
 
@@ -332,6 +351,13 @@ void printPeaks(const ev::Peaks &peaks)
 {
     for (const ev::Role role : ev::bulbs()) {
         std::printf("  %-6s %3u%%\n", ev::roleName(role).data(), peaks[role]);
+    }
+}
+
+void printMinLevels(const ev::MinLevels &levels)
+{
+    for (const ev::Role role : ev::bulbs()) {
+        std::printf("  %-6s %3u\n", ev::roleName(role).data(), levels[role]);
     }
 }
 
@@ -367,6 +393,86 @@ int cmdIntensity(int argc, char **argv)
         }
     }
     printPeaks(peaks);
+    return 0;
+}
+
+int cmdMinLevel(int argc, char **argv)
+{
+    const auto st = snapshot();
+    if (!st) {
+        return 1;
+    }
+    if (argc == 1) {
+        printMinLevels(st->min_levels);
+        return 0;
+    }
+    const int level = argc == 3 ? std::atoi(argv[2]) : 0;
+    if (argc != 3 || level < 1 || level > ev::kMaxLevel) {
+        std::printf("usage: minlevel [<light|group|all> <1-254>]   (find them with `tune`)\n");
+        return 1;
+    }
+    const auto lights = parseSelectionArg(argv[1]);
+    if (!lights) {
+        return 1;
+    }
+    g_ctx.post(ev::SetMinLevel{*lights, static_cast<uint8_t>(level)});
+    ev::MinLevels levels = st->min_levels;
+    for (const ev::Role role : ev::bulbs()) {
+        if (ev::selects(*lights, role)) {
+            levels[role] = static_cast<uint8_t>(level);
+        }
+    }
+    printMinLevels(levels);
+    return 0;
+}
+
+int cmdTune(int argc, char **argv)
+{
+    const auto st = snapshot();
+    if (!st) {
+        return 1;
+    }
+    const bool             tuning = st->mode == ev::Mode::Tuning;
+    const std::string_view what   = argc >= 2 ? argv[1] : "";
+    if (argc == 1) {
+        if (!tuning) {
+            g_ctx.post(ev::ModeRequested{ev::Mode::Tuning});
+        }
+        std::printf("tuning: every bulb steady at its minimum level, in sunset amber. Raise a bulb until it\n"
+                    "shows, then `tune save`; `tune off` (or a button press) returns to daylight.\n"
+                    "  tune <light|group|all> <1-254> [kelvin]\nminimum levels now:\n");
+        printMinLevels(st->min_levels);
+        return 0;
+    }
+    if (what == "off" && argc == 2) {
+        g_ctx.post(ev::ModeRequested{ev::Mode::Daylight});
+        return 0;
+    }
+    if (what == "save" && argc == 2) {
+        if (!tuning) {
+            std::printf("not tuning: nothing to save (start with `tune`)\n");
+            return 1;
+        }
+        g_ctx.post(ev::TuneSave{});
+        std::printf("saved as the minimum levels (see `minlevel`)\n");
+        return 0;
+    }
+    const int level  = argc >= 3 ? std::atoi(argv[2]) : 0;
+    const int kelvin = argc == 4 ? std::atoi(argv[3]) : 0;
+    if (argc < 3 || argc > 4 || level < 1 || level > ev::kMaxLevel || (argc == 4 && (kelvin < 1700 || kelvin > 6500))) {
+        std::printf("usage: tune [<light|group|all> <1-254> [1700-6500 kelvin] | save | off]\n");
+        return 1;
+    }
+    const auto lights = parseSelectionArg(argv[1]);
+    if (!lights) {
+        return 1;
+    }
+    if (!tuning) {
+        g_ctx.post(ev::ModeRequested{ev::Mode::Tuning});
+    }
+    g_ctx.post(ev::TuneLights{.lights = *lights,
+                              .level  = static_cast<uint8_t>(level),
+                              .kelvin = argc == 4 ? std::optional<uint16_t>{static_cast<uint16_t>(kelvin)} : std::nullopt});
     return 0;
 }
 
@@ -455,6 +561,12 @@ int cmdStatus(int, char **)
     std::printf(" (");
     printClock(st->day.next_event_hour);
     std::printf(")\n");
+
+    if (st->cloud_percent) {
+        std::printf("sky     %u%% cloud%s\n", *st->cloud_percent, st->config.clouds_enabled ? "" : " (clouds off)");
+    } else {
+        std::printf("sky     no forecast yet (clear assumed)\n");
+    }
 
     std::printf("mode    %s", ev::modeName(st->mode));
     if (st->mode == ev::Mode::Daylight) {
@@ -621,12 +733,16 @@ void startConsole(const ev::Post &post, const StatusSlot &status)
     registerCommand("unpair", "Forget a role's device, or a group's (they can then be re-paired)",
                     "<role|group|all>", &cmdUnpair);
     registerCommand("open", "Open the network for joining", "[seconds]", &cmdOpen);
-    registerCommand("config", "Show or change active/work hours, fade, sun shift, amber glow and work days",
+    registerCommand("config", "Show or change active/work/sync hours, fade, sun shift, amber glow, clouds, work days",
                     "[hours|workhours|syncwindow HH:MM-HH:MM | fade <min> | sunshift <0-100> |"
-                    " amber on|off | ambersweep <0-30> | days ...]",
+                    " amber on|off | ambersweep <0-30> | clouds on|off | clouddim|cloudcool <0-100> | days ...]",
                     &cmdConfig);
     registerCommand("intensity", "Show or set each light's peak brightness, 1-100%", "[<light|group|all> <1-100>]",
                     &cmdIntensity);
+    registerCommand("minlevel", "Show or set each light's minimum level while on, 1-254 (find them with tune)",
+                    "[<light|group|all> <1-254>]", &cmdMinLevel);
+    registerCommand("tune", "Tuning mode: hold bulbs steady to find each one's lowest visible level",
+                    "[<light|group|all> <1-254> [kelvin] | save | off]", &cmdTune);
     registerCommand("press", "Simulate the button: single = resume daylight, double = red alert, hold = all off",
                     "single|double|hold", &cmdPress);
     registerCommand("fastday", "Debug: run a whole active window every few seconds, or back to real time",
