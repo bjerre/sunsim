@@ -1,6 +1,10 @@
 # clangd (VS Code's clangd extension) reading the ESP-IDF GCC build's
 # compile_commands.json: drop the GCC-only flags clang doesn't know, and
 # point it at clang's built-in headers (esp-clangd ships without them).
+# The host tests (test/host) are read with these flags too: clangd gives each
+# module one compile command, and the components' modules get the firmware's,
+# so everything importing them must match (tests.cpp's command is inferred
+# from this database). Their real build (test/host/CMakeLists.txt) is apart.
 CompileFlags:
   CompilationDatabase: build
   Add:

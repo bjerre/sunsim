@@ -51,10 +51,13 @@ without the `export.sh` step.
 Code navigation and diagnostics come from clangd (VS Code's clangd
 extension, using ESP-IDF's own clangd; see `.clangd` and
 `.vscode/settings.json` - Microsoft's C/C++ IntelliSense is turned off). It
-reads `build/compile_commands.json`, so build once first; the host tests
-use `build-host/` (see `test/host/.clangd`). clangd builds its own copies of
-the C++ modules (`--experimental-modules-support`), so the first file opened
-takes a minute or two.
+reads `build/compile_commands.json`, so build once first. The host tests
+are read with the firmware's flags too: clangd
+gives each module one compile command, so everything importing the
+components' modules has to match them. clangd builds its own copies of the
+C++ modules (`--experimental-modules-support`), so the first file opened
+takes a couple of minutes; after a change to `.clangd` or the build, run
+"clangd: Restart language server".
 
 ## Missing devices
 

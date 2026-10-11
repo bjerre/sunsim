@@ -18,15 +18,20 @@ function(sunsim_import_std target)
     file(READ "${manifest}" json)
     string(JSON count LENGTH "${json}" modules)
     math(EXPR last "${count} - 1")
+    # Built from copies in the build tree, not where GCC keeps them: clangd
+    # looks for a file's compile command from the file's own directory, and
+    # finds none beside the toolchain's, so `import std` failed in the editor.
+    # (They only #include <...>, so they build the same from anywhere.)
+    set(source_dir "${CMAKE_CURRENT_BINARY_DIR}/std_modules")
     set(sources "")
     foreach(i RANGE ${last})
         string(JSON source GET "${json}" modules ${i} source-path)
         cmake_path(ABSOLUTE_PATH source BASE_DIRECTORY "${manifest_dir}" NORMALIZE)
-        list(APPEND sources "${source}")
+        cmake_path(GET source FILENAME name)
+        configure_file("${source}" "${source_dir}/${name}" COPYONLY)
+        list(APPEND sources "${source_dir}/${name}")
     endforeach()
 
-    list(GET sources 0 first)
-    cmake_path(GET first PARENT_PATH source_dir) # both live in bits/
     target_sources(${target} PUBLIC FILE_SET std TYPE CXX_MODULES BASE_DIRS "${source_dir}" FILES ${sources})
     target_compile_features(${target} PUBLIC cxx_std_26)
 endfunction()
