@@ -1,22 +1,22 @@
 # sunsim
 
-An ESP32-C6 Zigbee coordinator that drives 4 Zigbee bulbs through a daylight
+An ESP32-C6 Zigbee coordinator that drives 6 Zigbee bulbs through a daylight
 simulation and responds to one physical button controller:
 
-- **3 "wall" bulbs** fade through a warm-to-cool, dim-to-bright curve
+- **5 "wall" bulbs** fade through a warm-to-cool, dim-to-bright curve
   between the real local sunrise and sunset, simulating daylight.
 - **1 "work" bulb** stays bright and shifts cool to warm across the work
   hours (default 08:30-17:30: ~6000K in the morning to ~3000K by
   17:30, then holds warm).
-- The wall bulbs sit east-to-west on the south wall (A east, C west): the
-  one nearest the real sun's direction is brightest (`config sunshift`),
+- The wall bulbs sit east-to-west on the south wall (WallA east, WallE
+  west): the one nearest the real sun's direction is brightest (`config sunshift`),
   and near sunrise/sunset they glow amber (`config amber`).
 - All bulbs only run inside an **active window** (default Mon-Fri,
   08:00-19:00, 10 min fade at each edge) and are off outside it.
 - **1 button controller** (any simple single-button Zigbee switch):
   - single press -> resume the daylight program
   - long press (Off) -> all lights off until pressed again
-  - double press -> a "red alert" strobe effect on all 4 bulbs
+  - double press -> a "red alert" strobe effect on all the bulbs
 
 sunsim forms and is the coordinator of its own small Zigbee network - it
 does not join an existing hub's network. Built on
@@ -88,6 +88,7 @@ reflashing and re-pairing:
 ```
 sunsim> intensity              # list (defaults: walls 100, work 90)
 sunsim> intensity WallA 80     # applies within 2s
+sunsim> intensity wall 60      # every wall light
 sunsim> intensity all 75
 ```
 
@@ -99,7 +100,7 @@ The board's LCD (Waveshare ESP32-C6-GEEK, 1.14" ST7789) shows:
 - the mode: `daylight`, `idle` (outside active hours), `off` or `RED ALERT`
 - today's day length, and the countdown to the next sunrise or sunset
 - one dot per device: green = responding, amber = paired but silent,
-  grey = not paired (labels A, B, C = wall bulbs, W = work, Btn = button)
+  grey = not paired (labels A-E = wall bulbs east to west, W = work, B = button)
 
 The `status` console command prints the same information. Pins and
 orientation are under menuconfig, "Sunsim Configuration" -> "Status
@@ -128,7 +129,8 @@ bulbs' sunrise/sunset calculation - see
 
 ## Pairing
 
-Roles (`WallA`/`WallB`/`WallC`/`Work`/`Button`) are assigned from the serial
+Roles (`WallA`-`WallE` east to west along the wall, `Work`, `Button`; the
+counts per group are `ev::kLayout` in `types.cppm`) are assigned from the serial
 console (`idf.py monitor`, over the same USB cable used for flashing), one
 device at a time:
 
@@ -145,7 +147,8 @@ a role*. That way a paired bulb that gets power-cycled during pairing can't
 take the wrong role. To reassign a device, `unpair <role>` it first. Other
 commands:
 
-- `unpair <role>|all` - forget role assignments
+- `unpair <role|group|all>` - forget role assignments (e.g. `unpair WallB`,
+  `unpair wall`)
 - `open [seconds]` - reopen the network for joining (it opens for 180s at boot)
 - `pair cancel` - disarm a pending `pair`
 - `factory_reset` - forget all roles **and** the Zigbee network, then restart
@@ -153,13 +156,16 @@ commands:
   they still remember the old network.
 
 Roles and the Zigbee network both live in the `nvs` partition, so they survive
-reflashing. `idf.py erase-flash` also wipes both.
+reflashing. `idf.py erase-flash` also wipes both. Upgrading from the
+three-light wall renames the stored roles once, keeping each bulb's place:
+`WallB` (the middle) becomes `WallC` and `WallC` (the west end) becomes
+`WallE`; pair the new bulbs as `WallB` and `WallD`.
 
 Alternatively, devices can be pre-assigned by IEEE address in
 [`main/role_manifest.json`](main/role_manifest.json) (used only when no `pair`
 is armed). Use the exact `ext=` value from the log, not a hand-copied label.
 
-You don't need all 5 devices present for sunsim to do something useful:
+You don't need all 7 devices present for sunsim to do something useful:
 whichever bulbs have joined get the program applied; missing ones are
 silently skipped.
 
@@ -213,7 +219,7 @@ enable `SUNSIM_DEBUG_FAST_DAY` in menuconfig (and tune
   visibly animated
 - skips the Wi-Fi/SNTP time sync at boot
 
-It works with any subset of the 5 devices paired.
+It works with any subset of the 7 devices paired.
 
 ## Smooth transitions
 

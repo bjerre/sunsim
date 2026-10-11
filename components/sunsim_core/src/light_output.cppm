@@ -31,7 +31,7 @@ private:
     [[nodiscard]] static bool usable(const Bulb &b) noexcept { return b.known && b.reachable; }
 
     ev::Post                         post_;
-    std::array<Bulb, ev::kBulbCount> bulbs_{};
+    ev::PerRole<Bulb>                bulbs_{}; // bulbs only
 };
 
 } // namespace sunsim::core
@@ -80,7 +80,7 @@ void LightOutput::onRoleAssigned(const ev::RoleAssigned &e)
     if (!ev::isBulb(e.role)) {
         return;
     }
-    Bulb &b      = bulbs_[ev::indexOf(e.role)];
+    Bulb &b      = bulbs_[e.role];
     b.known      = e.record.valid && e.record.endpoint != 0;
     b.short_addr = e.record.short_addr;
     b.endpoint   = e.record.endpoint;
@@ -90,7 +90,7 @@ void LightOutput::onRoleAssigned(const ev::RoleAssigned &e)
 void LightOutput::onRoleCleared(const ev::RoleCleared &e)
 {
     if (ev::isBulb(e.role)) {
-        bulbs_[ev::indexOf(e.role)] = {};
+        bulbs_[e.role] = {};
     }
 }
 
@@ -99,7 +99,7 @@ void LightOutput::onReachability(const ev::ReachabilityChanged &e)
     if (!ev::isBulb(e.role)) {
         return;
     }
-    Bulb &b     = bulbs_[ev::indexOf(e.role)];
+    Bulb &b     = bulbs_[e.role];
     b.reachable = e.reachable;
     if (!e.reachable) {
         b.sent.reset(); // unknown state when it's back: resend everything
@@ -111,7 +111,7 @@ void LightOutput::onTarget(const ev::LightTarget &e)
     if (!ev::isBulb(e.role)) {
         return;
     }
-    Bulb &b = bulbs_[ev::indexOf(e.role)];
+    Bulb &b = bulbs_[e.role];
     if (!usable(b)) {
         return;
     }

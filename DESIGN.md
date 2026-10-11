@@ -27,13 +27,11 @@ flowchart TB
         Platform <--> Bus
     end
 
-    WallA((Wall bulb A))
-    WallB((Wall bulb B))
-    WallC((Wall bulb C))
+    Wall(("Wall bulbs A-E<br/>(east to west)"))
     Work((Work bulb))
     Switch(("Button<br/>(SNZB-01)"))
 
-    ZA == "ZCL: On/Off, Level,<br/>Color Control" ==> WallA & WallB & WallC & Work
+    ZA == "ZCL: On/Off, Level,<br/>Color Control" ==> Wall & Work
     Switch -- "On/Off: Toggle / On / Off" --> ZA
 ```
 
@@ -58,7 +56,8 @@ directly — see the table below, then the join sequence.
 | `short_addr` (NWK address) | 16-bit | Assigned by sunsim (the trust center) when the device associates | No — can change on every rejoin |
 | `endpoint` | 8-bit | Discovered via a ZDO Match_Desc query, not announced by the device | Fixed per device/firmware, but not knowable up front |
 
-Role (`WallA`/`WallB`/`WallC`/`Work`/`Button`) comes from none of these.
+Role (`WallA`-`WallE`, `Work`, `Button`: a group and an index within it,
+`ev::Role`, with the counts per group in `ev::kLayout`) comes from none of these.
 It's assigned when the device joins: to the role armed with the console's
 `pair <role>` (if the device doesn't already hold one), or else by looking
 up `ext_addr` in the optional build-time table
@@ -181,8 +180,10 @@ Defaults: `warm_mireds=370` (~2700K), `cool_mireds=153` (~6500K),
 
 ### Sun direction along the wall
 
-The three wall bulbs sit east-to-west along the south wall: A at the east
-end (`x = +1`), B in the middle (`0`), C at the west end (`-1`).
+The wall bulbs sit east-to-west along the south wall, lettered from the
+east, evenly spaced: with five, A at the east end (`x = +1`), then B
+(`+0.5`), C in the middle (`0`), D (`-0.5`) and E at the west end (`-1`);
+in general bulb `i` of `n` sits at `x = 1 - 2i/(n-1)`.
 `computeSunPosition()` (NOAA solar position equations, in `solar.cppm`)
 gives the sun's compass azimuth; its east-west component
 `sun_x = sin(azimuth)` is +1 due East, 0 due South, -1 due West. Each wall
@@ -195,8 +196,8 @@ direction = 1 - k · |x_bulb - sun_x| / 2          k = sun_shift_percent / 100 (
 so the bulb under the sun gets the full curve and the far end down to
 `1 - k`. It only ever dims, so `intensity` peaks stay true maxima. Seasons
 fall out of the real azimuth: in June the sun rises NE (~57°) and sets NW
-(~303°), so A and C lead strongly at the ends of the day; in December it
-rises SE (~123°) and sets SW (~238°) and B leads for longer.
+(~303°), so A and E lead strongly at the ends of the day; in December it
+rises SE (~123°) and sets SW (~238°) and the middle leads for longer.
 
 ### Amber sunrise/sunset
 

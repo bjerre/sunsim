@@ -31,8 +31,8 @@ struct SetConfig {               // console `config ...`
     ProgramConfig config{};
 };
 struct SetIntensity {            // console `intensity ...`
-    std::optional<Role> role;    // nullopt = every light
-    uint8_t             percent = 100;
+    Selection lights;            // non-bulbs in it are skipped
+    uint8_t   percent = 100;
 };
 struct RolesLoaded {             // at boot from NVS
     DeviceRecords records{};
@@ -52,15 +52,15 @@ struct DeviceAnnounced {
     uint16_t short_addr = 0;
 };
 struct EndpointFound {           // reply to Discover; endpoint 0 = none found
-    Role    role     = Role::WallA;
+    Role    role{};
     uint8_t endpoint = 0;
 };
 struct BindResult {
-    Role role = Role::Button;
+    Role role{Group::Button};
     bool ok   = false;
 };
 struct PingResult {
-    Role role   = Role::WallA;
+    Role role{};
     bool ok     = false;
     int  error  = 0;
     int  status = 0;
@@ -87,11 +87,11 @@ struct ButtonPressed {
 // ---- Console requests -----------------------------------------------------
 
 struct PairRequested {
-    Role role = Role::WallA;
+    Role role{};
 };
 struct PairCancelled {};
 struct UnpairRequested {
-    std::optional<Role> role;    // nullopt = all
+    Selection roles;
 };
 using OpenTime = std::chrono::duration<uint8_t>; // what the stack takes: whole seconds, up to 254
 inline constexpr OpenTime kDefaultOpenTime{180};  // pairing, console `open`, network up
@@ -103,34 +103,34 @@ struct FactoryReset {};
 // ---- DeviceRegistry -------------------------------------------------------
 
 struct RoleAssigned {            // at boot, on pairing, and on any address change
-    Role         role = Role::WallA;
+    Role         role{};
     DeviceRecord record{};
 };
 struct RoleCleared {
-    Role role = Role::WallA;
+    Role role{};
 };
 struct Discover {
-    Role     role       = Role::WallA;
+    Role     role{};
     uint16_t short_addr = 0;
 };
 struct Bind {                    // button's On/Off output -> our receiver endpoint
-    Role     role       = Role::Button;
+    Role     role{Group::Button};
     uint64_t ext_addr   = 0;
     uint16_t short_addr = 0;
     uint8_t  endpoint   = 0;
 };
 struct Ping {
-    Role     role       = Role::WallA;
+    Role     role{};
     uint16_t short_addr = 0;
 };
 struct ReachabilityChanged {     // a bulb stopped answering / answers again
-    Role role      = Role::WallA;
+    Role role{};
     bool reachable = true;
 };
 struct DevicesUpdated {          // 1 Hz summary for the status model
-    std::array<DeviceStatus, kRoleCount> devices{};
-    DeviceRecords                        records{};
-    std::optional<Role>                  armed;
+    PerRole<DeviceStatus> devices{};
+    DeviceRecords         records{};
+    std::optional<Role>   armed;
 };
 
 // ---- Mode, program, output ------------------------------------------------
@@ -142,7 +142,7 @@ struct RefreshLights {           // the running program re-applies now, with its
     std::optional<Role> role;    // nullopt = every light
 };
 struct LightTarget {             // what a bulb should show, from the running program
-    Role       role = Role::WallA;
+    Role       role{};
     LightState state{};
     Transition level_transition{};
     Transition color_transition{};

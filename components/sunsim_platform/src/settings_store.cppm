@@ -12,11 +12,12 @@ export namespace sunsim::platform {
 
 // Everything sunsim persists, in NVS namespace "sunsim", one key per field
 // so the format survives firmware changes (a new field just reads as its
-// default). Keys are unchanged from the pre-event firmware:
+// default):
 //   roles     "<role>.ext" / ".short" / ".ep"   (a role is assigned iff .ext exists)
 //   program   "act.start" "act.end" "act.fade" "act.days" "work.start"
 //             "work.end" "sun.shift" "sun.amber"  (hours stored as minutes)
 //   intensity "<role>.peak"
+//   "layout"  which role layout the keys follow (see migrateLayout())
 // Wi-Fi credentials are kept separately (:wifi_time_sync).
 class SettingsStore {
 public:
@@ -70,12 +71,26 @@ uint16_t toMinutes(double hours) noexcept
 // "<role>.<field>", at most 15 chars (NVS key limit).
 struct Key {
     char text[16];
-    Key(std::size_t role_index, const char *field)
+    Key(std::string_view role_name, const char *field)
     {
-        const auto name = ev::roleName(role_index);
-        std::snprintf(text, sizeof(text), "%.*s.%s", static_cast<int>(name.size()), name.data(), field);
+        std::snprintf(text, sizeof(text), "%.*s.%s", static_cast<int>(role_name.size()), role_name.data(), field);
     }
+    Key(ev::Role role, const char *field) : Key(ev::roleName(role), field) {}
 };
+static_assert(
+    [] {
+        std::size_t longest = 0;
+        for (const ev::Role role : ev::kRoles) {
+            longest = std::max(longest, ev::roleName(role).size());
+        }
+        return longest + std::string_view{".short"}.size() <= 15;
+    }(),
+    "role names must fit NVS keys");
+
+// The role layout the stored keys follow. Missing: the three-light wall,
+// whose WallA/B/C sat at the east end, middle and west end.
+constexpr const char *kLayoutKey     = "layout";
+constexpr uint8_t     kFiveLightWall = 1;
 
 class Nvs {
 public:
@@ -146,6 +161,51 @@ private:
     const char  *what_;
     esp_err_t    err_;
 };
+
+// Moves one key's value to another key; false if there was none.
+template <class T, auto get, auto set> bool moveKey(nvs_handle_t h, const Key &from, const Key &to)
+{
+    T value{};
+    if (get(h, from.text, &value) != ESP_OK || set(h, to.text, value) != ESP_OK) {
+        return false;
+    }
+    nvs_erase_key(h, from.text);
+    return true;
+}
+
+// Moves everything stored for a role to another role's name.
+bool moveRole(nvs_handle_t h, std::string_view from, std::string_view to)
+{
+    bool moved = moveKey<uint64_t, nvs_get_u64, nvs_set_u64>(h, Key(from, "ext"), Key(to, "ext"));
+    moved |= moveKey<uint16_t, nvs_get_u16, nvs_set_u16>(h, Key(from, "short"), Key(to, "short"));
+    moved |= moveKey<uint8_t, nvs_get_u8, nvs_set_u8>(h, Key(from, "ep"), Key(to, "ep"));
+    moved |= moveKey<uint8_t, nvs_get_u8, nvs_set_u8>(h, Key(from, "peak"), Key(to, "peak"));
+    return moved;
+}
+
+// The three-light wall's WallA/B/C (east end, middle, west end) are the
+// five-light wall's WallA/C/E: the same places. Renames their keys, once.
+void migrateLayout()
+{
+    Nvs nvs{NVS_READWRITE};
+    if (!nvs.ok()) {
+        ESP_LOGE(kTag, "Can't open NVS to check the role layout: %s", esp_err_to_name(nvs.error()));
+        return;
+    }
+    const nvs_handle_t h      = nvs.get();
+    uint8_t            layout = 0;
+    if (nvs_get_u8(h, kLayoutKey, &layout) == ESP_OK && layout >= kFiveLightWall) {
+        return;
+    }
+    const bool moved_c = moveRole(h, "WallC", "WallE"); // first, so WallC is free for WallB
+    const bool moved_b = moveRole(h, "WallB", "WallC");
+    nvs_set_u8(h, kLayoutKey, kFiveLightWall);
+    if (const esp_err_t err = nvs_commit(h); err != ESP_OK) {
+        ESP_LOGE(kTag, "Failed to save the role layout: %s", esp_err_to_name(err));
+    } else if (moved_b || moved_c) {
+        ESP_LOGW(kTag, "Five-light wall: stored WallB is now WallC, WallC is now WallE (same places on the wall)");
+    }
+}
 } // namespace
 
 SettingsStore::SettingsStore(ev::Post post, ev::ProgramConfig defaults) : post_(std::move(post)), config_(defaults) {}
@@ -157,6 +217,8 @@ void SettingsStore::publish()
 
 void SettingsStore::loadAll()
 {
+    migrateLayout();
+
     ev::RolesLoaded roles{};
 
     Nvs nvs{NVS_READONLY};
@@ -165,15 +227,15 @@ void SettingsStore::loadAll()
     } else {
         const nvs_handle_t h = nvs.get();
 
-        for (std::size_t i = 0; i < ev::kRoleCount; ++i) {
-            ev::DeviceRecord &d = roles.records[i];
-            if (nvs_get_u64(h, Key(i, "ext").text, &d.ext_addr) != ESP_OK) {
+        for (const ev::Role role : ev::kRoles) {
+            ev::DeviceRecord &d = roles.records[role];
+            if (nvs_get_u64(h, Key(role, "ext").text, &d.ext_addr) != ESP_OK) {
                 continue;
             }
             d.valid = true;
-            nvs_get_u16(h, Key(i, "short").text, &d.short_addr); // 0 if missing; refreshed on next announce
-            nvs_get_u8(h, Key(i, "ep").text, &d.endpoint);       // 0 if missing; triggers rediscovery
-            ESP_LOGI(kTag, "Restored %s: ext=0x%016llx short=0x%04x ep=%d", ev::roleName(i).data(),
+            nvs_get_u16(h, Key(role, "short").text, &d.short_addr); // 0 if missing; refreshed on next announce
+            nvs_get_u8(h, Key(role, "ep").text, &d.endpoint);       // 0 if missing; triggers rediscovery
+            ESP_LOGI(kTag, "Restored %s: ext=0x%016llx short=0x%04x ep=%d", ev::roleName(role).data(),
                      static_cast<unsigned long long>(d.ext_addr), d.short_addr, d.endpoint);
         }
 
@@ -203,9 +265,9 @@ void SettingsStore::loadAll()
         if (nvs_get_u8(h, kAmberKey, &byte) == ESP_OK) {
             config_.amber_enabled = byte != 0;
         }
-        for (std::size_t i = 0; i < ev::kRoleCount; ++i) {
-            if (nvs_get_u8(h, Key(i, "peak").text, &byte) == ESP_OK && byte >= 1 && byte <= 100) {
-                peaks_[i] = byte;
+        for (const ev::Role role : ev::kRoles) {
+            if (nvs_get_u8(h, Key(role, "peak").text, &byte) == ESP_OK && byte >= 1 && byte <= 100) {
+                peaks_[role] = byte;
             }
         }
     }
@@ -238,12 +300,11 @@ void SettingsStore::onSetIntensity(const ev::SetIntensity &e)
 
     Nvs       nvs{NVS_READWRITE};
     NvsWriter w{nvs, "intensity"};
-    for (std::size_t i = 0; i < ev::kBulbCount; ++i) {
-        if (e.role && ev::indexOf(*e.role) != i) {
-            continue;
+    for (const ev::Role role : ev::bulbs()) {
+        if (ev::selects(e.lights, role)) {
+            peaks_[role] = percent;
+            w.u8(Key(role, "peak").text, percent);
         }
-        peaks_[i] = percent;
-        w.u8(Key(i, "peak").text, percent);
     }
     w.commit();
     publish();
@@ -254,16 +315,16 @@ void SettingsStore::onPersistRoles(const ev::PersistRoles &e)
     Nvs       nvs{NVS_READWRITE};
     NvsWriter w{nvs, "roles"};
     w.erase(kLegacyBlobKey);
-    for (std::size_t i = 0; i < ev::kRoleCount; ++i) {
-        const ev::DeviceRecord &d = e.records[i];
+    for (const ev::Role role : ev::kRoles) {
+        const ev::DeviceRecord &d = e.records[role];
         if (d.valid) {
-            w.u64(Key(i, "ext").text, d.ext_addr);
-            w.u16(Key(i, "short").text, d.short_addr);
-            w.u8(Key(i, "ep").text, d.endpoint);
+            w.u64(Key(role, "ext").text, d.ext_addr);
+            w.u16(Key(role, "short").text, d.short_addr);
+            w.u8(Key(role, "ep").text, d.endpoint);
         } else {
-            w.erase(Key(i, "ext").text);
-            w.erase(Key(i, "short").text);
-            w.erase(Key(i, "ep").text);
+            w.erase(Key(role, "ext").text);
+            w.erase(Key(role, "short").text);
+            w.erase(Key(role, "ep").text);
         }
     }
     w.commit();

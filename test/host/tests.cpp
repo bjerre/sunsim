@@ -13,6 +13,13 @@ namespace {
 
 int g_failures = 0;
 
+constexpr Role kWallA{Group::Wall, 0}; // the east end
+constexpr Role kWallB{Group::Wall, 1};
+constexpr Role kWallC{Group::Wall, 2};
+constexpr Role kWallE{Group::Wall, 4}; // the west end
+constexpr Role kWork{Group::Work};
+constexpr Role kButton{Group::Button};
+
 #define CHECK(cond)                                                                                                    \
     do {                                                                                                               \
         if (!(cond)) {                                                                                                 \
@@ -106,18 +113,18 @@ int main()
     test("pairing assigns the armed role, persists, discovers, then lights it", [] {
         Harness h;
         h.tick(); // the program needs a time to compute targets
-        h.post(PairRequested{Role::WallC});
+        h.post(PairRequested{kWallC});
         CHECK(h.all<OpenNetwork>().size() == 1);
 
         h.post(DeviceAnnounced{.ext_addr = 0xAA, .short_addr = 0x1234});
         const auto assigned = h.all<RoleAssigned>();
-        CHECK(assigned.size() == 1 && assigned[0].role == Role::WallC && assigned[0].record.ext_addr == 0xAA);
+        CHECK(assigned.size() == 1 && assigned[0].role == kWallC && assigned[0].record.ext_addr == 0xAA);
         CHECK(!h.all<PersistRoles>().empty());
         const auto discover = h.all<Discover>();
-        CHECK(discover.size() == 1 && discover[0].role == Role::WallC && discover[0].short_addr == 0x1234);
+        CHECK(discover.size() == 1 && discover[0].role == kWallC && discover[0].short_addr == 0x1234);
 
         h.clearLog();
-        h.post(EndpointFound{.role = Role::WallC, .endpoint = 11});
+        h.post(EndpointFound{.role = kWallC, .endpoint = 11});
         const auto lights = h.all<SetLight>();
         CHECK(lights.size() == 1 && lights[0].short_addr == 0x1234 && lights[0].endpoint == 11);
         CHECK(lights.size() == 1 && lights[0].power && *lights[0].power); // first command switches it on
@@ -125,12 +132,12 @@ int main()
 
     test("a device that already holds a role is never claimed by `pair`", [] {
         Harness h;
-        h.pairBulb(Role::WallA, 0xA1, 0x0001);
-        h.post(PairRequested{Role::WallC});
+        h.pairBulb(kWallA, 0xA1, 0x0001);
+        h.post(PairRequested{kWallC});
         h.clearLog();
         h.post(DeviceAnnounced{.ext_addr = 0xA1, .short_addr = 0x0002}); // WallA power-cycles
         const auto assigned = h.all<RoleAssigned>();
-        CHECK(assigned.size() == 1 && assigned[0].role == Role::WallA && assigned[0].record.short_addr == 0x0002);
+        CHECK(assigned.size() == 1 && assigned[0].role == kWallA && assigned[0].record.short_addr == 0x0002);
         CHECK(h.all<RoleAssigned>().size() == 1); // WallC not assigned
     });
 
@@ -144,8 +151,8 @@ int main()
     test("double press -> red alert pulses; single press -> daylight resumes", [] {
         Harness h;
         h.tick();
-        h.pairBulb(Role::WallA, 0xA1, 0x0001);
-        h.pairBulb(Role::Work, 0xB2, 0x0002);
+        h.pairBulb(kWallA, 0xA1, 0x0001);
+        h.pairBulb(kWork, 0xB2, 0x0002);
         h.clearLog();
 
         h.post(ButtonPressed{.press = Press::Double, .source = Source::Zigbee, .at = h.now});
@@ -174,7 +181,7 @@ int main()
     test("hold -> all off; the daylight program is paused until resumed", [] {
         Harness h;
         h.tick();
-        h.pairBulb(Role::WallB, 0xC3, 0x0003);
+        h.pairBulb(kWallB, 0xC3, 0x0003);
         h.clearLog();
         h.post(ButtonPressed{.press = Press::Hold, .source = Source::Console, .at = h.now});
         const auto off = h.all<SetLight>();
@@ -191,7 +198,7 @@ int main()
         h.tick();
         h.post(ButtonPressed{.press = Press::Double, .source = Source::Console, .at = h.now});
         h.clearLog();
-        h.pairBulb(Role::WallC, 0xC3, 0x0003);
+        h.pairBulb(kWallC, 0xC3, 0x0003);
         const auto lights = h.all<SetLight>();
         CHECK(lights.size() == 1 && lights[0].power && *lights[0].power);
         CHECK(lights.size() == 1 && lights[0].hue_sat && lights[0].hue_sat->first == 0);
@@ -242,7 +249,7 @@ int main()
         TimeReading unset = noon();
         unset.valid       = false;
         h.tick(1, unset);
-        h.pairBulb(Role::WallA, 0xA1, 0x0001);
+        h.pairBulb(kWallA, 0xA1, 0x0001);
         h.clearLog();
         h.post(ProgramTick{.time = unset, .transition = 60s});
         const auto targets = h.all<LightTarget>();
@@ -255,8 +262,8 @@ int main()
     test("intensity scales the target level; ProgramTick ramps over the interval", [] {
         Harness h;
         h.tick();
-        Peaks peaks  = kDefaultPeaks;
-        peaks[0]     = 50; // WallA at 50%
+        Peaks peaks   = kDefaultPeaks;
+        peaks[kWallA] = 50;
         h.post(ConfigChanged{.config = {}, .peaks = peaks});
         h.clearLog();
         h.post(ProgramTick{.time = noon(), .transition = 60s});
@@ -272,25 +279,25 @@ int main()
     test("liveness: acks -> online; 150 s of silence -> silent", [] {
         Harness h;
         h.tick();
-        h.pairBulb(Role::Work, 0xB2, 0x0042);
+        h.pairBulb(kWork, 0xB2, 0x0042);
         h.post(AckReceived{.short_addr = 0x0042, .rssi = -48});
         h.tick();
         auto snaps = h.all<StatusChanged>();
-        CHECK(!snaps.empty() && snaps.back().snapshot->devices[indexOf(Role::Work)].link == DeviceLink::Online);
-        CHECK(!snaps.empty() && snaps.back().snapshot->devices[indexOf(Role::Work)].rssi == -48);
+        CHECK(!snaps.empty() && snaps.back().snapshot->devices[kWork].link == DeviceLink::Online);
+        CHECK(!snaps.empty() && snaps.back().snapshot->devices[kWork].rssi == -48);
 
         h.clearLog();
         h.tick(160);
         snaps = h.all<StatusChanged>();
-        CHECK(!snaps.empty() && snaps.back().snapshot->devices[indexOf(Role::Work)].link == DeviceLink::Silent);
+        CHECK(!snaps.empty() && snaps.back().snapshot->devices[kWork].link == DeviceLink::Silent);
         CHECK(h.all<Ping>().size() >= 2); // pinged every 60 s meanwhile
     });
 
     test("endpoint discovery is retried every 15 s until found", [] {
         Harness h;
-        h.post(PairRequested{Role::WallB});
+        h.post(PairRequested{kWallB});
         h.post(DeviceAnnounced{.ext_addr = 0xC3, .short_addr = 0x0003});
-        h.post(EndpointFound{.role = Role::WallB, .endpoint = 0}); // no reply
+        h.post(EndpointFound{.role = kWallB, .endpoint = 0}); // no reply
         h.clearLog();
         h.tick(30);
         CHECK(h.all<Discover>().size() == 2);
@@ -298,9 +305,9 @@ int main()
 
     test("unpairing a role mid-discovery stops its retries", [] {
         Harness h;
-        h.post(PairRequested{Role::WallB});
+        h.post(PairRequested{kWallB});
         h.post(DeviceAnnounced{.ext_addr = 0xC3, .short_addr = 0x0003}); // no EndpointFound
-        h.post(UnpairRequested{Role::WallB});
+        h.post(UnpairRequested{kWallB});
         h.clearLog();
         h.tick(45);
         CHECK(h.all<Discover>().empty());
@@ -310,19 +317,19 @@ int main()
     test("a ping that gets no answer at all counts as failed", [] {
         Harness h;
         h.tick();
-        h.pairBulb(Role::Work, 0xB2, 0x0002);
+        h.pairBulb(kWork, 0xB2, 0x0002);
         h.clearLog();
         h.tick(90); // pinged at 15 s and 75 s, never answered; silent since pairing
         const auto changes = h.all<ReachabilityChanged>();
-        CHECK(changes.size() == 1 && changes[0].role == Role::Work && !changes[0].reachable);
+        CHECK(changes.size() == 1 && changes[0].role == kWork && !changes[0].reachable);
     });
 
     test("button pairing binds it once its endpoint is found", [] {
         Harness h;
-        h.post(PairRequested{Role::Button});
+        h.post(PairRequested{kButton});
         h.post(DeviceAnnounced{.ext_addr = 0x18690AFFFE12620EULL, .short_addr = 0x2FED});
         h.clearLog();
-        h.post(EndpointFound{.role = Role::Button, .endpoint = 1});
+        h.post(EndpointFound{.role = kButton, .endpoint = 1});
         const auto binds = h.all<Bind>();
         CHECK(binds.size() == 1 && binds[0].short_addr == 0x2FED && binds[0].endpoint == 1);
         CHECK(h.all<SetLight>().empty()); // never treated as a bulb
@@ -331,8 +338,8 @@ int main()
     test("a missing bulb is paused, the others keep going, and it resumes when it answers", [] {
         Harness h;
         h.tick();
-        h.pairBulb(Role::WallA, 0xA1, 0x0001);
-        h.pairBulb(Role::Work, 0xB2, 0x0002); // never answers
+        h.pairBulb(kWallA, 0xA1, 0x0001);
+        h.pairBulb(kWork, 0xB2, 0x0002); // never answers
         h.post(AckReceived{.short_addr = 0x0001, .rssi = -50});
         h.clearLog();
 
@@ -343,17 +350,17 @@ int main()
         CHECK(pings.size() == 2);
 
         // WallA's ping is lost too, but it acked recently: still reachable.
-        h.post(PingResult{.role = Role::WallA, .ok = false});
+        h.post(PingResult{.role = kWallA, .ok = false});
         // Work's ping fails and it was never heard after pairing... except
         // at pairing itself, so it needs 60 s of silence first.
-        h.post(PingResult{.role = Role::Work, .ok = false});
+        h.post(PingResult{.role = kWork, .ok = false});
         CHECK(h.all<ReachabilityChanged>().empty());
 
         h.tick(60);
         h.post(AckReceived{.short_addr = 0x0001, .rssi = -50});
-        h.post(PingResult{.role = Role::Work, .ok = false});
+        h.post(PingResult{.role = kWork, .ok = false});
         auto changes = h.all<ReachabilityChanged>();
-        CHECK(changes.size() == 1 && changes[0].role == Role::Work && !changes[0].reachable);
+        CHECK(changes.size() == 1 && changes[0].role == kWork && !changes[0].reachable);
 
         h.clearLog();
         TimeReading later = noon();
@@ -372,7 +379,7 @@ int main()
         CHECK(h.all<Ping>().size() >= 1); // unreachable bulbs are checked every 15 s
 
         h.clearLog();
-        h.post(PingResult{.role = Role::Work, .ok = true}); // powered back on
+        h.post(PingResult{.role = kWork, .ok = true}); // powered back on
         changes = h.all<ReachabilityChanged>();
         CHECK(changes.size() == 1 && changes[0].reachable);
         bool resumed_on = false;
@@ -385,7 +392,7 @@ int main()
     test("only changed values are re-sent", [] {
         Harness h;
         h.tick();
-        h.pairBulb(Role::WallB, 0xC3, 0x0003);
+        h.pairBulb(kWallB, 0xC3, 0x0003);
         h.post(ProgramTick{.time = noon(), .transition = 60s});
         h.clearLog();
         h.post(ProgramTick{.time = noon(), .transition = 60s}); // same time -> same target
@@ -394,12 +401,61 @@ int main()
 
     test("unpair all clears every role and persists", [] {
         Harness h;
-        h.pairBulb(Role::WallA, 0xA1, 0x0001);
+        h.pairBulb(kWallA, 0xA1, 0x0001);
         h.clearLog();
         h.post(UnpairRequested{});
         CHECK(h.all<RoleCleared>().size() == ev::kRoleCount);
         const auto persisted = h.all<PersistRoles>();
-        CHECK(persisted.size() == 1 && !persisted[0].records[0].valid);
+        CHECK(persisted.size() == 1 && !persisted[0].records[kWallA].valid);
+    });
+
+    test("the layout: five wall lights east to west, then work and button", [] {
+        static_assert(kRoleCount == 7 && kBulbCount == 6);
+        static_assert(members(Group::Wall).size() == 5);
+        static_assert(roleName(kWallA) == "WallA" && roleName(kWallE) == "WallE");
+        static_assert(roleName(kWork) == "Work" && roleName(kButton) == "Button");
+        static_assert(parseRole("wallc") == kWallC && !parseRole("WallF"));
+        static_assert(slot(kWork) == 5 && kRoles[slot(kWallC)] == kWallC);
+        CHECK(std::ranges::equal(bulbs(), std::span{kRoles}.first(6)));
+
+        const auto wall = parseSelection("wall");
+        CHECK(wall && selects(*wall, kWallE) && !selects(*wall, kWork));
+        const auto work = parseSelection("WORK");
+        CHECK(work && selects(*work, kWork) && !selects(*work, kWallA));
+        const auto all = parseSelection("all");
+        CHECK(all && std::ranges::all_of(kRoles, [&](Role r) { return selects(*all, r); }));
+        CHECK(!parseSelection("lamp"));
+    });
+
+    test("unpairing a group clears just its roles", [] {
+        Harness h;
+        h.pairBulb(kWallA, 0xA1, 0x0001);
+        h.pairBulb(kWallE, 0xA5, 0x0005);
+        h.pairBulb(kWork, 0xB2, 0x0002);
+        h.clearLog();
+        h.post(UnpairRequested{Group::Wall});
+        CHECK(h.all<RoleCleared>().size() == members(Group::Wall).size());
+        const auto persisted = h.all<PersistRoles>();
+        CHECK(persisted.size() == 1 && !persisted[0].records[kWallA].valid && !persisted[0].records[kWallE].valid &&
+              persisted[0].records[kWork].valid);
+    });
+
+    test("the wall dims away from the sun, in order along the wall", [] {
+        Harness h;
+        h.tick();
+        for (const Role wall : members(Group::Wall)) {
+            h.pairBulb(wall, 0xA0 + wall.index, static_cast<uint16_t>(0x0010 + wall.index));
+        }
+        h.clearLog();
+        h.post(ProgramTick{.time = noon(), .transition = 60s}); // late afternoon at 0°E: the sun is in the west
+        std::vector<int> levels;
+        for (const auto &t : h.all<LightTarget>()) {
+            if (t.role.group == Group::Wall) {
+                levels.push_back(t.state.level);
+            }
+        }
+        CHECK(levels.size() == 5);
+        CHECK(std::ranges::is_sorted(levels, std::ranges::less{}) && levels.front() < levels.back()); // E brightest
     });
 
     std::printf("\n%s (%d failure%s)\n", g_failures ? "FAILED" : "ALL PASSED", g_failures, g_failures == 1 ? "" : "s");

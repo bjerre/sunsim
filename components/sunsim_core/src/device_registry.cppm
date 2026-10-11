@@ -30,7 +30,7 @@ export namespace sunsim::core {
 // Persists through PersistRoles; never touches storage or the radio itself.
 class DeviceRegistry {
 public:
-    using Manifest = std::array<uint64_t, ev::kRoleCount>; // 0 = no entry
+    using Manifest = ev::PerRole<uint64_t>; // IEEE address per role; 0 = no entry
 
     DeviceRegistry(ev::Post post, Manifest manifest);
 
@@ -54,10 +54,10 @@ private:
         bool       reachable = true;
     };
 
-    [[nodiscard]] ev::DeviceRecord &record(ev::Role role) noexcept { return records_[ev::indexOf(role)]; }
-    [[nodiscard]] const ev::DeviceRecord &record(ev::Role role) const noexcept { return records_[ev::indexOf(role)]; }
-    [[nodiscard]] Liveness &liveness(ev::Role role) noexcept { return liveness_[ev::indexOf(role)]; }
-    [[nodiscard]] const Liveness &liveness(ev::Role role) const noexcept { return liveness_[ev::indexOf(role)]; }
+    [[nodiscard]] ev::DeviceRecord &record(ev::Role role) noexcept { return records_[role]; }
+    [[nodiscard]] const ev::DeviceRecord &record(ev::Role role) const noexcept { return records_[role]; }
+    [[nodiscard]] Liveness &liveness(ev::Role role) noexcept { return liveness_[role]; }
+    [[nodiscard]] const Liveness &liveness(ev::Role role) const noexcept { return liveness_[role]; }
 
     [[nodiscard]] std::optional<ev::Role> roleByExt(uint64_t ext_addr) const noexcept;
     [[nodiscard]] std::optional<ev::Role> roleFromManifest(uint64_t ext_addr) const noexcept;
@@ -74,19 +74,19 @@ private:
     ev::Flow findEndpoint(ev::Role role);
     ev::Flow keepAlive(ev::Role bulb);
 
-    ev::Post                             post_;
-    Manifest                             manifest_;
-    ev::DeviceRecords                    records_{};
-    std::array<Liveness, ev::kRoleCount> liveness_{};
-    std::optional<ev::Role>              armed_;
+    ev::Post                     post_;
+    Manifest                     manifest_;
+    ev::DeviceRecords            records_{};
+    ev::PerRole<Liveness>        liveness_{};
+    std::optional<ev::Role>      armed_;
 
-    ev::Timer                            timer_;
-    bool                                 network_up_ = false; // nothing is sent before
-    ev::Inbox<ev::NetworkUp>             network_{timer_};
-    ev::Inbox<ev::EndpointFound>         endpoints_{timer_};
-    ev::Inbox<ev::PingResult>            pings_{timer_};
-    std::array<ev::Flow, ev::kRoleCount> discovery_;  // last, so they're destroyed
-    std::array<ev::Flow, ev::kBulbCount> keep_alive_; // before what they wait on
+    ev::Timer                    timer_;
+    bool                         network_up_ = false; // nothing is sent before
+    ev::Inbox<ev::NetworkUp>     network_{timer_};
+    ev::Inbox<ev::EndpointFound> endpoints_{timer_};
+    ev::Inbox<ev::PingResult>    pings_{timer_};
+    ev::PerRole<ev::Flow>        discovery_;  // last, so they're destroyed
+    ev::PerRole<ev::Flow>        keep_alive_; // before what they wait on (bulbs only)
 };
 
 } // namespace sunsim::core
@@ -132,7 +132,7 @@ std::optional<ev::Role> DeviceRegistry::roleByExt(uint64_t ext_addr) const noexc
 std::optional<ev::Role> DeviceRegistry::roleFromManifest(uint64_t ext_addr) const noexcept
 {
     for (const ev::Role role : ev::kRoles) {
-        if (ext_addr != 0 && manifest_[ev::indexOf(role)] == ext_addr) {
+        if (ext_addr != 0 && manifest_[role] == ext_addr) {
             return role;
         }
     }
@@ -189,18 +189,16 @@ void DeviceRegistry::assign(ev::Role role, uint64_t ext_addr, uint16_t short_add
     persist();
     heard(role);
     post_(ev::RoleAssigned{role, record(role)});
-    discovery_[ev::indexOf(role)] = findEndpoint(role);
+    discovery_[role] = findEndpoint(role);
     if (ev::isBulb(role)) {
-        keep_alive_[ev::indexOf(role)] = keepAlive(role);
+        keep_alive_[role] = keepAlive(role);
     }
 }
 
 void DeviceRegistry::clear(ev::Role role)
 {
-    discovery_[ev::indexOf(role)] = {};
-    if (ev::isBulb(role)) {
-        keep_alive_[ev::indexOf(role)] = {};
-    }
+    discovery_[role]  = {};
+    keep_alive_[role] = {};
     record(role)   = {};
     liveness(role) = {};
     post_(ev::RoleCleared{role});
@@ -215,10 +213,10 @@ void DeviceRegistry::onRolesLoaded(const ev::RolesLoaded &e)
         }
         post_(ev::RoleAssigned{role, record(role)});
         if (record(role).endpoint == 0) {
-            discovery_[ev::indexOf(role)] = findEndpoint(role);
+            discovery_[role] = findEndpoint(role);
         }
         if (ev::isBulb(role)) {
-            keep_alive_[ev::indexOf(role)] = keepAlive(role);
+            keep_alive_[role] = keepAlive(role);
         }
     }
 }
@@ -240,8 +238,8 @@ void DeviceRegistry::onAnnounced(const ev::DeviceAnnounced &e)
         SUNSIM_LOGI(kTag, "Known device rejoined: %s short=0x%04x", name(*existing), e.short_addr);
         heard(*existing);
         post_(ev::RoleAssigned{*existing, d});
-        if (*existing == ev::Role::Button || d.endpoint == 0) {
-            discovery_[ev::indexOf(*existing)] = findEndpoint(*existing); // the button is re-bound
+        if (!ev::isBulb(*existing) || d.endpoint == 0) {
+            discovery_[*existing] = findEndpoint(*existing); // a button is re-bound
         } else {
             post_(ev::RefreshLights{*existing});
         }
@@ -303,8 +301,8 @@ void DeviceRegistry::endpointFound(ev::Role role, uint8_t endpoint)
     d.endpoint          = endpoint;
     persist();
     post_(ev::RoleAssigned{role, d});
-    if (role == ev::Role::Button) {
-        SUNSIM_LOGI(kTag, "Button endpoint = %d, binding to local receiver", d.endpoint);
+    if (!ev::isBulb(role)) {
+        SUNSIM_LOGI(kTag, "%s endpoint = %d, binding to local receiver", name(role), d.endpoint);
         post_(ev::Bind{role, d.ext_addr, d.short_addr, d.endpoint});
     } else {
         SUNSIM_LOGI(kTag, "%s (bulb) endpoint = %d", name(role), d.endpoint);
@@ -326,7 +324,7 @@ void DeviceRegistry::onPingResult(const ev::PingResult &e)
     pings_.deliver(e);
 }
 
-// The button is a sleepy end device that won't answer pings; it counts as
+// A button is a sleepy end device that won't answer pings; it counts as
 // heard when it's pressed instead.
 ev::Flow DeviceRegistry::keepAlive(ev::Role bulb)
 {
@@ -366,8 +364,13 @@ void DeviceRegistry::onAck(const ev::AckReceived &e)
 
 void DeviceRegistry::onButtonPressed(const ev::ButtonPressed &e)
 {
-    if (e.source == ev::Source::Zigbee && record(ev::Role::Button).valid) {
-        heard(ev::Role::Button);
+    if (e.source != ev::Source::Zigbee) {
+        return;
+    }
+    for (const ev::Role button : ev::members(ev::Group::Button)) { // a press doesn't say which
+        if (record(button).valid) {
+            heard(button);
+        }
     }
 }
 
@@ -392,13 +395,15 @@ void DeviceRegistry::onPairCancelled(const ev::PairCancelled &)
 
 void DeviceRegistry::onUnpairRequested(const ev::UnpairRequested &e)
 {
-    if (e.role) {
-        clear(*e.role);
-        SUNSIM_LOGI(kTag, "%s cleared", name(*e.role));
-    } else {
-        for (const ev::Role role : ev::kRoles) {
+    for (const ev::Role role : ev::kRoles) {
+        if (ev::selects(e.roles, role)) {
             clear(role);
+            if (!std::holds_alternative<ev::AllRoles>(e.roles)) {
+                SUNSIM_LOGI(kTag, "%s cleared", name(role));
+            }
         }
+    }
+    if (std::holds_alternative<ev::AllRoles>(e.roles)) {
         SUNSIM_LOGI(kTag, "All roles cleared");
     }
     persist();
@@ -415,12 +420,12 @@ void DeviceRegistry::publishDevices()
     ev::DevicesUpdated u{.devices = {}, .records = records_, .armed = armed_};
     for (const ev::Role role : ev::kRoles) {
         const Liveness &l = liveness(role);
-        u.devices[ev::indexOf(role)] = {.link          = link(role),
-                                        .paired        = record(role).valid,
-                                        .has_endpoint  = record(role).endpoint != 0,
-                                        .last_heard    = l.last_heard,
-                                        .rssi          = l.rssi,
-                                        .reachable     = l.reachable};
+        u.devices[role] = {.link         = link(role),
+                           .paired       = record(role).valid,
+                           .has_endpoint = record(role).endpoint != 0,
+                           .last_heard   = l.last_heard,
+                           .rssi         = l.rssi,
+                           .reachable    = l.reachable};
     }
     post_(u);
 }

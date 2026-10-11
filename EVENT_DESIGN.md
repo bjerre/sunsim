@@ -377,7 +377,9 @@ re-syncs; hold -> all off and targets ignored; ambiguous On/Toggle timing;
 clock-not-set holds lights off; per-light intensity scaling; liveness
 (acks -> online, silence -> silent, pings every 60 s, an unanswered ping
 counts as failed); discovery retry every 15 s, and unpairing stops it;
-button pairing binds and is never driven as a bulb; `unpair all`.
+button pairing binds and is never driven as a bulb; `unpair all` and
+unpairing a group; the role layout (names, groups, selections); the five
+wall lights dimming in order away from the sun.
 
 ## 9. eventpp on ESP-IDF — measured
 

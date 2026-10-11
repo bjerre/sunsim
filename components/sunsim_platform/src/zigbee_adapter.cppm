@@ -134,14 +134,15 @@ long long secondsOf(ev::BootClock::duration d)
     return std::chrono::duration_cast<std::chrono::seconds>(d).count();
 }
 
+// A role through a ZDO request's user_ctx, as its slot.
 void *roleCtx(ev::Role role)
 {
-    return reinterpret_cast<void *>(static_cast<intptr_t>(role));
+    return reinterpret_cast<void *>(static_cast<intptr_t>(ev::slot(role)));
 }
 
 ev::Role roleFromCtx(void *ctx)
 {
-    return static_cast<ev::Role>(reinterpret_cast<intptr_t>(ctx));
+    return ev::kRoles[static_cast<std::size_t>(reinterpret_cast<intptr_t>(ctx))];
 }
 
 // A ZDO request got through and the device answered SUCCESS.
@@ -468,7 +469,7 @@ void ZigbeeAdapter::onMatchDescResult(const ezb_zdo_match_desc_req_result_t *res
     const ev::Role role = roleFromCtx(user_ctx);
     if (!zdoOk(result) || result->rsp->match_length == 0) {
         ESP_LOGW(kTag, "Could not find %s endpoint for %s (err=0x%x status=0x%x matches=%d), will retry",
-                 role == ev::Role::Button ? "On/Off output" : "light", ev::roleName(role).data(),
+                 ev::isBulb(role) ? "light" : "On/Off output", ev::roleName(role).data(),
                  result ? result->error : -1, (result && result->rsp) ? result->rsp->status : -1,
                  (result && result->rsp) ? result->rsp->match_length : -1);
         s_self->post_(ev::EndpointFound{.role = role, .endpoint = 0});
@@ -546,7 +547,7 @@ void ZigbeeAdapter::onDiscover(const ev::Discover &e)
     req.field.profile_id           = EZB_AF_HA_PROFILE_ID;
     req.cb                         = &ZigbeeAdapter::onMatchDescResult;
     req.user_ctx                   = roleCtx(e.role);
-    if (e.role == ev::Role::Button) {
+    if (!ev::isBulb(e.role)) {
         static uint16_t out_clusters[] = {EZB_ZCL_CLUSTER_ID_ON_OFF};
         req.field.num_in_clusters      = 0;
         req.field.num_out_clusters     = 1;
@@ -607,14 +608,14 @@ void ZigbeeAdapter::onFactoryReset()
 
 void ZigbeeAdapter::onRoleAssigned(const ev::RoleAssigned &e)
 {
-    if (e.role == ev::Role::Button) {
+    if (!ev::isBulb(e.role)) {
         button_short_.store(e.record.valid ? e.record.short_addr : 0xFFFF);
     }
 }
 
 void ZigbeeAdapter::onRoleCleared(const ev::RoleCleared &e)
 {
-    if (e.role == ev::Role::Button) {
+    if (!ev::isBulb(e.role)) {
         button_short_.store(0xFFFF);
     }
 }

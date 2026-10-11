@@ -60,7 +60,7 @@ struct Ui {
     lv_obj_t *mode;
     lv_obj_t *day_length;
     lv_obj_t *next_event;
-    lv_obj_t *dots[ev::kRoleCount];
+    ev::PerRole<lv_obj_t *> dots;
 };
 
 struct Context {
@@ -68,8 +68,13 @@ struct Context {
     Ui                ui;
 };
 
-// Short labels under each device dot, in Role order.
-constexpr const char *kDotLabels[ev::kRoleCount] = {"A", "B", "C", "W", "Btn"};
+// A device dot's label: a group member's letter (A-E along the wall), or a
+// group of one's initial (W = work, B = button).
+char dotLabel(ev::Role role)
+{
+    const ev::GroupSpec &g = ev::spec(role.group);
+    return g.count > 1 ? static_cast<char>('A' + role.index) : g.name.front();
+}
 
 lv_color_t linkColor(ev::DeviceLink link)
 {
@@ -109,8 +114,8 @@ void buildUi(Ui &ui)
     constexpr int kDotSize  = 10;
     constexpr int kSpacing  = kWidth / ev::kRoleCount;
     constexpr int kDotsTopY = 114;
-    for (std::size_t i = 0; i < ev::kRoleCount; ++i) {
-        const int x = 10 + static_cast<int>(i) * kSpacing;
+    for (const ev::Role role : ev::kRoles) {
+        const int x = 10 + static_cast<int>(ev::slot(role)) * kSpacing;
 
         lv_obj_t *dot = lv_obj_create(scr);
         lv_obj_set_size(dot, kDotSize, kDotSize);
@@ -119,11 +124,12 @@ void buildUi(Ui &ui)
         lv_obj_set_style_bg_color(dot, linkColor(ev::DeviceLink::Unpaired), 0);
         lv_obj_set_scrollable(dot, false);
         lv_obj_set_pos(dot, x, kDotsTopY + 4);
-        ui.dots[i] = dot;
+        ui.dots[role] = dot;
 
         lv_obj_t *label = makeLabel(scr, &lv_font_montserrat_14, LV_ALIGN_TOP_LEFT, x + kDotSize + 4, kDotsTopY);
         lv_obj_set_style_text_color(label, lv_color_hex(0xaaaaaa), 0);
-        lv_label_set_text(label, kDotLabels[i]);
+        const char text[] = {dotLabel(role), '\0'};
+        lv_label_set_text(label, text); // copies it
     }
 }
 
@@ -164,8 +170,8 @@ void render(Ui &ui, const ev::StatusSnapshot &st)
         break;
     }
 
-    for (std::size_t i = 0; i < ev::kRoleCount; ++i) {
-        lv_obj_set_style_bg_color(ui.dots[i], linkColor(st.devices[i].link), 0);
+    for (const ev::Role role : ev::kRoles) {
+        lv_obj_set_style_bg_color(ui.dots[role], linkColor(st.devices[role].link), 0);
     }
 }
 

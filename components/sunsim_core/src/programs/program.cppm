@@ -36,7 +36,7 @@ protected:
     // Calls f(role) for each bulb, or only for `only` if it's given (and a bulb).
     template <class F> static void forEachBulb(std::optional<ev::Role> only, F &&f)
     {
-        for (const ev::Role role : ev::kBulbs) {
+        for (const ev::Role role : ev::bulbs()) {
             if (!only || *only == role) {
                 f(role);
             }

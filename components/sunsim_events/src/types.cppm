@@ -34,40 +34,168 @@ using Transition = std::chrono::duration<uint16_t, std::deci>;
 
 // ---- Roles ----------------------------------------------------------------
 
-// Which job a paired device does. Assigned at pairing time (console `pair`,
-// or the build-time role manifest), never by join order.
-enum class Role : uint8_t {
-    WallA  = 0,
-    WallB  = 1,
-    WallC  = 2,
-    Work   = 3,
-    Button = 4,
+// What a device does. Each group can hold any number of devices.
+enum class Group : uint8_t { Wall, Work, Button };
+
+struct GroupSpec {
+    Group            group;
+    std::string_view name;
+    uint8_t          count;
 };
 
-inline constexpr std::size_t kRoleCount = 5;
-inline constexpr std::size_t kBulbCount = 4; // WallA..Work; the Button is last
+// The installation: how many devices each group has, in Group order. A
+// group's members are lettered (WallA, WallB, ...); a group of one is just
+// its name (Work, Button). Wall lights are lettered east to west: their
+// order along the wall drives the sun-direction dimming.
+inline constexpr std::array kLayout{
+    GroupSpec{Group::Wall, "Wall", 5},
+    GroupSpec{Group::Work, "Work", 1},
+    GroupSpec{Group::Button, "Button", 1},
+};
 
-inline constexpr std::array<Role, kRoleCount> kRoles = {Role::WallA, Role::WallB, Role::WallC, Role::Work,
-                                                        Role::Button};
-inline constexpr std::array<Role, kBulbCount> kBulbs = {Role::WallA, Role::WallB, Role::WallC, Role::Work};
+// One device's job: its group, and which member of it. Assigned at pairing
+// time (console `pair`, or the build-time role manifest), never by join
+// order.
+struct Role {
+    Group   group = Group::Wall;
+    uint8_t index = 0; // within the group; for the wall, 0 = the east end
 
-inline constexpr std::array<std::string_view, kRoleCount> kRoleNames = {"WallA", "WallB", "WallC", "Work", "Button"};
+    friend constexpr bool operator==(Role, Role) noexcept = default;
+};
 
-[[nodiscard]] constexpr std::size_t indexOf(Role role) noexcept { return static_cast<std::size_t>(role); }
-[[nodiscard]] constexpr bool isBulb(Role role) noexcept { return role != Role::Button; }
-
-[[nodiscard]] constexpr std::string_view roleName(std::size_t index) noexcept
+[[nodiscard]] constexpr const GroupSpec &spec(Group group) noexcept
 {
-    return index < kRoleCount ? kRoleNames[index] : std::string_view{"?"};
+    return kLayout[std::to_underlying(group)];
 }
-[[nodiscard]] constexpr std::string_view roleName(Role role) noexcept { return roleName(indexOf(role)); }
 
-// Case-sensitive match against kRoleNames, e.g. "WallA".
+inline constexpr std::size_t kRoleCount =
+    std::ranges::fold_left(kLayout | std::views::transform(&GroupSpec::count), 0uz, std::plus{});
+
+// Where a role's data lives in a PerRole: groups in Group order, members in
+// order within each.
+[[nodiscard]] constexpr std::size_t slot(Role role) noexcept
+{
+    std::size_t s = role.index;
+    for (std::size_t g = 0; g < std::to_underlying(role.group); ++g) {
+        s += kLayout[g].count;
+    }
+    return s;
+}
+
+// Every role, in slot order.
+inline constexpr std::array<Role, kRoleCount> kRoles = [] {
+    std::array<Role, kRoleCount> roles{};
+    for (const GroupSpec &g : kLayout) {
+        for (uint8_t i = 0; i < g.count; ++i) {
+            roles[slot({g.group, i})] = {g.group, i};
+        }
+    }
+    return roles;
+}();
+
+// A group's roles, in order (for the wall: east to west).
+[[nodiscard]] constexpr std::span<const Role> members(Group group) noexcept
+{
+    return std::span{kRoles}.subspan(slot({group, 0}), spec(group).count);
+}
+
+[[nodiscard]] constexpr bool isBulb(Role role) noexcept { return role.group != Group::Button; }
+
+// The bulbs (every role but the buttons), in slot order.
+[[nodiscard]] constexpr auto bulbs() noexcept { return kRoles | std::views::filter(isBulb); }
+inline constexpr std::size_t kBulbCount = std::ranges::count_if(kRoles, isBulb);
+
+// One T per role, indexed by the role.
+template <class T> struct PerRole {
+    std::array<T, kRoleCount> items{};
+
+    [[nodiscard]] constexpr T       &operator[](Role role) noexcept { return items[slot(role)]; }
+    [[nodiscard]] constexpr const T &operator[](Role role) const noexcept { return items[slot(role)]; }
+};
+
+namespace detail {
+static_assert(std::ranges::all_of(kLayout, [](const GroupSpec &g) { return g.count >= 1 && g.count <= 26; }),
+              "a group has 1-26 members (lettered A-Z)");
+static_assert(std::ranges::equal(kLayout | std::views::transform(&GroupSpec::group),
+                                 std::array{Group::Wall, Group::Work, Group::Button}),
+              "kLayout must list the groups in Group order");
+
+// A role's name, NUL-terminated (it's printed with %s).
+struct RoleName {
+    std::array<char, 12> chars{};
+    std::size_t          size = 0;
+};
+
+inline constexpr PerRole<RoleName> kRoleNames = [] {
+    PerRole<RoleName> names{};
+    for (const Role role : kRoles) {
+        RoleName       &n = names[role];
+        const GroupSpec &g = spec(role.group);
+        std::ranges::copy(g.name, n.chars.begin());
+        n.size = g.name.size();
+        if (g.count > 1) {
+            n.chars[n.size++] = static_cast<char>('A' + role.index);
+        }
+    }
+    return names;
+}();
+static_assert(std::ranges::all_of(kRoleNames.items, [](const RoleName &n) { return n.size < n.chars.size(); }));
+
+[[nodiscard]] constexpr bool equalsIgnoringCase(std::string_view a, std::string_view b) noexcept
+{
+    const auto lower = [](char c) { return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c; };
+    return std::ranges::equal(a, b, {}, lower, lower);
+}
+} // namespace detail
+
+// "WallA" ... "WallE", "Work", "Button". NUL-terminated.
+[[nodiscard]] constexpr std::string_view roleName(Role role) noexcept
+{
+    const detail::RoleName &n = detail::kRoleNames[role];
+    return {n.chars.data(), n.size};
+}
+
+// A role by name, ignoring case ("WallA", "walla").
 [[nodiscard]] constexpr std::optional<Role> parseRole(std::string_view name) noexcept
 {
     for (const Role role : kRoles) {
-        if (kRoleNames[indexOf(role)] == name) {
+        if (detail::equalsIgnoringCase(roleName(role), name)) {
             return role;
+        }
+    }
+    return std::nullopt;
+}
+
+// Which roles a request is about: every role, one group, or one role.
+struct AllRoles {
+    friend constexpr bool operator==(AllRoles, AllRoles) noexcept = default;
+};
+using Selection = std::variant<AllRoles, Group, Role>;
+
+[[nodiscard]] constexpr bool selects(const Selection &selection, Role role) noexcept
+{
+    if (const auto *group = std::get_if<Group>(&selection)) {
+        return role.group == *group;
+    }
+    if (const auto *one = std::get_if<Role>(&selection)) {
+        return role == *one;
+    }
+    return true;
+}
+
+// "all", a role ("WallC") or a group ("wall"), ignoring case. A group of
+// one is its role ("Work").
+[[nodiscard]] constexpr std::optional<Selection> parseSelection(std::string_view text) noexcept
+{
+    if (detail::equalsIgnoringCase(text, "all")) {
+        return AllRoles{};
+    }
+    if (const auto role = parseRole(text)) {
+        return *role;
+    }
+    for (const GroupSpec &g : kLayout) {
+        if (detail::equalsIgnoringCase(g.name, text)) {
+            return g.group;
         }
     }
     return std::nullopt;
@@ -81,7 +209,7 @@ struct DeviceRecord {
     uint16_t short_addr = 0;
     uint8_t  endpoint   = 0;
 };
-using DeviceRecords = std::array<DeviceRecord, kRoleCount>;
+using DeviceRecords = PerRole<DeviceRecord>;
 
 // ---- Light state ----------------------------------------------------------
 
@@ -178,9 +306,15 @@ struct ProgramConfig {
     uint16_t work_warm_mireds = 333;  // ~3000K
 };
 
-// Per-light peak intensity, 1-100 (% of full brightness). Button unused.
-using Peaks = std::array<uint8_t, kRoleCount>;
-inline constexpr Peaks kDefaultPeaks = {100, 100, 100, 90, 100};
+// Per-light peak intensity, 1-100 (% of full brightness). Buttons unused.
+using Peaks = PerRole<uint8_t>;
+inline constexpr Peaks kDefaultPeaks = [] {
+    Peaks peaks{};
+    for (const Role role : kRoles) {
+        peaks[role] = role.group == Group::Work ? 90 : 100;
+    }
+    return peaks;
+}();
 
 // ---- Time -----------------------------------------------------------------
 
@@ -212,7 +346,7 @@ struct StatusSnapshot {
     DayInfo                               day{};
     Mode                                  mode             = Mode::Daylight;
     bool                                  in_active_window = false;
-    std::array<DeviceStatus, kRoleCount>  devices{};
+    PerRole<DeviceStatus>                 devices{};
     DeviceRecords                         records{};
     std::optional<Role>                   armed;
     ProgramConfig                         config{};

@@ -61,7 +61,7 @@ private:
 
 App::App()
     : settings_(bus_.post(), defaultProgram()), clock_(bus_.post()), zigbee_(bus_.post()),
-      core_(bus_.post(), kRoleManifest)
+      core_(bus_.post(), {kRoleManifest})
 {
     core::wireCore(bus_, core_);
     wirePlatform();

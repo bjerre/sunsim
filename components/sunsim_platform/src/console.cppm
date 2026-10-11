@@ -21,11 +21,11 @@ export namespace sunsim::platform {
 //   roles                 list role assignments
 //   pair <role>           next unassigned device to join gets <role>; opens the network
 //   pair cancel           disarm a pending `pair`
-//   unpair <role>|all     forget role assignment(s)
+//   unpair <role|group|all>   forget role assignment(s)
 //   open [seconds]        open the network for joining (default 180)
 //   config                show active/work hours, fade, sun shift, amber, work days
 //   config <key> <value>  change one (see `help config`)
-//   intensity [<light|all> <1-100>]   per-light peak brightness, saved
+//   intensity [<light|group|all> <1-100>]   per-light peak brightness, saved
 //   press single|double|hold          simulate the button
 //   wifi                  list saved Wi-Fi networks (the strongest in range is used)
 //   wifi add <ssid> [pw]  add a network (up to 5), or change its password
@@ -33,7 +33,8 @@ export namespace sunsim::platform {
 //   restart               reboot, keeping everything
 //   factory_reset         forget all roles AND the Zigbee network, then restart
 //
-// <role> is one of WallA, WallB, WallC, Work, Button.
+// <role> is a device's name (WallA-WallE east to west, Work, Button); a
+// <group> is all of one kind (wall). Case doesn't matter.
 void startConsole(const ev::Post &post, const StatusSlot &status);
 
 } // namespace sunsim::platform
@@ -60,8 +61,8 @@ std::optional<ev::StatusSnapshot> snapshot()
 void printRoleNames()
 {
     std::printf("roles:");
-    for (const auto name : ev::kRoleNames) {
-        std::printf(" %.*s", static_cast<int>(name.size()), name.data());
+    for (const ev::Role role : ev::kRoles) {
+        std::printf(" %s", ev::roleName(role).data());
     }
     std::printf("\n");
 }
@@ -75,6 +76,22 @@ std::optional<ev::Role> parseRoleArg(const char *arg)
         printRoleNames();
     }
     return role;
+}
+
+// The role, group or "all" named by `arg`, or nullopt after saying why not.
+std::optional<ev::Selection> parseSelectionArg(const char *arg)
+{
+    const auto selection = ev::parseSelection(arg);
+    if (!selection) {
+        std::printf("unknown role or group '%s'\n", arg);
+        printRoleNames();
+        std::printf("groups:");
+        for (const ev::GroupSpec &g : ev::kLayout) {
+            std::printf(" %.*s", static_cast<int>(g.name.size()), g.name.data());
+        }
+        std::printf(" (or all)\n");
+    }
+    return selection;
 }
 
 void printClock(double hours)
@@ -99,13 +116,13 @@ int cmdRoles(int, char **)
     if (!st) {
         return 1;
     }
-    for (std::size_t i = 0; i < ev::kRoleCount; ++i) {
-        const ev::DeviceRecord &d = st->records[i];
+    for (const ev::Role role : ev::kRoles) {
+        const ev::DeviceRecord &d = st->records[role];
         if (d.valid) {
-            std::printf("%-6s ext=0x%016llx short=0x%04x ep=%d\n", ev::roleName(i).data(),
+            std::printf("%-6s ext=0x%016llx short=0x%04x ep=%d\n", ev::roleName(role).data(),
                         static_cast<unsigned long long>(d.ext_addr), d.short_addr, d.endpoint);
         } else {
-            std::printf("%-6s (unassigned)\n", ev::roleName(i).data());
+            std::printf("%-6s (unassigned)\n", ev::roleName(role).data());
         }
     }
     if (st->armed) {
@@ -136,19 +153,15 @@ int cmdPair(int argc, char **argv)
 int cmdUnpair(int argc, char **argv)
 {
     if (argc != 2) {
-        std::printf("usage: unpair <role>|all\n");
+        std::printf("usage: unpair <role|group|all>\n");
         printRoleNames();
         return 1;
     }
-    if (std::string_view{argv[1]} == "all") {
-        g_ctx.post(ev::UnpairRequested{});
-        return 0;
-    }
-    const auto role = parseRoleArg(argv[1]);
-    if (!role) {
+    const auto roles = parseSelectionArg(argv[1]);
+    if (!roles) {
         return 1;
     }
-    g_ctx.post(ev::UnpairRequested{*role});
+    g_ctx.post(ev::UnpairRequested{*roles});
     return 0;
 }
 
@@ -297,8 +310,8 @@ int cmdConfig(int argc, char **argv)
 
 void printPeaks(const ev::Peaks &peaks)
 {
-    for (std::size_t i = 0; i < ev::kBulbCount; ++i) {
-        std::printf("  %-6s %3u%%\n", ev::roleName(i).data(), peaks[i]);
+    for (const ev::Role role : ev::bulbs()) {
+        std::printf("  %-6s %3u%%\n", ev::roleName(role).data(), peaks[role]);
     }
 }
 
@@ -314,23 +327,23 @@ int cmdIntensity(int argc, char **argv)
     }
     const int percent = argc == 3 ? std::atoi(argv[2]) : 0;
     if (argc != 3 || percent < 1 || percent > 100) {
-        std::printf("usage: intensity [<WallA|WallB|WallC|Work|all> <1-100>]\n");
+        std::printf("usage: intensity [<light|group|all> <1-100>]   e.g. intensity WallC 80, intensity wall 60\n");
         return 1;
     }
-    std::optional<ev::Role> only;
-    if (std::string_view{argv[1]} != "all") {
-        only = ev::parseRole(argv[1]);
-        if (!only || !ev::isBulb(*only)) {
-            std::printf("unknown light '%s' (WallA, WallB, WallC, Work or all)\n", argv[1]);
-            return 1;
-        }
+    const auto lights = parseSelectionArg(argv[1]);
+    if (!lights) {
+        return 1;
+    }
+    if (std::ranges::none_of(ev::bulbs(), [&](ev::Role role) { return ev::selects(*lights, role); })) {
+        std::printf("'%s' isn't a light\n", argv[1]);
+        return 1;
     }
 
-    g_ctx.post(ev::SetIntensity{only, static_cast<uint8_t>(percent)});
+    g_ctx.post(ev::SetIntensity{*lights, static_cast<uint8_t>(percent)});
     ev::Peaks peaks = st->peaks;
-    for (std::size_t i = 0; i < ev::kBulbCount; ++i) {
-        if (!only || ev::indexOf(*only) == i) {
-            peaks[i] = static_cast<uint8_t>(percent);
+    for (const ev::Role role : ev::bulbs()) {
+        if (ev::selects(*lights, role)) {
+            peaks[role] = static_cast<uint8_t>(percent);
         }
     }
     printPeaks(peaks);
@@ -391,9 +404,9 @@ int cmdStatus(int, char **)
     }
     std::printf("\n");
 
-    for (std::size_t i = 0; i < ev::kRoleCount; ++i) {
-        const ev::DeviceStatus &d = st->devices[i];
-        std::printf("  %-6s ", ev::roleName(i).data());
+    for (const ev::Role role : ev::kRoles) {
+        const ev::DeviceStatus &d = st->devices[role];
+        std::printf("  %-6s ", ev::roleName(role).data());
         switch (d.link) {
         case ev::DeviceLink::Unpaired:
             std::printf("-  not paired\n");
@@ -546,13 +559,14 @@ void startConsole(const ev::Post &post, const StatusSlot &status)
     registerCommand("status", "Time, day length, next sunrise/sunset, mode and device links", nullptr, &cmdStatus);
     registerCommand("roles", "List role assignments", nullptr, &cmdRoles);
     registerCommand("pair", "Give the next unassigned device to join this role, and open the network",
-                    "<WallA|WallB|WallC|Work|Button|cancel>", &cmdPair);
-    registerCommand("unpair", "Forget a role's device (it can then be re-paired)", "<role|all>", &cmdUnpair);
+                    "<role|cancel>", &cmdPair);
+    registerCommand("unpair", "Forget a role's device, or a group's (they can then be re-paired)",
+                    "<role|group|all>", &cmdUnpair);
     registerCommand("open", "Open the network for joining", "[seconds]", &cmdOpen);
     registerCommand("config", "Show or change active/work hours, fade, sun shift, amber glow and work days",
                     "[hours|workhours HH:MM-HH:MM | fade <min> | sunshift <0-100> | amber on|off | days ...]",
                     &cmdConfig);
-    registerCommand("intensity", "Show or set each light's peak brightness, 1-100%", "[<light|all> <1-100>]",
+    registerCommand("intensity", "Show or set each light's peak brightness, 1-100%", "[<light|group|all> <1-100>]",
                     &cmdIntensity);
     registerCommand("press", "Simulate the button: single = resume daylight, double = red alert, hold = all off",
                     "single|double|hold", &cmdPress);

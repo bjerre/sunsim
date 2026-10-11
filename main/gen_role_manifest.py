@@ -3,13 +3,13 @@
 
 Keeps the role -> ext_addr table editable as plain data (fill in each
 device's IEEE address from its label) without hand-editing C++ syntax.
-Role order must match ev::Role in components/sunsim_events/src/types.cppm
+Role order must match ev::kRoles (ev::kLayout in components/sunsim_events/src/types.cppm)
 (a different role count fails to compile where it's used).
 """
 import json
 import sys
 
-ROLE_ORDER = ["WallA", "WallB", "WallC", "Work", "Button"]
+ROLE_ORDER = ["WallA", "WallB", "WallC", "WallD", "WallE", "Work", "Button"]
 
 HEADER_TEMPLATE = """#pragma once
 
