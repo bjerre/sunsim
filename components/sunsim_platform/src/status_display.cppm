@@ -26,7 +26,9 @@ export namespace sunsim::platform {
 
 // Drives the on-board ST7789 LCD (Waveshare ESP32-C6-GEEK by default, see
 // the "Status display" menuconfig): current time, day length, countdown to
-// the next sunrise/sunset, mode, and one dot per role for its link state.
+// the next sunrise/sunset, mode, and one dot per device for its link state,
+// grouped: "D ●●●●●  W ●  B ●" (the daylight wall east to west, the work
+// light, the button).
 // Redraws once a second from the latest StatusSnapshot - the same data as
 // the `status` console command. No-op unless CONFIG_SUNSIM_DISPLAY.
 void startStatusDisplay(const StatusSlot &status);
@@ -68,12 +70,38 @@ struct Context {
     Ui                ui;
 };
 
-// A device dot's label: a group member's letter (A-E along the wall), or a
-// group of one's initial (W = work, B = button).
-char dotLabel(ev::Role role)
+// The device dots: one row, each group's letter followed by a dot per
+// member in order (the wall's east to west).
+constexpr int kDotSize   = 10;
+constexpr int kDotPitch  = 16; // a dot and the gap after it
+constexpr int kLabelCell = 16; // a group letter and the gap after it
+constexpr int kGroupGap  = 10; // between one group's last dot and the next letter
+constexpr int kDotsLeft  = 8;
+constexpr int kDotsTopY  = 114;
+
+constexpr int dotsRowWidth()
 {
-    const ev::GroupSpec &g = ev::spec(role.group);
-    return g.count > 1 ? static_cast<char>('A' + role.index) : g.name.front();
+    int width = 0;
+    for (const ev::GroupSpec &g : ev::kLayout) {
+        width += kLabelCell + g.count * kDotPitch + kGroupGap;
+    }
+    return width - kGroupGap;
+}
+static_assert(kDotsLeft + dotsRowWidth() <= kWidth, "the device dots don't fit in one row (see ev::kLayout)");
+
+// A group's letter on the display: D = the daylight wall, W = the work
+// light, B = the button.
+char groupLabel(ev::Group group)
+{
+    switch (group) {
+    case ev::Group::Wall:
+        return 'D';
+    case ev::Group::Work:
+        return 'W';
+    case ev::Group::Button:
+        return 'B';
+    }
+    return '?';
 }
 
 lv_color_t linkColor(ev::DeviceLink link)
@@ -111,25 +139,26 @@ void buildUi(Ui &ui)
     ui.day_length = makeLabel(scr, &lv_font_montserrat_20, LV_ALIGN_TOP_LEFT, 6, 54);
     ui.next_event = makeLabel(scr, &lv_font_montserrat_20, LV_ALIGN_TOP_LEFT, 6, 80);
 
-    constexpr int kDotSize  = 10;
-    constexpr int kSpacing  = kWidth / ev::kRoleCount;
-    constexpr int kDotsTopY = 114;
-    for (const ev::Role role : ev::kRoles) {
-        const int x = 10 + static_cast<int>(ev::slot(role)) * kSpacing;
-
-        lv_obj_t *dot = lv_obj_create(scr);
-        lv_obj_set_size(dot, kDotSize, kDotSize);
-        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_border_width(dot, 0, 0);
-        lv_obj_set_style_bg_color(dot, linkColor(ev::DeviceLink::Unpaired), 0);
-        lv_obj_set_scrollable(dot, false);
-        lv_obj_set_pos(dot, x, kDotsTopY + 4);
-        ui.dots[role] = dot;
-
-        lv_obj_t *label = makeLabel(scr, &lv_font_montserrat_14, LV_ALIGN_TOP_LEFT, x + kDotSize + 4, kDotsTopY);
+    int x = kDotsLeft;
+    for (const ev::GroupSpec &g : ev::kLayout) {
+        lv_obj_t *label = makeLabel(scr, &lv_font_montserrat_14, LV_ALIGN_TOP_LEFT, x, kDotsTopY);
         lv_obj_set_style_text_color(label, lv_color_hex(0xaaaaaa), 0);
-        const char text[] = {dotLabel(role), '\0'};
+        const char text[] = {groupLabel(g.group), '\0'};
         lv_label_set_text(label, text); // copies it
+        x += kLabelCell;
+
+        for (const ev::Role role : ev::members(g.group)) {
+            lv_obj_t *dot = lv_obj_create(scr);
+            lv_obj_set_size(dot, kDotSize, kDotSize);
+            lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+            lv_obj_set_style_border_width(dot, 0, 0);
+            lv_obj_set_style_bg_color(dot, linkColor(ev::DeviceLink::Unpaired), 0);
+            lv_obj_set_scrollable(dot, false);
+            lv_obj_set_pos(dot, x, kDotsTopY + 4);
+            ui.dots[role] = dot;
+            x += kDotPitch;
+        }
+        x += kGroupGap;
     }
 }
 

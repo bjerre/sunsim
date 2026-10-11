@@ -104,8 +104,9 @@ The board's LCD (Waveshare ESP32-C6-GEEK, 1.14" ST7789) shows:
 - the time, large, and the weekday ("sim" in fast-day mode)
 - the mode: `daylight`, `idle` (outside active hours), `off` or `RED ALERT`
 - today's day length, and the countdown to the next sunrise or sunset
-- one dot per device: green = responding, amber = paired but silent,
-  grey = not paired (labels A-E = wall bulbs east to west, W = work, B = button)
+- one dot per device, grouped `D ●●●●●  W ●  B ●`: D = the daylight wall
+  (WallA-WallE, east to west), W = the work light, B = the button;
+  green = responding, amber = paired but silent, grey = not paired
 
 The `status` console command prints the same information. Pins and
 orientation are under menuconfig, "Sunsim Configuration" -> "Status
