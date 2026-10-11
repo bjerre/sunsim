@@ -1,5 +1,5 @@
 // app_main: builds the App - the event bus, every module, and their wiring -
-// and runs it. See EVENT_DESIGN.md.
+// and runs it. See ARCHITECTURE.md.
 
 #include <stdlib.h> // setenv (POSIX)
 #include <time.h>   // tzset (POSIX)
@@ -36,7 +36,7 @@ ev::ProgramConfig defaultProgram()
 }
 
 // Owns the event bus and every module, wires them, and runs the app task:
-// the single consumer of the bus. See EVENT_DESIGN.md.
+// the single consumer of the bus. See ARCHITECTURE.md.
 class App {
 public:
     App();

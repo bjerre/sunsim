@@ -7,12 +7,12 @@ build/pairing/configuration instructions, see [README.md](README.md).
 
 ```mermaid
 flowchart TB
-    subgraph Coordinator["sunsim (ESP32-C6, Zigbee coordinator + trust center)"]
+    subgraph Coordinator["sunsim (ESP32-C6: Zigbee coordinator + trust center)"]
         Bus[["EventBus (one app task)"]]
         subgraph Core["sunsim::core (pure C++)"]
             Reg[DeviceRegistry]
             Mode[ModeController]
-            Prog["DaylightProgram<br/>(daylight / solar math)"]
+            Prog["ProgramHost<br/>Daylight / Off / RedAlert"]
             Out[LightOutput]
             Stat[StatusModel]
         end
@@ -30,20 +30,40 @@ flowchart TB
     Wall(("Wall bulbs A-E<br/>(east to west)"))
     Work((Work bulb))
     Switch(("Button<br/>(SNZB-01)"))
+    NTP[("SNTP over Wi-Fi")]
+    User(["serial console<br/>./sunsim cmd ..."])
 
     ZA == "ZCL: On/Off, Level,<br/>Color Control" ==> Wall & Work
     Switch -- "On/Off: Toggle / On / Off" --> ZA
+    NTP -. "time, at boot and daily" .-> Clk
+    User <--> Con
 ```
 
-Every module talks only through events on one `EventBus` (`bus.cppm`, a
-mutex-guarded queue); a single app task processes
-them while holding the Zigbee lock, so no module takes locks or calls
-another. `sunsim::core` holds all application logic and builds on the host
-(`test/host`); `sunsim::platform` is everything that touches ESP-IDF.
-[EVENT_DESIGN.md](EVENT_DESIGN.md) has the full architecture: layers,
-threading, the event catalogue, and key flows. `WifiTimeSync` syncs the
-clock over SNTP at boot (before the radio starts), then retries/resyncs
-on a background task.
+Every module talks only through events on one `EventBus`, processed by a
+single app task that holds the Zigbee lock, so no module takes locks or
+calls another. `sunsim::core` holds all the application logic and builds on
+the host (`test/host`); `sunsim::platform` is everything that touches
+ESP-IDF. [ARCHITECTURE.md](ARCHITECTURE.md) has the modules, class
+diagrams, threads, events and the boot sequence.
+
+### The wall
+
+```mermaid
+flowchart LR
+    E2["East"] ~~~ A
+    subgraph wall["south wall"]
+        direction LR
+        A["WallA<br/>x = +1"] ~~~ B["WallB<br/>+0.5"] ~~~ C["WallC<br/>0"] ~~~ D["WallD<br/>-0.5"] ~~~ E["WallE<br/>x = -1"]
+    end
+    E ~~~ W2["West"]
+    W(["Work light"]) ~~~ BT(["Button"])
+```
+
+The roles come from one table, `ev::kLayout` (`types.cppm`): Wall 5, Work
+1, Button 1. A wall light's letter is its place: light `i` of `n` sits at
+`x = 1 - 2i/(n-1)`. Changing the count there is all it takes for a
+different wall: the role names, positions, the display's dots and the
+manifest checks follow at compile time.
 
 ## 2. Device addressing & role assignment
 
@@ -77,28 +97,37 @@ sequenceDiagram
     participant DR as DeviceRegistry
     participant SS as SettingsStore (NVS)
     participant LO as LightOutput
+    participant PH as ProgramHost
 
     Dev->>ZA: Associate, Device_annce(ext_addr, short_addr)
     ZA->>DR: DeviceAnnounced
 
     alt ext_addr already holds a role (rejoin)
         DR->>SS: PersistRoles (if short_addr changed)
+        DR->>LO: RoleAssigned (new address)
+        Note over DR: endpoint known: RefreshLights, done
     else a role is armed (`pair`), or ext_addr is in the manifest
         DR->>SS: PersistRoles (role assigned)
+        DR->>LO: RoleAssigned (endpoint still 0)
     else unknown
-        Note over DR: ignored (logged with its ext_addr)
+        Note over DR: ignored, logged with its ext_addr
     end
 
-    DR->>LO: RoleAssigned (addresses)
-    DR->>ZA: Discover (ZDO Match_Desc: endpoint with On/Off+Level+Color,<br/>or the button's On/Off output)
-    ZA->>DR: EndpointFound(endpoint)
+    loop findEndpoint flow, every 15 s until found
+        DR->>ZA: Discover (ZDO Match_Desc: On/Off + Level + Color,<br/>or the button's On/Off output)
+        ZA->>DR: EndpointFound(endpoint)
+    end
     DR->>SS: PersistRoles (endpoint)
+    DR->>LO: RoleAssigned (endpoint known)
 
-    alt role == Button
+    alt Button
         DR->>ZA: Bind (button's On/Off -> sunsim's receiver endpoint)
     else bulb
-        DR->>LO: RefreshLights: apply the current daylight state, 2s transition
+        DR->>PH: RefreshLights(role)
+        PH->>LO: LightTarget: the current program's state, 2 s
+        LO->>ZA: SetLight
     end
+    Note over DR: bulbs also get a keepAlive flow:<br/>pinged 15 s in, then every 60 s
 ```
 
 `short_addr` is deliberately never put in the manifest or treated as
@@ -107,16 +136,17 @@ network-assigned address should be.
 
 ### Finding `ext_addr` when the device has no visible label
 
-Not every bulb prints its IEEE address anywhere accessible. Since an
-unrecognized device is rejected rather than silently assigned a role (see
-`roleForExtAddr` returning `std::nullopt` above), its join attempt logs the
-exact address you need:
+Not every bulb prints its IEEE address anywhere accessible. An
+unrecognized device is ignored rather than given a role, and its join
+attempt logs the exact address you need:
 
 ```
-W (12345) LIGHT_RIG: Ignoring unknown device 0x1a2b (ext=0x00124b00223344aa): not in role manifest
+W (12345) REGISTRY: Ignoring unknown device 0x1a2b (ext=0x00124b00223344aa): not in role manifest (use `pair <role>` to claim it)
 ```
 
-Workflow: open `idf.py monitor`, put one bulb into pairing mode at a time
+(`pair <role>` from the console is usually simpler: it gives the next
+device that joins that role.) For the manifest: open `./sunsim monitor`,
+put one bulb into pairing mode at a time
 (so you know which log line is which physical device), copy the `ext=`
 value into the right role's entry in `role_manifest.json`, rebuild/reflash, then
 re-trigger pairing on that bulb so it rejoins and matches.
@@ -154,6 +184,40 @@ No Zigbee or hardware dependency in either piece below
 (`components/sunsim_core/src/math/daylight.cppm`, `solar.cppm`) — both are pure
 functions, unit-testable on the host.
 
+How one wall light's target is made, every `ProgramTick` (60 s), from the
+time and the light's place on the wall:
+
+```mermaid
+flowchart TB
+    T["TimeReading<br/>local time, UTC offset (DST included)"]
+    X["wall position x<br/>+1 east ... -1 west"]
+    CFG["ProgramConfig<br/>location, window, shift, amber"]
+
+    T & CFG --> G["activeGate<br/>0 outside days/hours, ramps over the fade"]
+    T & CFG --> ST["computeSunTimes<br/>sunrise, sunset"]
+    T & CFG --> SP["computeSunPosition<br/>azimuth, elevation"]
+
+    ST --> BR["b = sin(pi * progress through daylight)"]
+    SP --> AW["away = abs(x - sin(azimuth)) / 2"]
+    X --> AW
+
+    BR --> LV["level = gate * direction * b * max_level<br/>direction = 1 - shift * away"]
+    G --> LV
+    AW --> LV
+    BR --> MI["mireds: warm at the edges, cool at noon"]
+
+    SP --> AM["amber: below 6 deg of (elevation + sweep * away)<br/>slide to 1800K, sent as xy"]
+    AW --> AM
+    MI --> AM
+
+    LV --> PK["DaylightProgram: level * peak %"]
+    AM --> PK
+    PK --> LT(["LightTarget(role, LightState, 60 s)"])
+```
+
+The work light skips the sun: its level is `gate * max_level` and its
+colour follows the work hours (below).
+
 ### Wall bulbs (`DaylightSchedule::wallState`)
 
 The window the half-sine curve runs across is now the **real** sunrise/
@@ -168,9 +232,12 @@ Off outside `[sunrise, sunset]`; inside it:
 p = (h - sunrise) / (sunset - sunrise)      # 0..1 progress through today's daylight window
 b = sin(π · p)                              # 0 at sunrise/sunset, 1 at solar noon
 
-level  = round(b · max_level), floored to min_level
+level  = round(gate · direction · b · max_level), floored to min_level
 mireds = round(warm_mireds - b · (warm_mireds - cool_mireds))
 ```
+
+(`gate` is the active window, below; `direction` the sun's side of the
+wall, next.)
 
 `b` is a half-sine: it starts and ends at 0 (sunrise/sunset) and peaks at 1
 exactly at the window's midpoint ("solar noon" for that day's actual window
@@ -336,13 +403,14 @@ compute.
 
 ## 6. Smooth transitions
 
-Every periodic update (`ProgramTick` -> `DaylightProgram`, driven by the clock
-timer) sends level/color-temperature commands with a transition time equal
-to the tick interval (60s normally, 1s in debug fast-day mode), so bulbs
-fade continuously rather than stepping. Explicit state changes that should
-feel immediate — resuming after an override, a bulb finishing discovery, a
-reboot, a setting change — use a fixed 2s transition instead
-(`RefreshLights`).
+Every periodic update (`ProgramTick` -> `DaylightProgram`, driven by the
+clock) sends level/colour commands with a transition equal to the update
+interval (60 s normally, 1 s in debug fast-day mode), so bulbs fade
+continuously rather than stepping. Changes that should feel immediate —
+resuming after an override, a bulb finishing discovery or answering
+again, the network coming up, a setting change — re-apply with a fixed 2 s
+transition (`Program::refresh`). `LightOutput` only sends what changed, so
+a steady light gets no traffic at all.
 
 ## 7. File layout
 

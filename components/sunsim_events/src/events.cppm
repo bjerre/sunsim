@@ -1,6 +1,6 @@
 // Every event in the system, in one variant. A module never calls another
 // module: it posts one of these, and the wiring (wireCore / main's
-// wirePlatform) routes it. See EVENT_DESIGN.md §5 for who posts what.
+// wirePlatform) routes it. See ARCHITECTURE.md §7 for who posts what.
 
 export module sunsim.ev:events;
 

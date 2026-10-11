@@ -24,8 +24,9 @@ does not join an existing hub's network. Built on
 [esp-zigbee-sdk](https://github.com/espressif/esp-zigbee-sdk), targeting
 ESP32-C6, written in C++20.
 
-See [DESIGN.md](DESIGN.md) for architecture diagrams, how device addressing
-and roles work, and the math behind the daylight curve.
+See [DESIGN.md](DESIGN.md) for how devices, roles and the button work and
+the math behind the daylight curve, and [ARCHITECTURE.md](ARCHITECTURE.md)
+for the modules, class diagrams, threads, events and boot sequence.
 
 ## Building
 
@@ -259,7 +260,7 @@ catch up.
 ## Layout
 
 Event-driven: every module talks only through events on one bus, processed
-by a single app task. See [EVENT_DESIGN.md](EVENT_DESIGN.md).
+by a single app task. See [ARCHITECTURE.md](ARCHITECTURE.md).
 
 Each component is one C++ module (`import sunsim.ev;` and so on, plus
 `import std.compat;`): each `.cppm` is a partition holding one class (or
