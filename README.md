@@ -29,9 +29,25 @@ and roles work, and the math behind the daylight curve.
 
 ## Building
 
-Needs ESP-IDF 6.1 (GCC 15; the code uses C++20 and later). `idf.py` only
-works in a shell where ESP-IDF's environment has been loaded (once per
-terminal):
+Needs ESP-IDF 6.1 (GCC 15; the code uses C++20 and later). The `./sunsim`
+script loads ESP-IDF's environment itself, so it works from any terminal:
+
+```
+./sunsim go              # build, flash, then the serial monitor/console (Ctrl+] quits)
+./sunsim build | flash | monitor
+./sunsim cmd status      # one console command on the running board, reply printed
+./sunsim cmd pair WallB
+./sunsim test            # host tests
+./sunsim idf menuconfig  # any idf.py command
+```
+
+It finds the board as the only `/dev/ttyACM*` (or set `SUNSIM_PORT`), and
+uses `~/.espressif/v6.1/esp-idf` (or set `SUNSIM_IDF`). `cmd` doesn't reset
+the board, and can't run while `monitor` holds the port.
+
+By hand, `idf.py` only works in a shell where ESP-IDF's environment has
+been loaded (once per terminal; `export.sh`, not the `activate_idf` script,
+whose Python the build directory refuses):
 
 ```
 . ~/.espressif/v6.1/esp-idf/export.sh
@@ -291,6 +307,8 @@ The core logic is tested on your PC (no board, no ESP-IDF), wired exactly
 as in the firmware and driven by events:
 
 ```
+./sunsim test
+# or by hand:
 cmake -S test/host -B build-host -G Ninja && cmake --build build-host && ./build-host/sunsim_tests
 ```
 

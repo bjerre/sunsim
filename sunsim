@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# Everyday commands, with ESP-IDF's environment loaded for you (no `source
+# export.sh` first). See `./sunsim help`.
+#
+# SUNSIM_IDF   the ESP-IDF checkout (default ~/.espressif/v6.1/esp-idf). Its
+#              export.sh, not the activate_idf script: build/ was configured
+#              with export.sh's Python and refuses another.
+# SUNSIM_PORT  the board's serial port (default: the only /dev/ttyACM*).
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+IDF=${SUNSIM_IDF:-$HOME/.espressif/v6.1/esp-idf}
+
+usage() {
+    cat <<'EOF'
+usage: ./sunsim <command> [args]
+
+  build            build the firmware
+  flash            build and flash
+  monitor          serial monitor and console (Ctrl+] quits)
+  go               build, flash, then monitor
+  cmd <command>    run one console command on the board, print its reply
+                   (e.g. `./sunsim cmd status`, `./sunsim cmd pair WallB`)
+  test             build and run the host tests
+  idf <args>       any idf.py command (e.g. `./sunsim idf menuconfig`)
+EOF
+}
+
+idf_env() {
+    if [[ ${IDF_PATH:-} == "$IDF" ]] && command -v idf.py >/dev/null; then
+        return # already loaded
+    fi
+    if [[ ! -f $IDF/export.sh ]]; then
+        echo "sunsim: no ESP-IDF at $IDF (set SUNSIM_IDF)" >&2
+        exit 1
+    fi
+    # shellcheck disable=SC1091
+    source "$IDF/export.sh" >/dev/null 2>&1 || {
+        echo "sunsim: $IDF/export.sh failed; run it by hand to see why" >&2
+        exit 1
+    }
+}
+
+port() {
+    if [[ -n ${SUNSIM_PORT:-} ]]; then
+        echo "$SUNSIM_PORT"
+        return
+    fi
+    local ports=(/dev/ttyACM*)
+    if [[ ! -e ${ports[0]} ]]; then
+        echo "sunsim: no board found (/dev/ttyACM*); plug it in or set SUNSIM_PORT" >&2
+        exit 1
+    fi
+    if ((${#ports[@]} > 1)); then
+        echo "sunsim: several ports (${ports[*]}); set SUNSIM_PORT" >&2
+        exit 1
+    fi
+    echo "${ports[0]}"
+}
+
+# Sends one line to the console and prints what comes back up to the next
+# prompt. The port is opened with pyserial's default DTR/RTS (both high):
+# setting them low on open passes through DTR low / RTS high, which the
+# C6's USB-serial takes as a reset.
+console_cmd() {
+    python - "$(port)" "$*" <<'EOF'
+import sys, time, serial
+
+port, command = sys.argv[1], sys.argv[2]
+prompt = b"sunsim> "
+s = serial.Serial(port, 115200, timeout=0.2)
+s.reset_input_buffer()
+
+s.write(b"\r\n")  # a fresh prompt, so the reply starts clean
+deadline = time.time() + 2
+buf = b""
+while prompt not in buf and time.time() < deadline:
+    buf += s.read(4096)
+
+s.write(command.encode() + b"\r\n")
+buf, deadline = b"", time.time() + 10
+while time.time() < deadline:
+    buf += s.read(4096)
+    # The reply ends at the next prompt after the echoed command.
+    echo = buf.find(command.encode())
+    if echo >= 0 and buf.find(prompt, echo) >= 0:
+        break
+else:
+    print("sunsim: no prompt back from the board (is `./sunsim monitor` open?)", file=sys.stderr)
+
+text = buf.decode(errors="replace")
+start = text.find(command)
+start = text.find("\n", start) + 1 if start >= 0 else 0
+end = text.find(prompt.decode(), start)
+print(text[start:end if end >= 0 else None].rstrip("\r\n").replace("\r", ""))
+EOF
+}
+
+host_tests() {
+    if [[ ! -f $ROOT/build-host/build.ninja ]]; then
+        cmake -S "$ROOT/test/host" -B "$ROOT/build-host" -G Ninja >/dev/null
+    fi
+    cmake --build "$ROOT/build-host"
+    "$ROOT/build-host/sunsim_tests" | grep -Ev '^[IWE] \(' # results, not the core's logging
+}
+
+cd "$ROOT"
+case ${1:-help} in
+build)   idf_env; idf.py build ;;
+flash)   idf_env; idf.py -p "$(port)" flash ;;
+monitor) idf_env; idf.py -p "$(port)" monitor ;;
+go)      idf_env; idf.py -p "$(port)" flash monitor ;;
+cmd)     shift; [[ $# -gt 0 ]] || { usage >&2; exit 1; }; idf_env; console_cmd "$@" ;;
+test)    idf_env; host_tests ;;
+idf)     shift; idf_env; idf.py "$@" ;;
+help | -h | --help) usage ;;
+*)       usage >&2; exit 1 ;;
+esac
