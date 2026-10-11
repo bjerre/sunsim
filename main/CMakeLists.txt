@@ -3,7 +3,7 @@ file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
 # Wiring and startup only; the logic lives in components/ (sunsim_events,
 # sunsim_core, sunsim_platform - see EVENT_DESIGN.md).
 idf_component_register(SRCS "main.cpp"
-                       PRIV_INCLUDE_DIRS "." "${CMAKE_CURRENT_BINARY_DIR}/generated"
+                       PRIV_INCLUDE_DIRS "${CMAKE_CURRENT_BINARY_DIR}/generated"
                        PRIV_REQUIRES sunsim_events sunsim_core sunsim_platform nvs_flash)
 
 set(role_manifest_json "${CMAKE_CURRENT_SOURCE_DIR}/role_manifest.json")

@@ -1,5 +1,23 @@
 # sunsim::ev - the event vocabulary shared by every layer: value types,
-# event payloads, and the EventBus. Header-only; no ESP-IDF dependencies
-# beyond logging, so it also builds on the host (see test/host).
-idf_component_register(INCLUDE_DIRS "include"
-                       REQUIRES log eventpp)
+# event payloads, coroutine flows, and the EventBus. No ESP-IDF dependencies
+# beyond logging and the boot clock, so it also builds on the host (see
+# test/host).
+#
+# The C++ module sunsim.ev: one .cppm per partition (ev.cppm the module's
+# interface), plus `import std;` for every component - they all require
+# this one.
+set(modules "src/ev.cppm"
+            "src/bus.cppm"
+            "src/events.cppm"
+            "src/flow.cppm"
+            "src/types.cppm")
+
+idf_component_register(SRCS ${modules}
+                       INCLUDE_DIRS "include" # sunsim/ev/log.h
+                       REQUIRES log
+                       PRIV_REQUIRES eventpp esp_timer)
+
+target_sources(${COMPONENT_LIB} PUBLIC FILE_SET CXX_MODULES BASE_DIRS src FILES ${modules})
+
+include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/import_std.cmake)
+sunsim_import_std(${COMPONENT_LIB})

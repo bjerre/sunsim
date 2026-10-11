@@ -1,12 +1,7 @@
-module;
-
-#include <cstdint>
-
-#include "sunsim/ev/events.h"
-
 export module sunsim.core:program;
 
-import std;
+import std.compat;
+import sunsim.ev;
 
 export namespace sunsim::core {
 

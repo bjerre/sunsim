@@ -146,7 +146,7 @@ timing (450ms, resolved on the next `Tick` — `core::ModeController`);
 ## 4. Daylight mathematical model
 
 No Zigbee or hardware dependency in either piece below
-(`components/sunsim_core/src/math/daylight.cpp`, `solar.cpp`) — both are pure
+(`components/sunsim_core/src/math/daylight.cppm`, `solar.cppm`) — both are pure
 functions, unit-testable on the host.
 
 ### Wall bulbs (`DaylightSchedule::wallState`)
@@ -183,7 +183,7 @@ Defaults: `warm_mireds=370` (~2700K), `cool_mireds=153` (~6500K),
 
 The three wall bulbs sit east-to-west along the south wall: A at the east
 end (`x = +1`), B in the middle (`0`), C at the west end (`-1`).
-`computeSunPosition()` (NOAA solar position equations, in `solar.cpp`)
+`computeSunPosition()` (NOAA solar position equations, in `solar.cppm`)
 gives the sun's compass azimuth; its east-west component
 `sun_x = sin(azimuth)` is +1 due East, 0 due South, -1 due West. Each wall
 bulb's level is then scaled by
@@ -291,7 +291,7 @@ calculation — no GPS, just two numbers you configure once:
    `TZ` (`CONFIG_SUNSIM_TZ`) — and the difference between the two
    `time_t`s is the local UTC offset.
 
-`solar.cpp` implements the "Sunrise/Sunset Algorithm" from the
+`solar.cppm` implements the "Sunrise/Sunset Algorithm" from the
 *Almanac for Computers, 1990* (Nautical Almanac Office, US Naval
 Observatory) — the standard non-iterative closed-form approximation used
 by most embedded sunrise/sunset libraries (accurate to within a couple of
@@ -305,9 +305,9 @@ inverted).
 
 At latitudes inside the polar circle, the day can have no sunrise/sunset at
 all, or the sunset can land after local midnight (summer, very long day).
-`solar.cpp` clamps the underlying angle rather than leaving a domain error
+`solar.cppm` clamps the underlying angle rather than leaving a domain error
 (degenerates to an always-off or always-on day instead of propagating NaN
-into bulb commands); `daylight.cpp`'s window math unwraps a
+into bulb commands); `daylight.cppm`'s window math unwraps a
 `sunset <= sunrise` case onto a continuous scale so hours just after
 midnight are still correctly treated as part of the previous evening's
 daylight window.

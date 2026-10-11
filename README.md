@@ -231,32 +231,41 @@ catch up.
 Event-driven: every module talks only through events on one bus, processed
 by a single app task. See [EVENT_DESIGN.md](EVENT_DESIGN.md).
 
-- `components/sunsim_events/` (`sunsim::ev`) - the shared vocabulary: value
-  types (`types.h`), every event (`events.h`), the `EventBus` (`bus.h`),
-  and coroutine flows (`flow.h`: `Flow`, `Timer`, `Inbox`).
-- `components/sunsim_core/` (`sunsim::core`) - all application logic, pure
-  C++ (builds on the host), as the C++ module `sunsim.core`: each `.cppm` is
-  a partition's interface, each `.cpp` its implementation:
-  - `device_registry.*` - pairing, endpoint discovery/binding, liveness pings.
-  - `mode_controller.*` - single/double/hold -> daylight / red alert / off.
+Each component is one C++ module (`import sunsim.ev;` and so on, plus
+`import std.compat;`): each `.cppm` is a partition holding one class (or
+one piece of math), declaration and definitions together, and a
+component's main `.cppm` re-exports the partitions. The only headers left
+are `sunsim/ev/log.h` (macros don't travel through an import) and the
+generated `role_manifest.h`.
+
+- `components/sunsim_events/` (`sunsim::ev`, module `sunsim.ev`) - the
+  shared vocabulary: value types (`types.cppm`), every event
+  (`events.cppm`), the `EventBus` (`bus.cppm`), coroutine flows
+  (`flow.cppm`: `Flow`, `Timer`, `Inbox`), and `BootClock::now()`.
+- `components/sunsim_core/` (`sunsim::core`, module `sunsim.core`) - all
+  application logic, pure C++ (builds on the host):
+  - `device_registry.cppm` - pairing, endpoint discovery/binding, liveness pings.
+  - `mode_controller.cppm` - single/double/hold -> daylight / red alert / off.
   - `programs/` - the lighting programs, one per mode:
     - `program.cppm` - the interface every program implements (what each bulb
-      should show); `program_host.*` runs the selected one.
-    - `daylight_program.*` - sun curve, work light, active window, sun
+      should show); `program_host.cppm` runs the selected one.
+    - `daylight_program.cppm` - sun curve, work light, active window, sun
       shift, amber, per-light intensity, clock guard.
-    - `red_alert_program.*`, `off_program.*` - the other two modes.
-  - `light_output.*` - turns any program's targets into ZCL commands, diffed
+    - `red_alert_program.cppm`, `off_program.cppm` - the other two modes.
+  - `light_output.cppm` - turns any program's targets into ZCL commands, diffed
     against what was last sent.
-  - `status_model.*` - the snapshot shown by `status` and the display.
-  - `math/` - `daylight.*`, `solar.*`, `day_info.*`: the pure math.
-  - `core.*` - `CoreModules` and `wireCore()`, every core-to-core edge.
-- `components/sunsim_platform/` (`sunsim::platform`) - everything ESP-IDF:
-  - `zigbee_adapter.*` - the only code using esp-zigbee-lib (stack,
+  - `status_model.cppm` - the snapshot shown by `status` and the display.
+  - `math/` - `daylight.cppm`, `solar.cppm`, `day_info.cppm`: the pure math.
+  - `core.cppm` - `CoreModules` and `wireCore()`, every core-to-core edge.
+- `components/sunsim_platform/` (`sunsim::platform`, module
+  `sunsim.platform`) - everything ESP-IDF; `bulb_endpoint`,
+  `fast_day_clock` and `format` are internal partitions, not exported:
+  - `zigbee_adapter.cppm` - the only code using esp-zigbee-lib (stack,
     commissioning, discovery/bind/ping, button frames, bulb commands).
-  - `clock.*`, `fast_day_clock.h`, `wifi_time_sync.*` - heartbeat, program
+  - `clock.cppm`, `fast_day_clock.cppm`, `wifi_time_sync.cppm` - heartbeat, program
     time, SNTP sync.
-  - `settings_store.*` - all NVS persistence (roles, settings, intensities).
-  - `console.*` - the serial REPL; `status_display.*` - the LCD.
+  - `settings_store.cppm` - all NVS persistence (roles, settings, intensities).
+  - `console.cppm` - the serial REPL; `status_display.cppm` - the LCD.
 - `components/eventpp/` - vendored [eventpp](https://github.com/wqking/eventpp)
   (header-only, Apache-2.0).
 - `main/` - `main.cpp` (`App`: creates the bus and modules, platform wiring,

@@ -1,8 +1,8 @@
 // app_main: builds the App - the event bus, every module, and their wiring -
 // and runs it. See EVENT_DESIGN.md.
 
-#include <cstdlib>
-#include <ctime>
+#include <stdlib.h> // setenv (POSIX)
+#include <time.h>   // tzset (POSIX)
 
 #include "esp_check.h"
 #include "esp_log.h"
@@ -11,16 +11,12 @@
 #include "nvs_flash.h"
 
 #include "role_manifest.h"
-#include "sunsim/ev/bus.h"
-#include "sunsim/platform/clock.h"
-#include "sunsim/platform/console.h"
-#include "sunsim/platform/settings_store.h"
-#include "sunsim/platform/status_display.h"
-#include "sunsim/platform/status_slot.h"
-#include "sunsim/platform/zigbee_adapter.h"
 
 // Every #include before the first import (GCC).
+import std.compat;
+import sunsim.ev;
 import sunsim.core;
+import sunsim.platform;
 
 namespace sunsim {
 

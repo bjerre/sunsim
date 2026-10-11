@@ -1,9 +1,8 @@
-#include "sunsim/platform/status_display.h"
+module;
 
 #include "sdkconfig.h"
 
 #if CONFIG_SUNSIM_DISPLAY
-
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_check.h"
@@ -14,9 +13,27 @@
 #include "esp_lvgl_port.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#endif
 
-#include "format.h"
-#include "sunsim/platform/status_slot.h"
+export module sunsim.platform:status_display;
+
+import std.compat;
+import sunsim.ev;
+import :status_slot;
+import :format;
+
+export namespace sunsim::platform {
+
+// Drives the on-board ST7789 LCD (Waveshare ESP32-C6-GEEK by default, see
+// the "Status display" menuconfig): current time, day length, countdown to
+// the next sunrise/sunset, mode, and one dot per role for its link state.
+// Redraws once a second from the latest StatusSnapshot - the same data as
+// the `status` console command. No-op unless CONFIG_SUNSIM_DISPLAY.
+void startStatusDisplay(const StatusSlot &status);
+
+} // namespace sunsim::platform
+
+#if CONFIG_SUNSIM_DISPLAY
 
 namespace sunsim::platform {
 

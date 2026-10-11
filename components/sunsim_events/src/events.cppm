@@ -1,22 +1,13 @@
-#pragma once
-
 // Every event in the system, in one variant. A module never calls another
 // module: it posts one of these, and the wiring (wireCore / main's
 // wirePlatform) routes it. See EVENT_DESIGN.md §5 for who posts what.
 
-#include <array>
-#include <cstddef>
-#include <cstdint>
-#include <functional>
-#include <memory>
-#include <optional>
-#include <type_traits>
-#include <utility>
-#include <variant>
+export module sunsim.ev:events;
 
-#include "sunsim/ev/types.h"
+import std.compat;
+import :types;
 
-namespace sunsim::ev {
+export namespace sunsim::ev {
 
 // ---- Clock ----------------------------------------------------------------
 

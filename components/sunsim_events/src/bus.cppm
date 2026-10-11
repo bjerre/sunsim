@@ -1,18 +1,20 @@
-#pragma once
-
 // The one event queue. Producers on any task post(); a single consumer
 // (the app task on the target, the test on the host) runs process(), which
 // calls every listener for each queued event in order. Listeners may post
 // more events; those are handled on a following process() pass.
 
-#include <utility>
+module;
 
 #include <eventpp/eventqueue.h>
 
-#include "sunsim/ev/events.h"
 #include "sunsim/ev/log.h"
 
-namespace sunsim::ev {
+export module sunsim.ev:bus;
+
+import std.compat;
+import :events;
+
+export namespace sunsim::ev {
 
 class EventBus {
 public:

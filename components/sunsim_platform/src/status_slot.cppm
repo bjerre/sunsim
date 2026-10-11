@@ -1,11 +1,9 @@
-#pragma once
+export module sunsim.platform:status_slot;
 
-#include <mutex>
-#include <optional>
+import std.compat;
+import sunsim.ev;
 
-#include "sunsim/ev/types.h"
-
-namespace sunsim::platform {
+export namespace sunsim::platform {
 
 // The latest StatusSnapshot, for readers outside the app task (console
 // commands, the display task). Written by a StatusChanged listener.

@@ -1,5 +1,3 @@
-#pragma once
-
 // Coroutines for behaviour that happens in steps over time ("send this,
 // wait for the reply or 15 s, try again"), written top to bottom instead of
 // spread over handlers, flags and counters. Everything runs on the app
@@ -23,20 +21,12 @@
 //       Flow         asking_; // = ask(role); reassigning or destroying it cancels the flow
 //   };
 
-#include <algorithm>
-#include <chrono>
-#include <concepts>
-#include <coroutine>
-#include <cstdint>
-#include <cstdlib>
-#include <functional>
-#include <optional>
-#include <utility>
-#include <vector>
+export module sunsim.ev:flow;
 
-#include "sunsim/ev/types.h"
+import std.compat;
+import :types;
 
-namespace sunsim::ev {
+export namespace sunsim::ev {
 
 // A coroutine that starts at once and runs until it returns or its owner
 // destroys it, which cancels it wherever it's waiting. Nobody awaits it.
@@ -108,6 +98,9 @@ private:
 // Time only moves forward.
 class Timer {
 public:
+    Timer() = default;
+    ~Timer();
+
     [[nodiscard]] Instant now() const noexcept { return now_; }
 
     // co_await until(t) / after(d): resumes on the first tick at or after the
@@ -155,6 +148,11 @@ private:
     Instant                      now_{};
     std::vector<detail::Timed *> timed_;
 };
+
+// Not inline: sunsim.ev's object file has the one copy. (Inline, GCC 15
+// left a module that destroys a Timer linking to vector internals nobody
+// emitted.)
+Timer::~Timer() = default;
 
 inline detail::Timed::~Timed()
 {

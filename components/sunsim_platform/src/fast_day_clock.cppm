@@ -1,10 +1,7 @@
-#pragma once
+module sunsim.platform:fast_day_clock; // internal: not exported
 
-#include <chrono>
-#include <cmath>
-#include <ctime>
-
-#include "sunsim/ev/types.h"
+import std.compat;
+import sunsim.ev;
 
 namespace sunsim::platform {
 

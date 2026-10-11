@@ -1,22 +1,23 @@
-#pragma once
-
 // Value types shared by every layer. Plain data only: no behaviour beyond
 // trivial helpers, no ESP-IDF includes.
 
-#include <array>
-#include <chrono>
-#include <cstddef>
-#include <cstdint>
-#include <ctime>
-#include <optional>
-#include <string_view>
+module;
 
-namespace sunsim::ev {
+#if defined(ESP_PLATFORM)
+#include "esp_timer.h"
+#endif
+
+export module sunsim.ev:types;
+
+import std.compat;
+
+export namespace sunsim::ev {
 
 // ---- Clock ----------------------------------------------------------------
 
-// Steady time since boot. now() exists only in the platform layer (the
-// esp_timer): core code gets time from events, which keeps it testable.
+// Steady time since boot (the esp_timer; steady_clock on the host). Only
+// the platform layer calls now(): core code gets time from events, which
+// keeps it testable.
 struct BootClock {
     using rep                       = int64_t;
     using period                    = std::micro;
@@ -217,5 +218,18 @@ struct StatusSnapshot {
     ProgramConfig                         config{};
     Peaks                                 peaks = kDefaultPeaks;
 };
+
+} // namespace sunsim::ev
+
+namespace sunsim::ev {
+
+BootClock::time_point BootClock::now() noexcept
+{
+#if defined(ESP_PLATFORM)
+    return time_point{duration{esp_timer_get_time()}};
+#else
+    return time_point{std::chrono::duration_cast<duration>(std::chrono::steady_clock::now().time_since_epoch())};
+#endif
+}
 
 } // namespace sunsim::ev

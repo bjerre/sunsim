@@ -14,16 +14,19 @@ add_compile_options(-Wall -Wextra -fno-exceptions -fno-rtti)
 set(ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../..)
 include(${ROOT}/cmake/import_std.cmake)
 
-# The module sunsim.core, as the firmware's sunsim_core component builds it.
+# The modules sunsim.ev and sunsim.core, as the firmware's components build them.
+set(EVENTS ${ROOT}/components/sunsim_events)
+file(GLOB EVENTS_MODULES ${EVENTS}/src/*.cppm)
+add_library(sunsim_events STATIC)
+target_sources(sunsim_events PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${EVENTS}/src FILES ${EVENTS_MODULES})
+target_include_directories(sunsim_events PUBLIC ${EVENTS}/include PRIVATE ${ROOT}/components/eventpp/include)
+sunsim_import_std(sunsim_events)
+
 set(CORE ${ROOT}/components/sunsim_core/src)
-file(GLOB_RECURSE CORE_SOURCES ${CORE}/*.cpp)
 file(GLOB_RECURSE CORE_MODULES ${CORE}/*.cppm)
-add_library(sunsim_core STATIC ${CORE_SOURCES})
+add_library(sunsim_core STATIC)
 target_sources(sunsim_core PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CORE} FILES ${CORE_MODULES})
-target_include_directories(sunsim_core PUBLIC
-    ${ROOT}/components/eventpp/include
-    ${ROOT}/components/sunsim_events/include)
-sunsim_import_std(sunsim_core)
+target_link_libraries(sunsim_core PUBLIC sunsim_events)
 
 find_package(Threads REQUIRED)
 add_executable(sunsim_tests tests.cpp)

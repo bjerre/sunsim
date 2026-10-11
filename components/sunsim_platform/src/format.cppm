@@ -1,10 +1,7 @@
-#pragma once
-
 // Text formatting shared by the console and the status display.
+module sunsim.platform:format; // internal: not exported
 
-#include <cmath>
-#include <cstddef>
-#include <cstdio>
+import std.compat;
 
 namespace sunsim::platform {
 

@@ -25,8 +25,10 @@ processes them.** Modules never take locks and never call each other.
 
 ## 2. Layers and namespaces
 
-Namespaces label layers; ESP-IDF component `REQUIRES` lines enforce them
-(a `core` file that includes `esp_zigbee.h` fails to build).
+Namespaces label layers, each component is one C++ module (`sunsim.ev`,
+`sunsim.core`, `sunsim.platform`), and ESP-IDF component `REQUIRES` lines
+enforce them (a `core` file that includes `esp_zigbee.h` or imports
+`sunsim.platform` fails to build).
 
 ```mermaid
 flowchart TB
@@ -68,9 +70,9 @@ flowchart TB
 | `sunsim` | `Bus`, `Modules`, `wire()`, `app_main` | all |
 
 Conventions: at most two levels (`sunsim::core::X`); anonymous namespaces
-for file-private helpers (as today); `detail` only for header-visible
+for file-private helpers (as today); `detail` only for exported
 internals such as eventpp policy structs. `core` and `platform` never
-include each other — anything both need lives in `ev`.
+import each other — anything both need lives in `ev`.
 
 ## 3. Threading model
 
@@ -157,7 +159,7 @@ flowchart LR
 
 ### Programs
 
-Every mode is a `core::Program` (`programs/program.h`): it decides what each bulb
+Every mode is a `core::Program` (`programs/program.cppm`): it decides what each bulb
 should show and posts `LightTarget`s, and nothing else. `ProgramHost` owns
 them and runs the one the `Mode` selects:
 
@@ -183,7 +185,7 @@ events and the wiring don't change.
 ### Flows
 
 Behaviour that happens in steps over time is written as a coroutine
-(`ev::Flow`, `ev/flow.h`) rather than spread over handlers, flags and Tick
+(`ev::Flow`, `flow.cppm`) rather than spread over handlers, flags and Tick
 counters:
 
 ```cpp
@@ -218,7 +220,7 @@ sleep). The host tests run them unchanged, also under ASan/UBSan.
 `ZigbeeAdapter` never needs to know about roles (except the button's
 address for the synchronous APS decision).
 
-## 5. Event catalogue (`sunsim::ev`, `events.h`)
+## 5. Event catalogue (`sunsim::ev`, `events.cppm`)
 
 | Event | Payload | Posted by |
 |---|---|---|
@@ -336,7 +338,7 @@ public:
 };
 } // namespace sunsim::ev
 
-// sunsim_core (core.cpp): every core-to-core edge, shared by firmware and tests.
+// sunsim_core (core.cppm): every core-to-core edge, shared by firmware and tests.
 void wireCore(ev::EventBus &bus, CoreModules &m)
 {
     bus.on<Tick>([&](const Tick &e) { m.mode.onTick(e); m.registry.onTick(e); m.programs.onTick(e); m.status.onTick(e); });

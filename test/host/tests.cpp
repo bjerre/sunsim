@@ -1,13 +1,8 @@
 // Host tests: the real core modules, wired with the same core::wireCore()
 // as the firmware, driven by events; a recorder captures everything posted.
 
-#include <cstdio>
-#include <functional>
-#include <string>
-#include <vector>
-
-#include "sunsim/ev/bus.h"
-
+import std.compat;
+import sunsim.ev;
 import sunsim.core;
 
 using namespace sunsim;
