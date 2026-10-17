@@ -158,6 +158,14 @@ struct Rule {
 constexpr Rule Window::opensOnly() const noexcept { return {*this, Says::OnOnly}; }
 constexpr Rule Window::closesOnly() const noexcept { return {*this, Says::OffOnly}; }
 
+// A rule that answers whatever the time, so nothing after it in a gate is
+// ever asked: `Always`, and a `Window` that gives both answers. (Presence,
+// once it's here, won't be: it has no answer while its sensor is unknown.)
+[[nodiscard]] constexpr bool answersAlways(const Rule &rule) noexcept
+{
+    return std::holds_alternative<Always>(rule.source) || rule.says == Says::Both;
+}
+
 // The first rule with an answer decides; when none answers, the lights are off.
 using Gate = List<Rule, 4>;
 
@@ -215,10 +223,12 @@ inline void aLightIsInNoZone() noexcept {}
 inline void controlsNamesNoButton() noexcept {}
 inline void aButtonControlsTwice() noexcept {}
 inline void aButtonPicksAModeItsZoneCantRun() noexcept {}
+inline void aGateRuleCanNeverAnswer() noexcept {}
 } // namespace detail
 
 // `zones` per role. Doesn't compile if two zones share a name; a zone has no
-// lights, no gate, or can't run daylight; a name in it isn't in the layout,
+// lights, no gate, a gate rule after one that always answers
+// (answersAlways), or can't run daylight; a name in it isn't in the layout,
 // gives a button a look or a light a second one; a light is in no zone; or
 // a button is named twice, isn't a button, or picks a mode its zone can't run.
 template <std::ranges::input_range Zones> [[nodiscard]] consteval Topology topologyOf(const Zones &zones)
@@ -238,6 +248,11 @@ template <std::ranges::input_range Zones> [[nodiscard]] consteval Topology topol
         }
         if (zone.gate.empty()) {
             detail::aZoneHasNoGate();
+        }
+        for (const Rule *rule = zone.gate.begin(); rule + 1 < zone.gate.end(); ++rule) {
+            if (answersAlways(*rule)) {
+                detail::aGateRuleCanNeverAnswer(); // the rules after it never get asked
+            }
         }
         if (!zone.allows(Mode::Daylight)) {
             detail::aZoneCantRunDaylight();

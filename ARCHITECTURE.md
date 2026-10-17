@@ -184,7 +184,8 @@ run, which buttons choose its mode (`Controls`: what a single, double and
 held press pick) and whether the weather lights may be in it.
 `topologyOf()` checks it at compile time into `kZoneOf`, `kLookOf` and
 `kControlsOf`: two zones with one name; a zone with no lights, no gate or
-no daylight; a name the layout doesn't have; a light in two zones or none;
+no daylight; a gate rule after one that always answers (`Always`, a
+two-way `Window`), which would never be asked; a name the layout doesn't have; a light in two zones or none;
 a look on a button; a button named twice or picking a mode its zone can't
 run - none of these compile. Each zone runs its own mode: a red alert or
 a hold in one leaves the others alone. Their values are `Tunable`: fixed in the file, or a

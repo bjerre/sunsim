@@ -285,6 +285,17 @@ void devicesTests()
         static_assert(t.controls_of[kButton] && !t.controls_of[kButton]->twice && t.controls_of[kButton]->hold == Mode::Off);
         static_assert(zones[1].allows(Mode::Off) && !zones[1].allows(Mode::RedAlert));
         // A light in no zone or two, a look on the button, a button picking red alert in "desk", ... don't compile.
+
+        // A gate's rules after one that always answers are never asked, so that doesn't compile either.
+        constexpr Window nine_to_five{.hours = DaySpan{9h, 17h}};
+        static_assert(answersAlways(Always{}) && answersAlways(nine_to_five));
+        static_assert(!answersAlways(nine_to_five.closesOnly()) && !answersAlways(nine_to_five.opensOnly()));
+        constexpr std::array layered{
+            ZoneSpec{.name   = "all",
+                     .lights = {{"wall", SunCurve{}}, {"work", WorkCurve{}}},
+                     .gate   = {nine_to_five.closesOnly(), nine_to_five.opensOnly(), Always{}}},
+        };
+        static_assert(topologyOf(layered).zone_of[kWork] == ZoneId{0}); // one-way rules first: fine
     });
 
     test("role sets: lists, groups and none", [] {
