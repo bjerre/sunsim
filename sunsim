@@ -29,7 +29,9 @@ usage: ./sunsim <command> [args]
 Console commands (also in `monitor`); `./sunsim cmd help` lists them all:
 
   status                                 time, sunrise/sunset, sky, mode, device links
-  roles | pair <role> | unpair <role|group|all>
+  roles                                  which device has each role
+  pair <role|cancel>                     the next device to join takes this role
+  unpair <role|group|all>                forget a device, so it can be re-paired
   config [<setting> <value>]             hours, workhours, syncwindow, fade, sunshift,
                                          amber, ambersweep, clouds, clouddim, cloudcool, days
   intensity [<light|group|all> <1-100>]  each light's peak brightness, %
@@ -40,7 +42,8 @@ Console commands (also in `monitor`); `./sunsim cmd help` lists them all:
   sync                                   clock + cloud forecast now
   wifi [add <ssid> [pw] | remove <ssid>]
 
-<light> is WallA-WallE (east to west) or Work; <group> is wall. Case doesn't matter.
+<light> is WallA-WallE (east to west) or Work; <role> is a light or Button;
+<group> is wall. Case doesn't matter.
 EOF
 }
 
