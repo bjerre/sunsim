@@ -213,11 +213,9 @@ void Overlays::show(ev::Role role, const Pulse &pulse, bool bright)
 
     post_(ev::OutputTarget{{
         .role             = role,
-        .state            = {.on         = true,
-                             .level      = bright ? top : bottom,
-                             .color      = ev::ColorMode::HueSat,
-                             .hue        = zigbeeHue(pulse.shade.hue_deg),
-                             .saturation = pulse.shade.saturation},
+        .state            = {.on    = true,
+                             .level = bright ? top : bottom,
+                             .color = ev::HueSat{zigbeeHue(pulse.shade.hue_deg), pulse.shade.saturation}},
         .level_transition = ev::Transition{static_cast<uint16_t>(pulse.fade_seconds * 10 - 1)}, // nearly the whole fade
         .color_transition = kColorTransition,
     }});

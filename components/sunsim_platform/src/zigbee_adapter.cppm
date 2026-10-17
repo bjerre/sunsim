@@ -497,19 +497,21 @@ void ZigbeeAdapter::on(const ev::SetLight &e)
 {
     const BulbEndpoint bulb{e.short_addr, e.endpoint, kLightCtrlEp};
 
+    // A saturated colour goes before the level, whites after it.
+    const auto *hue_sat = e.color ? std::get_if<ev::HueSat>(&*e.color) : nullptr;
     if (e.power && *e.power) {
         countSend(bulb.turnOn());
     }
-    if (e.hue_sat) {
-        countSend(bulb.setHueSaturation(e.hue_sat->first, e.hue_sat->second, e.color_transition));
+    if (hue_sat) {
+        countSend(bulb.setHueSaturation(hue_sat->hue, hue_sat->saturation, e.color_transition));
     }
     if (e.level) {
         countSend(bulb.setLevel(*e.level, e.level_transition));
     }
-    if (e.xy) {
-        countSend(bulb.setColorXY(e.xy->first, e.xy->second, e.color_transition));
-    } else if (e.mireds) {
-        countSend(bulb.setColorTemperature(*e.mireds, e.color_transition));
+    if (const auto *xy = e.color ? std::get_if<ev::Xy>(&*e.color) : nullptr) {
+        countSend(bulb.setColorXY(xy->x, xy->y, e.color_transition));
+    } else if (const auto *mireds = e.color ? std::get_if<ev::Mireds>(&*e.color) : nullptr) {
+        countSend(bulb.setColorTemperature(mireds->value, e.color_transition));
     }
     if (e.power && !*e.power) {
         countSend(bulb.turnOff());

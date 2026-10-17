@@ -38,41 +38,6 @@ private:
 
 namespace sunsim::core {
 
-namespace {
-
-bool sameColor(const ev::LightState &a, const ev::LightState &b) noexcept
-{
-    if (a.color != b.color) {
-        return false;
-    }
-    switch (a.color) {
-    case ev::ColorMode::Temperature:
-        return a.mireds == b.mireds;
-    case ev::ColorMode::Xy:
-        return a.color_x == b.color_x && a.color_y == b.color_y;
-    case ev::ColorMode::HueSat:
-        return a.hue == b.hue && a.saturation == b.saturation;
-    }
-    return false;
-}
-
-void setColor(ev::SetLight &s, const ev::LightState &state) noexcept
-{
-    switch (state.color) {
-    case ev::ColorMode::Temperature:
-        s.mireds = state.mireds;
-        break;
-    case ev::ColorMode::Xy:
-        s.xy = std::pair<float, float>{state.color_x, state.color_y};
-        break;
-    case ev::ColorMode::HueSat:
-        s.hue_sat = std::pair<uint8_t, uint8_t>{state.hue, state.saturation};
-        break;
-    }
-}
-
-} // namespace
-
 LightOutput::LightOutput(ev::Post post) : post_(std::move(post)) {}
 
 void LightOutput::on(const ev::RoleAssigned &e)
@@ -129,15 +94,15 @@ void LightOutput::on(const ev::OutputTarget &e)
             s.level            = e.state.level;
             s.level_transition = e.level_transition;
         }
-        if (!was_on || !sameColor(*b.sent, e.state)) {
-            setColor(s, e.state);
+        if (!was_on || b.sent->color != e.state.color) {
+            s.color            = e.state.color;
             s.color_transition = e.color_transition;
         }
     } else if (!b.sent || was_on) {
         s.power = false;
     }
 
-    if (s.power || s.level || s.mireds || s.xy || s.hue_sat) {
+    if (s.power || s.level || s.color) {
         post_(s);
     }
     b.sent = e.state;

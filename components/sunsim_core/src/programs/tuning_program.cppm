@@ -73,11 +73,9 @@ void TuningProgram::on(const ev::TuneLights &e)
 void TuningProgram::emit(ev::Role role) const
 {
     // Like the sunset, where bulbs go dark first: xy below ~2700K.
-    ev::LightState state{.on = true, .level = level(role), .mireds = static_cast<uint16_t>(std::lround(1e6 / kelvin_))};
-    if (kelvin_ < 2700.0) {
-        state.color = ev::ColorMode::Xy;
-        planckianXy(kelvin_, state.color_x, state.color_y);
-    }
+    const ev::Color color = kelvin_ < 2700.0 ? ev::Color{planckianXy(kelvin_)}
+                                             : ev::Mireds{static_cast<uint16_t>(std::lround(1e6 / kelvin_))};
+    const ev::LightState state{.on = true, .level = level(role), .color = color};
     target(role, state, std::chrono::seconds{1});
 }
 

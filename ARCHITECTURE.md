@@ -128,10 +128,7 @@ classDiagram
     class LightState {
         bool on
         uint8 level
-        ColorMode color
-        uint16 mireds
-        float color_x, color_y
-        uint8 hue, saturation
+        Color color : variant~Mireds, Xy, HueSat~
     }
     class ProgramConfig {
         double latitude_deg, longitude_deg
@@ -139,8 +136,9 @@ classDiagram
         sun_shift_percent
         amber_enabled, golden_elevation_deg
         amber_kelvin, amber_sweep_deg
-        active window, fade, days
-        work hours, work mireds
+        DaySpan active, minutes fade, Weekdays days
+        DaySpan work, work mireds
+        DaySpan sync
     }
     class StatusSnapshot {
         TimeReading time
@@ -828,7 +826,7 @@ Pairing a device (console `pair` or the role manifest) is in DESIGN.md §2.
 | `RefreshLights` | role, or every light | DeviceRegistry |
 | `LightTarget` | role, `LightState`, level and colour transitions | the running program |
 | `OutputTarget` | the same: what the bulb does show | Overlays |
-| `SetLight` | short addr, endpoint, optional power / level / mireds / xy / hue-sat, transitions | LightOutput |
+| `SetLight` | short addr, endpoint, optional power / level / `Color`, transitions | LightOutput |
 | `StatusChanged` | `shared_ptr<const StatusSnapshot>` | StatusModel, 1 Hz |
 
 ## 8. Wiring

@@ -118,6 +118,16 @@ static_assert(!HandlerOf<ByBaseModule, LightTarget> && TakesByConversion<ByBaseM
 static_assert(!HandlerOf<ByValueModule, Tick> && TakesByConversion<ByValueModule, Tick>);
 static_assert(kEventNames[kTypeId<OutputTarget>] == "OutputTarget");
 
+// A light's or a command's colour, if it's a C.
+template <class C> const C *colorOf(const LightState &s)
+{
+    return std::get_if<C>(&s.color);
+}
+template <class C> const C *colorOf(const SetLight &s)
+{
+    return s.color ? std::get_if<C>(&*s.color) : nullptr;
+}
+
 void test(const char *name, const std::function<void()> &body)
 {
     const int before = g_failures;
@@ -179,21 +189,21 @@ int main()
         CHECK(modes.size() == 1 && modes[0].mode == Mode::RedAlert);
         auto red = h.all<SetLight>();
         CHECK(red.size() == 2); // one immediate pulse per bulb
-        CHECK(red.size() == 2 && red[0].hue_sat && red[0].hue_sat->first == 0 && red[0].hue_sat->second == 254);
+        CHECK((red.size() == 2 && colorOf<HueSat>(red[0]) && *colorOf<HueSat>(red[0]) == HueSat{0, 254}));
 
         h.clearLog();
         h.tick(3);
         const auto pulses = h.all<SetLight>();
         CHECK(pulses.size() == 6);
         CHECK(pulses.size() == 6 && pulses[0].level && pulses[2].level && *pulses[0].level != *pulses[2].level); // bright/dim alternate
-        CHECK(pulses.size() == 6 && !pulses[0].hue_sat); // already red: only the level moves
+        CHECK(pulses.size() == 6 && !pulses[0].color); // already red: only the level moves
 
         h.clearLog();
         h.post(ButtonPressed{.press = Press::Single, .source = Source::Zigbee, .at = h.now});
         modes = h.all<ModeChanged>();
         CHECK(modes.size() == 1 && modes[0].mode == Mode::Daylight);
         const auto back = h.all<SetLight>();
-        CHECK(back.size() == 2 && back[0].level && !back[0].hue_sat && (back[0].mireds || back[0].xy)); // daylight at once
+        CHECK(back.size() == 2 && back[0].level && (colorOf<Mireds>(back[0]) || colorOf<Xy>(back[0]))); // daylight at once
 
     });
 
@@ -220,7 +230,7 @@ int main()
         h.pairBulb(kWallC, 0xC3, 0x0003);
         const auto lights = h.all<SetLight>();
         CHECK(lights.size() == 1 && lights[0].power && *lights[0].power);
-        CHECK(lights.size() == 1 && lights[0].hue_sat && lights[0].hue_sat->first == 0);
+        CHECK(lights.size() == 1 && colorOf<HueSat>(lights[0]) && colorOf<HueSat>(lights[0])->hue == 0);
     });
 
     test("ambiguous On/Toggle: two within 450 ms = double, one alone = single", [] {
@@ -530,30 +540,31 @@ int main()
         for (const Role wall : members(Group::Wall)) {
             h.pairBulb(wall, 0xA0 + wall.index, static_cast<uint16_t>(0x0010 + wall.index));
         }
-        const auto wallMireds = [&] {
+        // How amber each wall light is: along the blackbody line, x grows as it warms.
+        const auto wallAmber = [&] {
             h.clearLog();
             h.post(ProgramTick{.time = dusk, .transition = 60s});
-            std::vector<int> mireds;
+            std::vector<float> amber;
             for (const auto &t : h.all<LightTarget>()) {
                 if (t.role.group == Group::Wall) {
-                    CHECK(t.state.color == ColorMode::Xy);
-                    mireds.push_back(t.state.mireds);
+                    CHECK(colorOf<Xy>(t.state));
+                    amber.push_back(colorOf<Xy>(t.state) ? colorOf<Xy>(t.state)->x : 0.0f);
                 }
             }
-            CHECK(mireds.size() == 5);
-            return mireds;
+            CHECK(amber.size() == 5);
+            return amber;
         };
 
-        const auto swept = wallMireds();
+        const auto swept = wallAmber();
         CHECK(std::ranges::is_sorted(swept) && swept.front() < swept.back()); // the west end warmest
 
         ProgramConfig alike;
         alike.amber_sweep_deg = 0;
         h.post(ConfigChanged{.config = alike});
-        const auto even = wallMireds();
-        CHECK(std::ranges::all_of(even, [&](int m) { return m == even.front(); }));
-        CHECK(std::ranges::all_of(swept, [&](int m) { return m <= even.front(); })); // the sweep only holds amber back
-        CHECK(even.front() - swept.back() < 10); // and barely at the end nearest the sun
+        const auto even = wallAmber();
+        CHECK(std::ranges::all_of(even, [&](float x) { return x == even.front(); }));
+        CHECK(std::ranges::all_of(swept, [&](float x) { return x <= even.front(); })); // the sweep only holds amber back
+        CHECK(even.front() - swept.back() < 0.01f); // and barely at the end nearest the sun
     });
 
     // A forecast for noon()'s date: 20% at 12:00, 60% at 13:00, the next
@@ -617,7 +628,8 @@ int main()
             CHECK(sunny.front().level < sunny.back().level);  // clear: brighter towards the sun
             CHECK(cloudy.front().level == cloudy.back().level); // overcast: diffuse, even
             CHECK(cloudy.back().level < sunny.back().level);    // and dimmer
-            CHECK(cloudy.back().mireds < sunny.back().mireds);  // and cooler
+            CHECK(colorOf<Mireds>(cloudy.back()) && colorOf<Mireds>(sunny.back()) &&
+                  colorOf<Mireds>(cloudy.back())->value < colorOf<Mireds>(sunny.back())->value); // and cooler
         }
 
         ProgramConfig off;
@@ -663,7 +675,7 @@ int main()
         const auto start = h.all<LightTarget>();
         CHECK(start.size() == kBulbCount);
         for (const auto &t : start) {
-            CHECK(t.state.on && t.state.color == ColorMode::Xy); // the sunset's amber
+            CHECK(t.state.on && colorOf<Xy>(t.state)); // the sunset's amber
             CHECK(t.state.level == (t.role == kWork ? 12 : 1));
         }
 
@@ -908,7 +920,7 @@ int main()
         const auto c = outputs(h, kWallC);
         CHECK(c.size() >= 3);
         CHECK(std::ranges::all_of(c, [](const OutputTarget &t) {
-            return t.state.on && t.state.color == ColorMode::HueSat && t.state.saturation == 150;
+            return t.state.on && colorOf<HueSat>(t.state) && colorOf<HueSat>(t.state)->saturation == 150;
         }));
         CHECK(std::ranges::any_of(c, [&](const OutputTarget &t) { return t.state.level != c.front().state.level; }));
         CHECK(outputs(h, kWallA).empty()); // the rest of the wall follows the sun alone
@@ -921,7 +933,7 @@ int main()
         h.clearLog();
         h.post(ConditionsUpdated{.now = {.cloud_percent = 100}, .at = h.now}); // let go at once
         const auto back = outputs(h, kWallC);
-        CHECK(back.size() == 1 && back[0].state.color != ColorMode::HueSat && back[0].level_transition == 2s);
+        CHECK(back.size() == 1 && !colorOf<HueSat>(back[0].state) && back[0].level_transition == 2s);
     });
 
     test("snow outside active hours glows dimmer; not at all in off mode", [&] {
@@ -969,7 +981,7 @@ int main()
             const auto alarm = outputs(h, role);
             CHECK(alarm.size() == 5); // at once, then a fade every second
             CHECK(std::ranges::all_of(alarm, [](const OutputTarget &t) {
-                return t.state.on && t.state.color == ColorMode::HueSat && t.state.hue == 0;
+                return t.state.on && colorOf<HueSat>(t.state) && colorOf<HueSat>(t.state)->hue == 0;
             }));
         }
         CHECK(outputs(h, kWallC).empty());
@@ -993,7 +1005,7 @@ int main()
         h.clearLog();
         h.tick(3);
         const auto c = outputs(h, kWallC);
-        CHECK(!c.empty() && std::ranges::all_of(c, [](const OutputTarget &t) { return t.state.hue == 35; }));
+        CHECK(!c.empty() && std::ranges::all_of(c, [](const OutputTarget &t) { return colorOf<HueSat>(t.state) && colorOf<HueSat>(t.state)->hue == 35; }));
 
         both.weather_enabled = false;
         h.post(ConfigChanged{.config = both});
@@ -1001,7 +1013,7 @@ int main()
         h.tick(3);
         const auto plain = outputs(h, kWallC);
         CHECK(!plain.empty() && std::ranges::none_of(plain, [](const OutputTarget &t) {
-            return t.state.color == ColorMode::HueSat;
+            return colorOf<HueSat>(t.state) != nullptr;
         }));
     });
 

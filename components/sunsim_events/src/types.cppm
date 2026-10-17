@@ -50,7 +50,8 @@ struct DaySpan {
         return start >= std::chrono::minutes{0} && end <= std::chrono::days{1} && start < end;
     }
 
-    // Spelled out: defaulted, GCC 15 crashes compiling an importer that uses it.
+    // Spelled out, like the colours': GCC 15 crashes compiling a file that
+    // imports this and compares DaySpans with a defaulted ==.
     friend constexpr bool operator==(DaySpan a, DaySpan b) noexcept { return a.start == b.start && a.end == b.end; }
 };
 
@@ -291,24 +292,42 @@ using DeviceRecords = PerRole<DeviceRecord>;
 
 // ---- Light state ----------------------------------------------------------
 
-// How a LightState's colour is given.
-enum class ColorMode : uint8_t {
-    Temperature, // `mireds`
-    Xy,          // CIE `color_x`/`color_y`: golden hour, warmer than colour-temperature mode can show
-    HueSat,      // `hue`/`saturation`: saturated colours (red alert)
+// A light's colour, in whichever of the bulbs' three colour modes shows it.
+
+// A white on the blackbody line, by colour temperature: mireds = 1e6 / kelvin.
+struct Mireds {
+    uint16_t value = 0;
+
+    // Spelled out, as are Xy's and HueSat's: defaulted, GCC 15 crashes
+    // compiling a file that imports this and compares them.
+    friend constexpr bool operator==(Mireds a, Mireds b) noexcept { return a.value == b.value; }
 };
+// A CIE 1931 chromaticity: warmer than colour-temperature mode can show
+// (amber, below most bulbs' ~2700 K).
+struct Xy {
+    float x = 0.0f;
+    float y = 0.0f;
+
+    friend constexpr bool operator==(Xy a, Xy b) noexcept { return a.x == b.x && a.y == b.y; }
+};
+// A saturated colour: Zigbee's hue (0-254 for 0-360 deg) and saturation (0-254).
+struct HueSat {
+    uint8_t hue        = 0;
+    uint8_t saturation = 0;
+
+    friend constexpr bool operator==(HueSat a, HueSat b) noexcept
+    {
+        return a.hue == b.hue && a.saturation == b.saturation;
+    }
+};
+using Color = std::variant<Mireds, Xy, HueSat>;
 
 inline constexpr uint8_t kMaxLevel = 254; // Zigbee's brightest
 
 struct LightState {
-    bool      on     = false;
-    uint8_t   level  = 0; // 0-254; this and the colour are meaningful only if `on`
-    ColorMode color  = ColorMode::Temperature;
-    uint16_t  mireds = 0; // Temperature; for Xy, the blackbody temperature it sits at
-    float     color_x    = 0.0f;
-    float     color_y    = 0.0f;
-    uint8_t   hue        = 0;
-    uint8_t   saturation = 0;
+    bool    on    = false;
+    uint8_t level = 0; // 0-254; this and the colour are meaningful only if `on`
+    Color   color = Mireds{};
 };
 
 // ---- Modes and links ------------------------------------------------------

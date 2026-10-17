@@ -184,15 +184,13 @@ struct LightChange {             // a bulb, what it's to show, and how quickly t
 struct LightTarget : LightChange {};  // what a bulb should show, from the running program
 struct OutputTarget : LightChange {}; // what it does show: Overlays' pick, for LightOutput
 struct SetLight {                // one bulb's ZCL commands, sent in field order
-    uint16_t                                  short_addr = 0;
-    uint8_t                                   endpoint   = 0;
-    std::optional<bool>                       power;   // On goes first, Off last
-    std::optional<uint8_t>                    level;
-    std::optional<uint16_t>                   mireds;
-    std::optional<std::pair<float, float>>    xy;
-    std::optional<std::pair<uint8_t, uint8_t>> hue_sat;
-    Transition                                level_transition{};
-    Transition                                color_transition{};
+    uint16_t               short_addr = 0;
+    uint8_t                endpoint   = 0;
+    std::optional<bool>    power;   // On goes first, Off last
+    std::optional<uint8_t> level;
+    std::optional<Color>   color;
+    Transition             level_transition{};
+    Transition             color_transition{};
 };
 
 // ---- Status ---------------------------------------------------------------

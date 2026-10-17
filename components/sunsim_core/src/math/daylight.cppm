@@ -11,7 +11,7 @@ using ev::LightState;
 // CIE 1931 xy of a blackbody at `kelvin` (Kim et al. cubic spline
 // approximation of the Planckian locus, valid 1667-25000K): for colours
 // below most bulbs' ~2700K colour-temperature floor.
-void planckianXy(double kelvin, float &x_out, float &y_out) noexcept;
+[[nodiscard]] ev::Xy planckianXy(double kelvin) noexcept;
 
 // Astronomical daylight model for the wall bulbs: warm and dim at the real
 // sunrise/sunset for a configured location, brightest and coolest (bluest)
@@ -55,7 +55,7 @@ private:
 
 namespace sunsim::core {
 
-void planckianXy(double kelvin, float &x_out, float &y_out) noexcept
+ev::Xy planckianXy(double kelvin) noexcept
 {
     const double t  = std::fmin(25000.0, std::fmax(1667.0, kelvin));
     const double t2 = t * t;
@@ -76,8 +76,7 @@ void planckianXy(double kelvin, float &x_out, float &y_out) noexcept
     } else {
         y = 3.0817580 * x3 - 5.87338670 * x2 + 3.75112997 * x - 0.37001483;
     }
-    x_out = static_cast<float>(x);
-    y_out = static_cast<float>(y);
+    return {.x = static_cast<float>(x), .y = static_cast<float>(y)};
 }
 
 double DaylightSchedule::activeGate(const ev::TimeReading &time) const noexcept
@@ -103,7 +102,7 @@ LightState DaylightSchedule::wallState(const ev::TimeReading &time, double wall_
 
     const double gate = activeGate(time);
     if (gate <= 0.0) {
-        return {.on = false, .level = 0, .mireds = config_.warm_mireds};
+        return {}; // off
     }
 
     const ev::Hours now{time.sinceMidnight()};
@@ -126,7 +125,7 @@ LightState DaylightSchedule::wallState(const ev::TimeReading &time, double wall_
     }
 
     if (hour_adj < sunrise || hour_adj > sunset) {
-        return {.on = false, .level = 0, .mireds = config_.warm_mireds};
+        return {}; // off
     }
 
     const double day_progress = (hour_adj - sunrise) / (sunset - sunrise);
@@ -152,7 +151,7 @@ LightState DaylightSchedule::wallState(const ev::TimeReading &time, double wall_
     const auto   mireds     = static_cast<uint16_t>(std::lround(
         sun_mireds + (config_.cool_mireds - sun_mireds) * (config_.cloud_cool_percent / 100.0) * overcast));
 
-    LightState state{.on = true, .level = level, .mireds = mireds};
+    LightState state{.on = true, .level = level, .color = ev::Mireds{mireds}};
 
     // The amber glow follows the sun: bulbs further away see it as if it
     // were up to amber_sweep_deg higher, so they turn amber later and less.
@@ -165,9 +164,7 @@ LightState DaylightSchedule::wallState(const ev::TimeReading &time, double wall_
             (1.0 - overcast); // no glow under a grey sky
         const double amber_mireds = 1e6 / config_.amber_kelvin;
         const double m            = mireds + golden * (amber_mireds - mireds);
-        state.mireds              = static_cast<uint16_t>(std::lround(m));
-        state.color               = ev::ColorMode::Xy;
-        planckianXy(1e6 / m, state.color_x, state.color_y);
+        state.color               = planckianXy(1e6 / m);
     }
     return state;
 }
@@ -176,7 +173,7 @@ LightState DaylightSchedule::workState(const ev::TimeReading &time) const noexce
 {
     const double gate = activeGate(time);
     if (gate <= 0.0) {
-        return {.on = false, .level = 0, .mireds = config_.work_warm_mireds};
+        return {}; // off
     }
     uint8_t level = static_cast<uint8_t>(std::lround(gate * config_.max_level));
     if (level < config_.min_level) {
@@ -191,7 +188,7 @@ LightState DaylightSchedule::workState(const ev::TimeReading &time) const noexce
     const auto   mireds   = static_cast<uint16_t>(
         std::lround(config_.work_cool_mireds + warmth * (config_.work_warm_mireds - config_.work_cool_mireds)));
 
-    return {.on = true, .level = level, .mireds = mireds};
+    return {.on = true, .level = level, .color = ev::Mireds{mireds}};
 }
 
 } // namespace sunsim::core
