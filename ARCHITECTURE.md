@@ -168,6 +168,17 @@ classDiagram
     StatusSnapshot ..> PerRole~T~ : devices, records, peaks
 ```
 
+The room's behavior is data too, in `installation.cppm`, written in
+`topology.cppm`'s words. `kShows` gives each light a look (a `Look`
+variant: `SunCurve`, `WorkCurve`), checked at compile time into
+`kLookOf`: a name the layout doesn't have, a light with two looks or none,
+or a look on a button doesn't compile. `kGate` says when the lights may be
+on: a list of rules (`Always`, `Window`), where the first rule with an
+answer decides. Their values are `Tunable`: fixed in the file, or a
+`ProgramConfig` field the console can change (`&ProgramConfig::active`).
+`core` evaluates them: `show()` per look (`daylight.cppm`), `openness()`
+for the gate (`gate.cppm`).
+
 `DeviceRecords` is `PerRole<DeviceRecord>`; `Peaks` (percent) and
 `MinLevels` (raw level) are `PerRole<uint8_t>`. `CloudCover` is the hourly
 forecast, fetched by `InternetSync` each sync.
@@ -283,11 +294,12 @@ classDiagram
         #forEachBulb(role, f)$
     }
     class DaylightProgram {
-        -DaylightSchedule schedule_
+        -ProgramConfig config_
         -Peaks peaks_
         -MinLevels min_levels_
         -uint8 cloud_percent_
         +on(SkyChanged)
+        -gated(state, open) LightState
         -outputLevel(role, level) uint8
     }
     class TuningProgram {
@@ -301,10 +313,15 @@ classDiagram
     class RedAlertProgram {
         -bool bright_
     }
-    class DaylightSchedule {
-        +wallState(time, utc_offset, wall_position, cloud) LightState
-        +workState(time) LightState
-        +inActiveWindow(time) bool
+    class looks {
+        <<functions>>
+        show(SunCurve, LookContext) LightState
+        show(WorkCurve, LookContext) LightState
+        show(Look, LookContext) LightState
+    }
+    class gate {
+        <<functions>>
+        openness(Gate, time, config) double
     }
     class solar {
         <<functions>>
@@ -355,8 +372,10 @@ classDiagram
     Program <|-- OffProgram
     Program <|-- RedAlertProgram
     Program <|-- TuningProgram
-    DaylightProgram *-- DaylightSchedule
-    DaylightSchedule ..> solar
+    DaylightProgram ..> looks : kLookOf
+    DaylightProgram ..> gate : kGate
+    looks ..> solar
+    StatusModel ..> gate : gate open
     StatusModel ..> solar : day info
     SkyModel ..> solar : the forecast by hour
 ```
@@ -746,7 +765,7 @@ sequenceDiagram
 
     CK->>PH: ProgramTick(time, 60 s)
     loop each bulb
-        PH->>PH: wallState / workState, then peak %
+        PH->>PH: show(its look), through the gate, then peak %
         PH->>LO: LightTarget(role, state, 60 s)
         alt address known, reachable, something changed
             LO->>ZA: SetLight(only the changed fields)
@@ -954,5 +973,6 @@ crash.
   today's rates.
 - `DevicesUpdated` (~250 B) now sets every `Event`'s size; share it like
   `StatusChanged` if events grow further.
-- A presence sensor is planned to replace the fixed active window; the gate
-  in `DaylightSchedule` is the place it plugs in.
+- A presence sensor is planned to replace the fixed active window: a
+  `Presence` rule in the gate (`ev::kGate`, `installation.cppm`), before or
+  after the `Window`, depending on which should take precedence.

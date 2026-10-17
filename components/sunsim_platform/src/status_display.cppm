@@ -183,8 +183,8 @@ void render(Ui &ui, const ev::StatusSnapshot &st)
 
     switch (st.mode) {
     case ev::Mode::Daylight:
-        lv_label_set_text(ui.mode, st.in_active_window ? "daylight" : "idle");
-        lv_obj_set_style_text_color(ui.mode, lv_color_hex(st.in_active_window ? 0xffd27f : 0x888888), 0);
+        lv_label_set_text(ui.mode, st.gate_open ? "daylight" : "idle");
+        lv_obj_set_style_text_color(ui.mode, lv_color_hex(st.gate_open ? 0xffd27f : 0x888888), 0);
         break;
     case ev::Mode::Off:
         lv_label_set_text(ui.mode, "off");

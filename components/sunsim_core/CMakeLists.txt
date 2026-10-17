@@ -6,6 +6,7 @@
 # module's interface), each a class's declaration and its definitions.
 set(modules "src/core.cppm"
             "src/device_registry.cppm"
+            "src/gate.cppm"
             "src/light_output.cppm"
             "src/math/day_info.cppm"
             "src/math/daylight.cppm"

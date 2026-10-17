@@ -558,7 +558,7 @@ int cmdStatus(Console &console, int, char **)
 
     std::print("mode    {}", ev::modeName(st->mode));
     if (st->mode == ev::Mode::Daylight) {
-        std::print(" - {}", st->in_active_window ? "in active hours" : "outside active hours, lights off");
+        std::print(" - {}", st->gate_open ? "lights may be on (gate open)" : "lights off (gate shut)");
     }
     std::println();
 

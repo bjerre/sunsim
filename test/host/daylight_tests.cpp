@@ -29,6 +29,62 @@ void daylightTests()
         }
     });
 
+    test("the gate: the active hours fade at each edge; the first rule with an answer decides", [] {
+        const ProgramConfig c; // 08:00-19:00, Monday to Friday, 10 min fades
+        CHECK(core::openness(kGate, noon(), c) == 1.0);
+        CHECK(core::openness(kGate, at(7h + 59min), c) == 0.0);
+        CHECK(std::abs(core::openness(kGate, at(8h + 5min), c) - 0.5) < 1e-9);
+        CHECK(std::abs(core::openness(kGate, at(18h + 55min), c) - 0.5) < 1e-9);
+        TimeReading saturday = noon();
+        saturday.local += std::chrono::days{4};
+        CHECK(core::openness(kGate, saturday, c) == 0.0);
+
+        const Window nine_to_five{.hours = DaySpan{9h, 17h}};
+        CHECK(core::openness(Gate{}, noon(), c) == 0.0); // no rule answers: off
+        CHECK(core::openness(Gate{Always{}}, at(3h), c) == 1.0);
+        // Only its "off": inside the hours the next rule decides.
+        const Gate closes{nine_to_five.closesOnly(), Window{.hours = DaySpan{12h, 13h}}};
+        CHECK(core::openness(closes, at(10h), c) == 0.0);
+        CHECK(core::openness(closes, at(12h + 30min), c) == 1.0);
+        CHECK(core::openness(closes, at(20h), c) == 0.0);
+        // Only its "on": outside the hours the next rule decides.
+        const Gate opens{nine_to_five.opensOnly(), Window{.hours = DaySpan{18h, 20h}}};
+        CHECK(core::openness(opens, at(10h), c) == 1.0);
+        CHECK(core::openness(opens, at(19h), c) == 1.0);
+        CHECK(core::openness(opens, at(21h), c) == 0.0);
+
+        // A setting, not a fixed value: it follows the config.
+        const Gate work{Window{.hours = &ProgramConfig::work}};
+        ProgramConfig late = c;
+        late.work          = DaySpan{13h, 22h};
+        CHECK(core::openness(work, at(10h), c) == 1.0 && core::openness(work, at(10h), late) == 0.0);
+    });
+
+    test("each light shows its declared look, faded by the gate", [] {
+        static_assert(std::ranges::all_of(members(Group::Wall),
+                                          [](Role r) { return std::holds_alternative<SunCurve>(kLookOf[r]); }));
+        static_assert(std::holds_alternative<WorkCurve>(kLookOf[kWork]));
+        constexpr auto swapped = looksOf(std::array{Shows{"wall", WorkCurve{}}, Shows{"WORK", SunCurve{}}});
+        static_assert(std::holds_alternative<WorkCurve>(swapped[kWallC]) &&
+                      std::holds_alternative<SunCurve>(swapped[kWork]));
+
+        Harness h;
+        h.tick();
+        const auto work = [&](const TimeReading &t) {
+            h.clearLog();
+            h.post(ProgramTick{.time = t, .transition = 60s});
+            const auto targets = h.all<LightTarget>();
+            const auto it      = std::ranges::find(targets, kWork, &LightTarget::role);
+            return it == targets.end() ? LightState{.level = 99} : it->state;
+        };
+        const LightState before = work(at(7h + 30min));
+        const LightState fading = work(at(8h + 5min));
+        const LightState full   = work(at(8h + 30min));
+        CHECK(!before.on);
+        CHECK(fading.on && full.on && fading.level < full.level && fading.level * 2 > full.level - 4);
+        CHECK(colorOf<Mireds>(full) && colorOf<Mireds>(full)->value == ProgramConfig{}.work_cool_mireds);
+    });
+
     test("intensity scales the target level; ProgramTick ramps over the interval", [] {
         Harness h;
         h.tick();

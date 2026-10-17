@@ -395,14 +395,15 @@ struct ProgramConfig {
     double  amber_kelvin         = 1800.0;
     uint8_t amber_sweep_deg      = 3; // 0-kMaxAmberSweepDeg
 
-    // Active window, shared by all bulbs: on only on active_days, in the
-    // active hours; fading in and out over `fade` at each edge.
+    // Active hours: the gate's window (ev::kGate) lets the lights be on only
+    // on active_days, in the active hours; fading in and out over `fade` at
+    // each edge.
     DaySpan              active{std::chrono::hours{8}, std::chrono::hours{19}};
     std::chrono::minutes fade{10};
     Weekdays             active_days = kMondayToFriday;
 
-    // Work light: cool -> warm (ease-in) across the core work hours, cool
-    // before them and warm after.
+    // Work light (ev::WorkCurve): cool -> warm (ease-in) across the core
+    // work hours, cool before them and warm after.
     DaySpan  work{std::chrono::minutes{8 * 60 + 30}, std::chrono::minutes{17 * 60 + 30}};
     uint16_t work_cool_mireds = 167; // ~6000K
     uint16_t work_warm_mireds = 333; // ~3000K
@@ -615,7 +616,7 @@ struct StatusSnapshot {
     TimeReading                           time{};
     DayInfo                               day{};
     Mode                                  mode             = Mode::Daylight;
-    bool                                  in_active_window = false;
+    bool                                  gate_open        = false; // ev::kGate lets the lights be on
     PerRole<DeviceStatus>                 devices{};
     DeviceRecords                         records{};
     std::optional<Role>                   armed;

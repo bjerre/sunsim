@@ -3,7 +3,7 @@ export module sunsim.core:status_model;
 import std.compat;
 import sunsim.ev;
 import :day_info;
-import :daylight;
+import :gate;
 
 export namespace sunsim::core {
 
@@ -64,7 +64,7 @@ void StatusModel::publish()
 {
     const ev::TimeReading &t = snap_.time;
     snap_.day              = computeDayInfo(t, snap_.config.latitude_deg, snap_.config.longitude_deg);
-    snap_.in_active_window = DaylightSchedule{snap_.config}.inActiveWindow(t);
+    snap_.gate_open        = openness(ev::kGate, t, snap_.config) > 0.0;
     post_(ev::StatusChanged{std::make_shared<const ev::StatusSnapshot>(snap_)});
 }
 

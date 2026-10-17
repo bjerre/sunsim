@@ -9,6 +9,7 @@ export import :day_info;
 export import :daylight;
 export import :daylight_program;
 export import :device_registry;
+export import :gate;
 export import :light_output;
 export import :mode_controller;
 export import :off_program;

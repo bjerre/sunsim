@@ -195,7 +195,7 @@ flowchart TB
     CFG["ProgramConfig<br/>location, window, shift, amber, clouds"]
     FC["CloudCover forecast<br/>(fetched each morning)"]
 
-    T & CFG --> G["activeGate<br/>0 outside days/hours, ramps over the fade"]
+    T & CFG --> G["openness(kGate)<br/>0 outside days/hours, ramps over the fade"]
     T & CFG --> ST["computeSunTimes<br/>sunrise, sunset"]
     T & CFG --> SP["computeSunPosition<br/>azimuth, elevation"]
     T & FC --> CC["c = cloudCover(forecast, time)<br/>0 clear ... 1 overcast"]
@@ -224,7 +224,7 @@ flowchart TB
 The work light skips the sun: its level is `gate * max_level` and its
 color follows the work hours (below).
 
-### Wall bulbs (`DaylightSchedule::wallState`)
+### Wall bulbs (`show(SunCurve)`)
 
 The window the half-sine curve runs across is now the **real** sunrise/
 sunset for the configured location and date, not a fixed clock-time guess.
@@ -242,8 +242,8 @@ level  = round(gate · direction · b · max_level), floored to min_level
 mireds = round(warm_mireds - b · (warm_mireds - cool_mireds))
 ```
 
-(`gate` is the active window, below; `direction` the sun's side of the
-wall, next.)
+(`gate` is how open the gate is, below: `DaylightProgram` applies it to
+what the look shows; `direction` is the sun's side of the wall, next.)
 
 `b` is a half-sine: it starts and ends at 0 (sunrise/sunset) and peaks at 1
 exactly at the window's midpoint ("solar noon" for that day's actual window
@@ -304,11 +304,11 @@ Planckian-locus approximation) instead; the rest of the day stays in
 color-temperature mode, which renders whites with the dedicated white
 LEDs. On a winter weekday this is visible from ~15:40 to sunset (~16:22).
 
-### Work bulb (`DaylightSchedule::workState`)
+### Work bulb (`show(WorkCurve)`)
 
-Bright, and **cool to warm** across the core work hours (`work`, a
-`DaySpan`, default 08:30-17:30, inside the longer 08:00-19:00
-active window it's on for) rather than tied to the sun: cool, blue-rich light in the morning supports alertness and
+Bright, and **cool to warm** across the core work hours (the
+`WorkCurve`'s hours: the `workhours` setting, default 08:30-17:30, inside
+the longer 08:00-19:00 active hours it's on for) rather than tied to the sun: cool, blue-rich light in the morning supports alertness and
 circadian entrainment, while blue-rich light in the evening suppresses
 melatonin and delays sleep (cf. the evening-light guidance in Brown et
 al., PLOS Biology 2022). With `p` the progress through the work hours (so it holds cool before
@@ -402,13 +402,21 @@ turn off. Find the minimums with tuning mode (`TuningProgram`: every bulb
 steady at its minimum in the sunset's amber; `tune <light> <level>`, then
 `tune save`). Color is untouched; red alert is not scaled.
 
-### Active window (`DaylightSchedule::activeGate`)
+### The gate: when the lights may be on (`ev::kGate`, `core::openness`)
 
-Both bulb types are gated by one shared window, set with the `config`
-console command and persisted in NVS (`platform::SettingsStore`):
-on only on `active_days` (a `Weekdays` set, default Mon–Fri) in the
-`active` hours (a `DaySpan`, default 08:00–19:00), off otherwise. Inside
-it, a gate factor ramps over `fade` (default 10 min) at each edge:
+What a light shows (its look) and when it may be on (the gate) are kept
+apart, so the gate can change without touching the light math. The gate
+is declared in `installation.cppm` as a list of rules. The first rule with
+an answer decides, and when none answers the lights are off. A rule can be
+limited to one answer (`opensOnly()`, `closesOnly()`), leaving the other
+case to the rules after it, so a future presence rule can take precedence
+over the hours, or the other way around.
+
+Today the gate is one `Window` on the active hours, set with the `config`
+console command and persisted in NVS (`platform::SettingsStore`): on only
+on `active_days` (a `Weekdays` set, default Mon–Fri) in the `active` hours
+(a `DaySpan`, default 08:00–19:00), off otherwise. Inside it, the gate
+ramps over `fade` (default 10 min) at each edge:
 
 ```
 gate = 0                                               outside days/hours

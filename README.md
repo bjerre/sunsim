@@ -344,7 +344,9 @@ tests' `check.h`; logging is `ev::log::info(tag, "{}", ...)`, std::format
 strings checked at compile time.
 
 - `components/sunsim_events/` (`sunsim::ev`, module `sunsim.ev`) - the
-  shared vocabulary: value types (`types.cppm`), every event
+  shared vocabulary: value types (`types.cppm`), the room
+  (`installation.cppm`: what each light shows and when the lights may be
+  on, in `topology.cppm`'s words), every event
   (`events.cppm`), the settings table (`settings.cppm`: what `config`
   shows and takes, and the NVS key of each), the `EventBus` (`bus.cppm`), coroutine flows
   (`flow.cppm`: `Flow`, `Timer`, `Inbox`), and `BootClock::now()`.
@@ -355,8 +357,8 @@ strings checked at compile time.
   - `programs/` - the lighting programs, one per mode:
     - `program.cppm` - the interface every program implements (what each bulb
       should show); `program_host.cppm` runs the selected one.
-    - `daylight_program.cppm` - sun curve, work light, active window, sun
-      shift, amber, cloud cover, per-light minimum-to-peak range, clock guard.
+    - `daylight_program.cppm` - each light's look through the gate, the
+      per-light minimum-to-peak range, the clock guard.
     - `red_alert_program.cppm`, `off_program.cppm`, `tuning_program.cppm` -
       the other modes.
   - `overlays.cppm` - the weather lights: between the programs and the
@@ -366,8 +368,10 @@ strings checked at compile time.
   - `status_model.cppm` - the snapshot shown by `status` and the display.
   - `sky_model.cppm` - what the sky is now (forecast, live conditions and
     alerts while they count), posted as `SkyChanged`.
-  - `math/` - `daylight.cppm`, `solar.cppm`, `sky.cppm` (the forecast's
-    cloud cover by hour), `day_info.cppm`: the pure math.
+  - `gate.cppm` - how open the gate is: when the lights may be on.
+  - `math/` - `daylight.cppm` (what each look shows), `solar.cppm`,
+    `sky.cppm` (the forecast's cloud cover by hour), `day_info.cppm`: the
+    pure math.
   - `core.cppm` - `CoreModules` and `wireCore()`, which attaches them to the bus.
 - `components/sunsim_weather/` (`sunsim::weather`, module `sunsim.weather`)
   - reading the weather services' replies as they stream in, pure C++

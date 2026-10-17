@@ -13,43 +13,45 @@ using ev::LightState;
 // below most bulbs' ~2700K color-temperature floor.
 [[nodiscard]] ev::Xy planckianXy(double kelvin) noexcept;
 
-// Astronomical daylight model for the wall bulbs: warm and dim at the real
-// sunrise/sunset for a configured location, brightest and coolest (bluest)
-// at the window's midpoint ("solar noon"); a cool-to-warm work light that
-// tracks the work day rather than the sun (bright and cool in the morning,
-// warm by evening). Both only run inside the active window
-// (work days and hours, see Config). See :solar for the
-// sunrise/sunset calculation and DESIGN.md for the full math.
-class DaylightSchedule {
-public:
-    // All tunables live in ev::ProgramConfig (shared with settings/console).
-    using Config = ev::ProgramConfig;
-
-    constexpr DaylightSchedule() noexcept : config_{} {}
-    explicit constexpr DaylightSchedule(Config config) noexcept : config_(config) {}
-
-    // `time` carries the local civil UTC offset in effect (DST included;
-    // see platform::Clock for how it's derived), which the sun's position
-    // needs. wall_position: where the bulb sits along the (south) wall, +1 = east
-    // end, 0 = middle, -1 = west end; drives the sun-direction dimming and
-    // the amber sweep. cloud: the cloud cover now, 0 (clear) to 1 (overcast).
-    [[nodiscard]] LightState wallState(const ev::TimeReading &time, double wall_position = 0.0,
-                                       double cloud = 0.0) const noexcept;
-    [[nodiscard]] LightState workState(const ev::TimeReading &time) const noexcept;
-
-    // True inside the active window (lights may be on), including its fades.
-    [[nodiscard]] bool inActiveWindow(const ev::TimeReading &time) const noexcept { return activeGate(time) > 0.0; }
-
-    [[nodiscard]] const Config &config() const noexcept { return config_; }
-    void setConfig(const Config &config) noexcept { config_ = config; }
-
-private:
-    // 0 = off (outside active days/hours), 1 = full curve, ramping between
-    // the two across the fade at each edge of the active window.
-    [[nodiscard]] double activeGate(const ev::TimeReading &time) const noexcept;
-
-    Config config_;
+// What a look sees: the settings, the time, and where the light is.
+struct LookContext {
+    const ev::ProgramConfig &config;
+    // Carries the local civil UTC offset in effect (DST included; see
+    // platform::Clock for how it's derived), which the sun's position needs.
+    ev::TimeReading time;
+    // Along its group, as the group is lettered: +1 the first (for the wall:
+    // the east end), 0 the middle, -1 the last.
+    double position = 0.0;
+    double cloud    = 0.0; // the cloud cover now, 0 (clear) to 1 (overcast)
 };
+
+// What each look (ev::Look) shows, from min_level to max_level: ungated, as
+// if the lights may be on (the gate decides whether they are). See
+// DESIGN.md for the math.
+
+// The sun's curve for the configured location: warm and dim at the real
+// sunrise and sunset, brightest and coolest at solar noon, off at night;
+// dimming away from the sun along the wall, amber while the sun is low,
+// flattened by cloud. See :solar for the sun's times and position.
+[[nodiscard]] LightState show(const ev::SunCurve &curve, const LookContext &ctx) noexcept;
+
+// Cool to warm across the curve's hours, at full brightness.
+[[nodiscard]] LightState show(const ev::WorkCurve &curve, const LookContext &ctx) noexcept;
+
+// Something that can be a Look: it has a show().
+template <class L>
+concept Showable = requires(const L &look, const LookContext &ctx) {
+    { show(look, ctx) } -> std::same_as<LightState>;
+};
+static_assert([]<class... L>(std::type_identity<std::variant<L...>>) { return (Showable<L> && ...); }(
+                  std::type_identity<ev::Look>{}),
+              "every ev::Look needs a show()");
+
+// What `look` shows.
+[[nodiscard]] inline LightState show(const ev::Look &look, const LookContext &ctx) noexcept
+{
+    return std::visit([&](const auto &l) { return show(l, ctx); }, look);
+}
 
 } // namespace sunsim::core
 
@@ -79,36 +81,19 @@ ev::Xy planckianXy(double kelvin) noexcept
     return {.x = static_cast<float>(x), .y = static_cast<float>(y)};
 }
 
-double DaylightSchedule::activeGate(const ev::TimeReading &time) const noexcept
+LightState show(const ev::SunCurve &, const LookContext &ctx) noexcept
 {
-    const std::chrono::seconds now = time.sinceMidnight();
-    if (!config_.active_days.contains(time.weekday()) || !config_.active.contains(now)) {
-        return 0.0;
-    }
-    if (config_.fade <= std::chrono::minutes{0}) {
-        return 1.0;
-    }
-    // How far into the fade at either edge, 0 to 1 and beyond.
-    const auto fade_in  = std::chrono::duration<double>{now - config_.active.start} / config_.fade;
-    const auto fade_out = std::chrono::duration<double>{config_.active.end - now} / config_.fade;
-    return std::fmin(1.0, std::fmin(fade_in, fade_out));
-}
+    const ev::ProgramConfig &c    = ctx.config;
+    const ev::TimeReading   &time = ctx.time;
 
-LightState DaylightSchedule::wallState(const ev::TimeReading &time, double wall_position, double cloud) const noexcept
-{
     // Clouds make the light diffuse: dimmer, cooler, no sun direction and
     // no golden glow, each in proportion to the cover.
-    const double overcast = config_.clouds_enabled ? std::clamp(cloud, 0.0, 1.0) : 0.0;
-
-    const double gate = activeGate(time);
-    if (gate <= 0.0) {
-        return {}; // off
-    }
+    const double overcast = c.clouds_enabled ? std::clamp(ctx.cloud, 0.0, 1.0) : 0.0;
 
     const ev::Hours now{time.sinceMidnight()};
     const ev::Hours utc_offset{time.utc_offset};
     const int       day_of_year = time.dayOfYear();
-    const SunTimes  sun = computeSunTimes(config_.latitude_deg, config_.longitude_deg, day_of_year, utc_offset);
+    const SunTimes  sun = computeSunTimes(c.latitude_deg, c.longitude_deg, day_of_year, utc_offset);
 
     const double hour    = now.count();
     double       sunrise = sun.sunrise.count();
@@ -136,59 +121,52 @@ LightState DaylightSchedule::wallState(const ev::TimeReading &time, double wall_
     // bulb is from it: 0 under the sun, 1 at the opposite end. Bulbs further
     // away dim, by up to sun_shift_percent.
     const SunPosition pos =
-        computeSunPosition(config_.latitude_deg, config_.longitude_deg, day_of_year, now, utc_offset);
+        computeSunPosition(c.latitude_deg, c.longitude_deg, day_of_year, now, utc_offset);
     const double sun_x     = std::sin(pos.azimuth_deg * std::numbers::pi / 180.0);
-    const double away      = std::fabs(wall_position - sun_x) / 2.0;
-    const double direction = 1.0 - (config_.sun_shift_percent / 100.0) * away * (1.0 - overcast);
-    const double sky       = 1.0 - (config_.cloud_dim_percent / 100.0) * overcast;
+    const double away      = std::fabs(ctx.position - sun_x) / 2.0;
+    const double direction = 1.0 - (c.sun_shift_percent / 100.0) * away * (1.0 - overcast);
+    const double sky       = 1.0 - (c.cloud_dim_percent / 100.0) * overcast;
 
-    uint8_t level = static_cast<uint8_t>(std::lround(gate * direction * sky * brightness * config_.max_level));
-    if (level < config_.min_level) {
-        level = config_.min_level;
+    uint8_t level = static_cast<uint8_t>(std::lround(direction * sky * brightness * c.max_level));
+    if (level < c.min_level) {
+        level = c.min_level;
     }
 
-    const double sun_mireds = config_.warm_mireds - brightness * (config_.warm_mireds - config_.cool_mireds);
+    const double sun_mireds = c.warm_mireds - brightness * (c.warm_mireds - c.cool_mireds);
     const auto   mireds     = static_cast<uint16_t>(std::lround(
-        sun_mireds + (config_.cool_mireds - sun_mireds) * (config_.cloud_cool_percent / 100.0) * overcast));
+        sun_mireds + (c.cool_mireds - sun_mireds) * (c.cloud_cool_percent / 100.0) * overcast));
 
     LightState state{.on = true, .level = level, .color = ev::Mireds{mireds}};
 
     // The amber glow follows the sun: bulbs further away see it as if it
     // were up to amber_sweep_deg higher, so they turn amber later and less.
-    const double amber_elevation = pos.elevation_deg + config_.amber_sweep_deg * away;
-    if (config_.amber_enabled && config_.golden_elevation_deg > 0.0 &&
-        amber_elevation < config_.golden_elevation_deg) {
+    const double amber_elevation = pos.elevation_deg + c.amber_sweep_deg * away;
+    if (c.amber_enabled && c.golden_elevation_deg > 0.0 &&
+        amber_elevation < c.golden_elevation_deg) {
         // 0 at golden_elevation_deg, 1 at (or below) the horizon.
         const double golden =
-            std::fmin(1.0, (config_.golden_elevation_deg - amber_elevation) / config_.golden_elevation_deg) *
+            std::fmin(1.0, (c.golden_elevation_deg - amber_elevation) / c.golden_elevation_deg) *
             (1.0 - overcast); // no glow under a gray sky
-        const double amber_mireds = 1e6 / config_.amber_kelvin;
+        const double amber_mireds = 1e6 / c.amber_kelvin;
         const double m            = mireds + golden * (amber_mireds - mireds);
         state.color               = planckianXy(1e6 / m);
     }
     return state;
 }
 
-LightState DaylightSchedule::workState(const ev::TimeReading &time) const noexcept
+LightState show(const ev::WorkCurve &curve, const LookContext &ctx) noexcept
 {
-    const double gate = activeGate(time);
-    if (gate <= 0.0) {
-        return {}; // off
-    }
-    uint8_t level = static_cast<uint8_t>(std::lround(gate * config_.max_level));
-    if (level < config_.min_level) {
-        level = config_.min_level;
-    }
+    const ev::DaySpan hours = curve.hours(ctx.config);
+    const double      cool  = curve.cool(ctx.config);
+    const double      warm  = curve.warm(ctx.config);
 
-    // How far through the work hours, 0 to 1.
+    // How far through the hours, 0 to 1.
     const double progress = std::clamp(
-        std::chrono::duration<double>{time.sinceMidnight() - config_.work.start} / (config_.work.end - config_.work.start),
-        0.0, 1.0);
-    const double warmth   = progress * progress; // ease-in: stays cool through the morning
-    const auto   mireds   = static_cast<uint16_t>(
-        std::lround(config_.work_cool_mireds + warmth * (config_.work_warm_mireds - config_.work_cool_mireds)));
+        std::chrono::duration<double>{ctx.time.sinceMidnight() - hours.start} / (hours.end - hours.start), 0.0, 1.0);
+    const double warmth = progress * progress; // ease-in: stays cool through the morning
+    const auto   mireds = static_cast<uint16_t>(std::lround(cool + warmth * (warm - cool)));
 
-    return {.on = true, .level = level, .color = ev::Mireds{mireds}};
+    return {.on = true, .level = ctx.config.max_level, .color = ev::Mireds{mireds}};
 }
 
 } // namespace sunsim::core

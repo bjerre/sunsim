@@ -10,8 +10,10 @@ set(modules "src/ev.cppm"
             "src/bus.cppm"
             "src/events.cppm"
             "src/flow.cppm"
+            "src/installation.cppm"
             "src/log.cppm"
             "src/settings.cppm"
+            "src/topology.cppm"
             "src/types.cppm")
 
 idf_component_register(SRCS ${modules}
