@@ -310,8 +310,7 @@ classDiagram
         -MinLevels min_levels_
         -uint8 cloud_percent_
         +on(SkyChanged)
-        -gated(state, open) LightState
-        -outputLevel(role, level) uint8
+        -levelFor(role, brightness) uint8
     }
     class TuningProgram {
         -MinLevels min_levels_
@@ -326,9 +325,9 @@ classDiagram
     }
     class looks {
         <<functions>>
-        show(SunCurve, LookContext) LightState
-        show(WorkCurve, LookContext) LightState
-        show(Look, LookContext) LightState
+        show(SunCurve, LookContext) optional~Glow~
+        show(WorkCurve, LookContext) optional~Glow~
+        show(Look, LookContext) optional~Glow~
     }
     class gate {
         <<functions>>

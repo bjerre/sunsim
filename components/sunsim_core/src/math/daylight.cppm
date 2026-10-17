@@ -6,8 +6,6 @@ import :solar;
 
 export namespace sunsim::core {
 
-using ev::LightState;
-
 // CIE 1931 xy of a blackbody at `kelvin` (Kim et al. cubic spline
 // approximation of the Planckian locus, valid 1667-25000K): for colors
 // below most bulbs' ~2700K color-temperature floor.
@@ -25,30 +23,36 @@ struct LookContext {
     double cloud    = 0.0; // the cloud cover now, 0 (clear) to 1 (overcast)
 };
 
-// What each look (ev::Look) shows, from min_level to max_level: ungated, as
-// if the lights may be on (the gate decides whether they are). See
-// DESIGN.md for the math.
+// What a look shows while it's on: how bright, as a fraction of the light's
+// own range (0: its minimum level, 1: its peak), and in what color.
+struct Glow {
+    double    brightness = 0.0;
+    ev::Color color      = ev::Mireds{};
+};
+
+// What each look (ev::Look) shows (nullopt: off): ungated, as if the light
+// may be on; the gate decides whether it is. See DESIGN.md for the math.
 
 // The sun's curve for the configured location: warm and dim at the real
 // sunrise and sunset, brightest and coolest at solar noon, off at night;
 // dimming away from the sun along the wall, amber while the sun is low,
 // flattened by cloud. See :solar for the sun's times and position.
-[[nodiscard]] LightState show(const ev::SunCurve &curve, const LookContext &ctx) noexcept;
+[[nodiscard]] std::optional<Glow> show(const ev::SunCurve &curve, const LookContext &ctx) noexcept;
 
 // Cool to warm across the curve's hours, at full brightness.
-[[nodiscard]] LightState show(const ev::WorkCurve &curve, const LookContext &ctx) noexcept;
+[[nodiscard]] std::optional<Glow> show(const ev::WorkCurve &curve, const LookContext &ctx) noexcept;
 
 // Something that can be a Look: it has a show().
 template <class L>
 concept Showable = requires(const L &look, const LookContext &ctx) {
-    { show(look, ctx) } -> std::same_as<LightState>;
+    { show(look, ctx) } -> std::same_as<std::optional<Glow>>;
 };
 static_assert([]<class... L>(std::type_identity<std::variant<L...>>) { return (Showable<L> && ...); }(
                   std::type_identity<ev::Look>{}),
               "every ev::Look needs a show()");
 
 // What `look` shows.
-[[nodiscard]] inline LightState show(const ev::Look &look, const LookContext &ctx) noexcept
+[[nodiscard]] inline std::optional<Glow> show(const ev::Look &look, const LookContext &ctx) noexcept
 {
     return std::visit([&](const auto &l) { return show(l, ctx); }, look);
 }
@@ -81,7 +85,7 @@ ev::Xy planckianXy(double kelvin) noexcept
     return {.x = static_cast<float>(x), .y = static_cast<float>(y)};
 }
 
-LightState show(const ev::SunCurve &, const LookContext &ctx) noexcept
+std::optional<Glow> show(const ev::SunCurve &, const LookContext &ctx) noexcept
 {
     const ev::ProgramConfig &c    = ctx.config;
     const ev::TimeReading   &time = ctx.time;
@@ -127,16 +131,11 @@ LightState show(const ev::SunCurve &, const LookContext &ctx) noexcept
     const double direction = 1.0 - (c.sun_shift_percent / 100.0) * away * (1.0 - overcast);
     const double sky       = 1.0 - (c.cloud_dim_percent / 100.0) * overcast;
 
-    uint8_t level = static_cast<uint8_t>(std::lround(direction * sky * brightness * c.max_level));
-    if (level < c.min_level) {
-        level = c.min_level;
-    }
-
     const double sun_mireds = c.warm_mireds - brightness * (c.warm_mireds - c.cool_mireds);
     const auto   mireds     = static_cast<uint16_t>(std::lround(
         sun_mireds + (c.cool_mireds - sun_mireds) * (c.cloud_cool_percent / 100.0) * overcast));
 
-    LightState state{.on = true, .level = level, .color = ev::Mireds{mireds}};
+    Glow glow{.brightness = direction * sky * brightness, .color = ev::Mireds{mireds}};
 
     // The amber glow follows the sun: bulbs further away see it as if it
     // were up to amber_sweep_deg higher, so they turn amber later and less.
@@ -149,12 +148,12 @@ LightState show(const ev::SunCurve &, const LookContext &ctx) noexcept
             (1.0 - overcast); // no glow under a gray sky
         const double amber_mireds = 1e6 / c.amber_kelvin;
         const double m            = mireds + golden * (amber_mireds - mireds);
-        state.color               = planckianXy(1e6 / m);
+        glow.color                = planckianXy(1e6 / m);
     }
-    return state;
+    return glow;
 }
 
-LightState show(const ev::WorkCurve &curve, const LookContext &ctx) noexcept
+std::optional<Glow> show(const ev::WorkCurve &curve, const LookContext &ctx) noexcept
 {
     const ev::DaySpan hours = curve.hours(ctx.config);
     const double      cool  = curve.cool(ctx.config);
@@ -166,7 +165,7 @@ LightState show(const ev::WorkCurve &curve, const LookContext &ctx) noexcept
     const double warmth = progress * progress; // ease-in: stays cool through the morning
     const auto   mireds = static_cast<uint16_t>(std::lround(cool + warmth * (warm - cool)));
 
-    return {.on = true, .level = ctx.config.max_level, .color = ev::Mireds{mireds}};
+    return Glow{.brightness = 1.0, .color = ev::Mireds{mireds}};
 }
 
 } // namespace sunsim::core

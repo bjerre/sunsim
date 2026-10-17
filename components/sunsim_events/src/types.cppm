@@ -413,8 +413,6 @@ struct ProgramConfig {
     double   longitude_deg = 0.0; // degrees East (negative = West); 0 = Greenwich
     uint16_t warm_mireds   = 370; // ~2700K
     uint16_t cool_mireds   = 153; // ~6500K
-    uint8_t  min_level     = 1;
-    uint8_t  max_level     = 254;
 
     // Sun direction along the wall: the wall bulbs sit east-to-west on a
     // south wall; the one nearest the sun's east-west position gets the full

@@ -27,8 +27,7 @@ public:
 
 private:
     void emit(ev::Role role, const ev::TimeReading &time, ev::Transition transition);
-    [[nodiscard]] ev::LightState gated(ev::LightState state, double open) const noexcept;
-    [[nodiscard]] uint8_t outputLevel(ev::Role role, uint8_t level) const noexcept;
+    [[nodiscard]] uint8_t levelFor(ev::Role role, double brightness) const noexcept;
 
     ev::ProgramConfig config_{};
     ev::Peaks         peaks_         = ev::kDefaultPeaks;
@@ -77,47 +76,32 @@ void DaylightProgram::on(const ev::ConfigChanged &e)
     min_levels_ = e.min_levels;
 }
 
-// The look's level (min_level..max_level) mapped onto the light's own
-// range: its minimum level (the lowest it visibly shows) up to its peak. So
-// a light stays lit, dimly, until the curve really ends at sunset.
-uint8_t DaylightProgram::outputLevel(ev::Role role, uint8_t level) const noexcept
+// A brightness (0-1) on the light's own range: its minimum level (the
+// lowest it visibly shows) up to its peak. So a light stays lit, dimly,
+// until the curve really ends at sunset.
+uint8_t DaylightProgram::levelFor(ev::Role role, double brightness) const noexcept
 {
     const double top   = std::max(1.0, ev::kMaxLevel * peaks_[role] / 100.0);
     const double floor = std::min<double>(min_levels_[role], top);
-    const double span  = std::max(1, config_.max_level - config_.min_level);
-    const double f     = std::clamp((level - config_.min_level) / span, 0.0, 1.0);
-    return static_cast<uint8_t>(std::lround(floor + (top - floor) * f));
-}
-
-// The look's state through a gate this open: off when it's shut, dimmed
-// while it fades (never below min_level).
-ev::LightState DaylightProgram::gated(ev::LightState state, double open) const noexcept
-{
-    if (open <= 0.0) {
-        return {};
-    }
-    if (state.on) {
-        state.level = std::max(config_.min_level, static_cast<uint8_t>(std::lround(state.level * std::fmin(open, 1.0))));
-    }
-    return state;
+    return static_cast<uint8_t>(std::lround(floor + (top - floor) * std::clamp(brightness, 0.0, 1.0)));
 }
 
 void DaylightProgram::emit(ev::Role role, const ev::TimeReading &time, ev::Transition transition)
 {
     ev::LightState state{};
     if (time.valid) {
-        clock_warned_ = false;
-        state         = gated(show(ev::kLookOf[role], {.config   = config_,
-                                                       .time     = time,
-                                                       .position = positionInGroup(role),
-                                                       .cloud    = cloud_percent_ / 100.0}),
-                              openness(ev::spec(zone()).gate, time, config_));
+        clock_warned_     = false;
+        const double open = openness(ev::spec(zone()).gate, time, config_);
+        const auto   glow = show(ev::kLookOf[role], {.config   = config_,
+                                                     .time     = time,
+                                                     .position = positionInGroup(role),
+                                                     .cloud    = cloud_percent_ / 100.0});
+        if (glow && open > 0.0) {
+            state = {.on = true, .level = levelFor(role, glow->brightness * open), .color = glow->color};
+        }
     } else if (!clock_warned_) {
         clock_warned_ = true;
         ev::log::warn(kTag, "Clock not set yet (no time sync) - holding lights off");
-    }
-    if (state.on) {
-        state.level = outputLevel(role, state.level);
     }
     target(role, state, transition);
 }
