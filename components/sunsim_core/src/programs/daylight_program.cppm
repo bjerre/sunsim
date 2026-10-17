@@ -10,7 +10,7 @@ export namespace sunsim::core {
 
 // The normal program: each light shows its look (ev::kLookOf: the wall's
 // sun curve, with the cloud cover live, else forecast; the work light's
-// cool -> warm day) while the gate (ev::kGate: the active hours) lets it,
+// cool -> warm day) while its zone's gate (the active hours) lets it,
 // across the light's range from its minimum level to its peak intensity.
 // Every ProgramTick ramps over the update interval; refreshes and setting
 // changes re-apply at once with a quick transition. Until the clock has been set (no SNTP yet) every bulb
@@ -111,7 +111,7 @@ void DaylightProgram::emit(ev::Role role, const ev::TimeReading &time, ev::Trans
                                                        .time     = time,
                                                        .position = positionInGroup(role),
                                                        .cloud    = cloud_percent_ / 100.0}),
-                              openness(ev::kGate, time, config_));
+                              openness(ev::spec(zone()).gate, time, config_));
     } else if (!clock_warned_) {
         clock_warned_ = true;
         ev::log::warn(kTag, "Clock not set yet (no time sync) - holding lights off");

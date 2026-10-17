@@ -118,6 +118,13 @@ constexpr uint8_t kLightCtrlEp = 1;
 // physical button controller so its presses arrive here.
 constexpr uint8_t kButtonRxEp = 2;
 
+// The button: there's one at most (ev::kLayout checks), and it's the one
+// whose presses arrive. (With none, none arrive: any role will do.)
+constexpr ev::Role kButton = [] {
+    const auto button = std::ranges::find_if(ev::kRoles, ev::isButton);
+    return button == ev::kRoles.end() ? ev::kRoles.front() : *button;
+}();
+
 constexpr uint32_t kPrimaryChannelMask   = 1U << CONFIG_SUNSIM_PRIMARY_CHANNEL;
 constexpr uint32_t kSecondaryChannelMask = CONFIG_SUNSIM_SECONDARY_CHANNEL_MASK;
 
@@ -375,7 +382,10 @@ void ZigbeeAdapter::handleSignal(const ezb_app_signal_t *app_signal)
 
 void ZigbeeAdapter::pressed(ev::Press press)
 {
-    post_(ev::ButtonPressed{.press = press, .source = ev::Source::Zigbee, .at = ev::BootClock::now()});
+    post_(ev::ButtonPressed{.button = kButton,
+                            .press  = press,
+                            .source = ev::Source::Zigbee,
+                            .at     = ev::BootClock::now()});
 }
 
 // Buttons that do send to the bound receiver endpoint (kButtonRxEp).

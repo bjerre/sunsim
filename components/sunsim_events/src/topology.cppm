@@ -1,5 +1,6 @@
-// The words the room is described in (installation.cppm): what a light shows
-// (a Look) and when the lights may be on (a Gate). Plain data, like :types;
+// The words the room is described in (installation.cppm): which device is
+// which (Address), what a light shows (a Look), when the lights may be on (a
+// Gate), and the zones that tie them together. Plain data, like :types;
 // sunsim::core evaluates them.
 
 export module sunsim.ev:topology;
@@ -116,54 +117,11 @@ struct WorkCurve {
 
 using Look = std::variant<SunCurve, WorkCurve>;
 
-// What a group's lights, or one light, show.
+// What a group's lights, or one light, show (in a zone).
 struct Shows {
     std::string_view lights; // a group ("Wall") or one light ("Work"), any case
     Look             look;
 };
-
-namespace detail {
-// Not constexpr: reached while building kLookOf, they stop the compile, and
-// the error names them.
-inline void showsNamesNoLight() noexcept {}
-inline void showsGivesALookToAButton() noexcept {}
-inline void showsGivesALightTwoLooks() noexcept {}
-inline void aLightShowsNothing() noexcept {}
-} // namespace detail
-
-// Each light's look, from `shows`: a name the layout doesn't have, a light
-// given two looks or none, or a look on a button doesn't compile.
-template <std::ranges::input_range ShowsTable>
-[[nodiscard]] consteval PerRole<Look> looksOf(const ShowsTable &shows)
-{
-    PerRole<Look>  looks{};
-    PerRole<bool>  given{};
-    for (const Shows &s : shows) {
-        const auto selection = parseSelection(s.lights);
-        if (!selection) {
-            detail::showsNamesNoLight();
-        }
-        for (const Role role : kRoles) {
-            if (!selects(*selection, role)) {
-                continue;
-            }
-            if (!isLight(role)) {
-                detail::showsGivesALookToAButton();
-            }
-            if (given[role]) {
-                detail::showsGivesALightTwoLooks();
-            }
-            looks[role] = s.look;
-            given[role] = true;
-        }
-    }
-    for (const Role role : lights()) {
-        if (!given[role]) {
-            detail::aLightShowsNothing();
-        }
-    }
-    return looks;
-}
 
 // ---- Gates: when the lights may be on ---------------------------------------
 
@@ -202,5 +160,131 @@ constexpr Rule Window::closesOnly() const noexcept { return {*this, Says::OffOnl
 
 // The first rule with an answer decides; when none answers, the lights are off.
 using Gate = List<Rule, 4>;
+
+// ---- Zones: lights that share a mode, a gate and their buttons --------------
+
+// A zone, by its place in the zones table.
+struct ZoneId {
+    uint8_t index = 0;
+
+    // Spelled out, like DaySpan's: defaulted, GCC 15 crashes compiling a
+    // file that imports this and compares ZoneIds.
+    friend constexpr bool operator==(ZoneId a, ZoneId b) noexcept { return a.index == b.index; }
+};
+
+// What a button's presses choose for its zone; nullopt: that press does
+// nothing.
+struct Controls {
+    std::string_view    by; // a button: "Button", any case
+    std::optional<Mode> single = Mode::Daylight;
+    std::optional<Mode> twice  = Mode::RedAlert; // a double press
+    std::optional<Mode> hold   = Mode::Off;
+};
+
+// Lights that share a mode (chosen by their buttons, or the console) and a
+// gate. Each light is in exactly one zone; it starts in daylight.
+struct ZoneSpec {
+    std::string_view  name;
+    List<Shows, 8>    lights;
+    Gate              gate  = {Always{}};
+    List<Mode, 4>     modes = {Mode::Daylight, Mode::Off, Mode::RedAlert, Mode::Tuning}; // what it may run
+    List<Controls, 2> controls{};
+    bool              weather = false; // the weather lights (`config precip`, `alerts`) may be in it
+
+    [[nodiscard]] constexpr bool allows(Mode mode) const noexcept { return std::ranges::contains(modes, mode); }
+};
+
+// The zones table, per role: checked when it's built.
+struct Topology {
+    PerRole<std::optional<ZoneId>>   zone_of{};     // a light's zone, or the zone a button controls
+    PerRole<Look>                    look_of{};     // lights
+    PerRole<std::optional<Controls>> controls_of{}; // buttons that control a zone
+};
+
+namespace detail {
+// Not constexpr: reached while building a Topology, they stop the compile,
+// and the error names them.
+inline void twoZonesShareAName() noexcept {}
+inline void aZoneHasNoLights() noexcept {}
+inline void aZoneHasNoGate() noexcept {}
+inline void aZoneCantRunDaylight() noexcept {}
+inline void showsNamesNoLight() noexcept {}
+inline void showsGivesALookToAButton() noexcept {}
+inline void aLightIsShownTwice() noexcept {}
+inline void aLightIsInNoZone() noexcept {}
+inline void controlsNamesNoButton() noexcept {}
+inline void aButtonControlsTwice() noexcept {}
+inline void aButtonPicksAModeItsZoneCantRun() noexcept {}
+} // namespace detail
+
+// `zones` per role. Doesn't compile if two zones share a name; a zone has no
+// lights, no gate, or can't run daylight; a name in it isn't in the layout,
+// gives a button a look or a light a second one; a light is in no zone; or
+// a button is named twice, isn't a button, or picks a mode its zone can't run.
+template <std::ranges::input_range Zones> [[nodiscard]] consteval Topology topologyOf(const Zones &zones)
+{
+    Topology      t{};
+    PerRole<bool> shown{};
+    uint8_t       index = 0;
+    for (const ZoneSpec &zone : zones) {
+        const ZoneId id{index++};
+        for (const ZoneSpec &other : zones) {
+            if (&other != &zone && other.name == zone.name) {
+                detail::twoZonesShareAName();
+            }
+        }
+        if (zone.lights.empty()) {
+            detail::aZoneHasNoLights();
+        }
+        if (zone.gate.empty()) {
+            detail::aZoneHasNoGate();
+        }
+        if (!zone.allows(Mode::Daylight)) {
+            detail::aZoneCantRunDaylight();
+        }
+        for (const Shows &s : zone.lights) {
+            const auto selection = parseSelection(s.lights);
+            if (!selection) {
+                detail::showsNamesNoLight();
+            }
+            for (const Role role : kRoles) {
+                if (!selects(*selection, role)) {
+                    continue;
+                }
+                if (!isLight(role)) {
+                    detail::showsGivesALookToAButton();
+                }
+                if (shown[role]) {
+                    detail::aLightIsShownTwice();
+                }
+                shown[role]     = true;
+                t.look_of[role] = s.look;
+                t.zone_of[role] = id;
+            }
+        }
+        for (const Controls &c : zone.controls) {
+            const auto button = parseRole(c.by);
+            if (!button || !isButton(*button)) {
+                detail::controlsNamesNoButton();
+            }
+            if (t.controls_of[*button]) {
+                detail::aButtonControlsTwice();
+            }
+            for (const std::optional<Mode> &mode : {c.single, c.twice, c.hold}) {
+                if (mode && !zone.allows(*mode)) {
+                    detail::aButtonPicksAModeItsZoneCantRun();
+                }
+            }
+            t.controls_of[*button] = c;
+            t.zone_of[*button]     = id;
+        }
+    }
+    for (const Role role : lights()) {
+        if (!shown[role]) {
+            detail::aLightIsInNoZone();
+        }
+    }
+    return t;
+}
 
 } // namespace sunsim::ev

@@ -22,8 +22,9 @@ struct Pulse {
     friend constexpr bool operator==(const Pulse &, const Pulse &) noexcept = default;
 };
 
-// What the sky shows on `role`, if anything; pure. `lit`: the program has
-// the light on. On the alert lights, a warning shows in daylight and off
+// What the sky shows on `role`, if anything; pure. Only on lights the
+// weather may take (ev::takesWeather: color lights in a weather zone).
+// `lit`: the program has the light on; `mode`: its zone's. On the alert lights, a warning shows in daylight and off
 // modes whether lit or not (it's an alarm); an advisory or watch only on a
 // lit light in daylight mode. Failing that, on the precipitation lights,
 // rain or snow shows in daylight mode: dimmer if the light is otherwise off.
@@ -43,7 +44,7 @@ public:
 
     void on(const ev::LightTarget &e);
     void on(const ev::Tick &e);
-    void on(const ev::ModeChanged &e) { mode_ = e.mode; }
+    void on(const ev::ModeChanged &e) { modes_[e.zone] = e.mode; }
     void on(const ev::ConfigChanged &e);
     void on(const ev::SkyChanged &e);
 
@@ -57,14 +58,14 @@ private:
     void show(ev::Role role, const Pulse &pulse, bool bright);
     void release(ev::Role role);
 
-    ev::Post           post_;
-    ev::Sky            sky_{};
-    ev::Mode           mode_ = ev::Mode::Daylight;
-    ev::ProgramConfig  config_{};
-    ev::Peaks          peaks_      = ev::kDefaultPeaks;
-    ev::MinLevels      min_levels_ = ev::kDefaultMinLevels;
-    ev::PerRole<Light> lights_{};
-    uint32_t           ticks_ = 0;
+    ev::Post              post_;
+    ev::Sky               sky_{};
+    ev::PerZone<ev::Mode> modes_{}; // each zone's; Daylight, the first Mode, to start
+    ev::ProgramConfig     config_{};
+    ev::Peaks             peaks_      = ev::kDefaultPeaks;
+    ev::MinLevels         min_levels_ = ev::kDefaultMinLevels;
+    ev::PerRole<Light>    lights_{};
+    uint32_t              ticks_ = 0;
 };
 
 } // namespace sunsim::core
@@ -128,7 +129,7 @@ std::optional<Pulse> weatherPulse(ev::Role role, bool lit, ev::Mode mode, const 
 {
     const ev::AlertLevel                 alert = sky.alert();
     const std::optional<ev::Conditions> &now   = sky.conditions;
-    if (!config.weather_enabled || !ev::caps(role).color) { // a pulse is a saturated color
+    if (!config.weather_enabled || !ev::takesWeather(role)) {
         return std::nullopt;
     }
     const bool daylight = mode == ev::Mode::Daylight;
@@ -188,7 +189,7 @@ void Overlays::reconcile()
     for (const ev::Role role : ev::lights()) {
         Light     &light = lights_[role];
         const bool lit   = light.base && light.base->state.on;
-        const auto pulse = weatherPulse(role, lit, mode_, config_, sky_);
+        const auto pulse = weatherPulse(role, lit, modes_[*ev::kZoneOf[role]], config_, sky_);
         if (!pulse) {
             if (light.pulse) {
                 release(role);

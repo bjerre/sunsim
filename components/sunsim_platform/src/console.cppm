@@ -325,8 +325,9 @@ int cmdTune(Console &console, int argc, char **argv)
     if (!st) {
         return 1;
     }
-    const bool             tuning = st->mode == ev::Mode::Tuning;
-    const std::string_view what   = argc >= 2 ? argv[1] : "";
+    const bool tuning =
+        std::ranges::any_of(st->zones.items, [](const ev::ZoneStatus &z) { return z.mode == ev::Mode::Tuning; });
+    const std::string_view what = argc >= 2 ? argv[1] : "";
     if (argc == 1) {
         if (!tuning) {
             console.post(ev::ModeRequested{ev::Mode::Tuning});
@@ -387,7 +388,13 @@ int cmdPress(Console &console, int argc, char **argv)
         std::println("usage: press single|double|hold");
         return 1;
     }
-    console.post(ev::ButtonPressed{.press = press, .source = ev::Source::Console, .at = ev::BootClock::now()});
+    const auto button = std::ranges::find_if(ev::kRoles, ev::isButton);
+    if (button == ev::kRoles.end()) {
+        std::println("there's no button in the layout");
+        return 1;
+    }
+    console.post(ev::ButtonPressed{.button = *button, .press = press, .source = ev::Source::Console,
+                                   .at = ev::BootClock::now()});
     return 0;
 }
 
@@ -556,11 +563,18 @@ int cmdStatus(Console &console, int, char **)
         std::println("alert   {}", alert.event.data());
     }
 
-    std::print("mode    {}", ev::modeName(st->mode));
-    if (st->mode == ev::Mode::Daylight) {
-        std::print(" - {}", st->gate_open ? "lights may be on (gate open)" : "lights off (gate shut)");
+    for (const ev::ZoneId zone : ev::kZoneIds) {
+        const ev::ZoneStatus &z = st->zones[zone];
+        std::print("mode    ");
+        if (ev::kZoneCount > 1) {
+            std::print("{}: ", ev::spec(zone).name);
+        }
+        std::print("{}", ev::modeName(z.mode));
+        if (z.mode == ev::Mode::Daylight) {
+            std::print(" - {}", z.gate_open ? "lights may be on (gate open)" : "lights off (gate shut)");
+        }
+        std::println();
     }
-    std::println();
 
     for (const ev::Role role : ev::kRoles) {
         const ev::DeviceStatus &d = st->devices[role];

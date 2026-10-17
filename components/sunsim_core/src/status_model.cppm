@@ -41,7 +41,7 @@ void StatusModel::on(const ev::ConfigChanged &e)
 
 void StatusModel::on(const ev::ModeChanged &e)
 {
-    snap_.mode = e.mode;
+    snap_.zones[e.zone].mode = e.mode;
 }
 
 void StatusModel::on(const ev::DevicesUpdated &e)
@@ -63,8 +63,10 @@ void StatusModel::on(const ev::Tick &e)
 void StatusModel::publish()
 {
     const ev::TimeReading &t = snap_.time;
-    snap_.day              = computeDayInfo(t, snap_.config.latitude_deg, snap_.config.longitude_deg);
-    snap_.gate_open        = openness(ev::kGate, t, snap_.config) > 0.0;
+    snap_.day = computeDayInfo(t, snap_.config.latitude_deg, snap_.config.longitude_deg);
+    for (const ev::ZoneId zone : ev::kZoneIds) {
+        snap_.zones[zone].gate_open = openness(ev::spec(zone).gate, t, snap_.config) > 0.0;
+    }
     post_(ev::StatusChanged{std::make_shared<const ev::StatusSnapshot>(snap_)});
 }
 

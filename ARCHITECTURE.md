@@ -176,12 +176,18 @@ The rest of the room is data too, in `installation.cppm`, written in
 `topology.cppm`'s words. `kAddresses` gives roles' IEEE addresses, from
 the devices' labels, checked into `kAddressOf` (the `DeviceRegistry`
 gets it): a name that isn't one role, a role listed twice or an address
-given twice doesn't compile. `kShows` gives each light a look (a `Look`
-variant: `SunCurve`, `WorkCurve`), checked at compile time into
-`kLookOf`: a name the layout doesn't have, a light with two looks or none,
-or a look on a button doesn't compile. `kGate` says when the lights may be
-on: a list of rules (`Always`, `Window`), where the first rule with an
-answer decides. Their values are `Tunable`: fixed in the file, or a
+given twice doesn't compile. `kZones` groups the lights into zones: each
+zone gives its lights a look (a `Look` variant: `SunCurve`, `WorkCurve`),
+says when they may be on (its `Gate`: a list of rules, `Always` or
+`Window`, where the first rule with an answer decides), which modes it can
+run, which buttons choose its mode (`Controls`: what a single, double and
+held press pick) and whether the weather lights may be in it.
+`topologyOf()` checks it at compile time into `kZoneOf`, `kLookOf` and
+`kControlsOf`: two zones with one name; a zone with no lights, no gate or
+no daylight; a name the layout doesn't have; a light in two zones or none;
+a look on a button; a button named twice or picking a mode its zone can't
+run - none of these compile. Each zone runs its own mode: a red alert or
+a hold in one leaves the others alone. Their values are `Tunable`: fixed in the file, or a
 `ProgramConfig` field the console can change (`&ProgramConfig::active`).
 `core` evaluates them: `show()` per look (`daylight.cppm`), `openness()`
 for the gate (`gate.cppm`).
@@ -280,14 +286,13 @@ classDiagram
     }
     class ModeController {
         -Inbox~ButtonPressed~ presses_
-        -Flow flow_
-        +on(ButtonPressed)
+        -PerRole~Flow~ flows_ : one per button
+        +on(ButtonPressed / ModeRequested)
         +on(Tick)
-        -run() Flow
+        -run(button) Flow
     }
     class ProgramHost {
-        -tuple~Daylight, Off, RedAlert, Tuning~ programs_ : in Mode order
-        -Mode mode_
+        -array~Zone~ zones_ : per zone, its Mode and a tuple~Daylight, Off, RedAlert, Tuning~ in Mode order
         -optional~TimeReading~ time_
         +on(ModeChanged / Tick / ProgramTick / RefreshLights / NetworkUp)
         +on(ConfigChanged / SkyChanged)
@@ -379,7 +384,7 @@ classDiagram
     Program <|-- RedAlertProgram
     Program <|-- TuningProgram
     DaylightProgram ..> looks : kLookOf
-    DaylightProgram ..> gate : kGate
+    DaylightProgram ..> gate : its zone's
     looks ..> solar
     StatusModel ..> gate : gate open
     StatusModel ..> solar : day info
@@ -605,7 +610,7 @@ flowchart LR
 | **DeviceRegistry** | `RolesLoaded`, `NetworkUp`, `DeviceAnnounced`, `EndpointFound`, `BindResult`, `PingResult`, `AckReceived`, `ButtonPressed`, `PairRequested`, `PairCanceled`, `UnpairRequested`, `Tick` | `RoleAssigned`, `RoleCleared`, `Discover`, `Bind`, `Ping`, `OpenNetwork`, `PersistRoles`, `RefreshLights`, `ReachabilityChanged`, `DevicesUpdated` |
 | **ModeController** | `ButtonPressed`, `ModeRequested`, `Tick` | `ModeChanged` |
 | **SkyModel** | `CloudCoverUpdated`, `ConditionsUpdated`, `AlertsUpdated`, `Tick` | `SkyChanged` |
-| **ProgramHost** (runs one `Program`) | `ModeChanged`, `ConfigChanged`, `SkyChanged`, `Tick`, `ProgramTick`, `RefreshLights`, `NetworkUp`, `TuneLights`, `TuneSave` | `LightTarget`, `SetMinLevel` (on `TuneSave`) |
+| **ProgramHost** (runs a `Program` per zone) | `ModeChanged`, `ConfigChanged`, `SkyChanged`, `Tick`, `ProgramTick`, `RefreshLights`, `NetworkUp`, `TuneLights`, `TuneSave` | `LightTarget`, `SetMinLevel` (on `TuneSave`) |
 | **Overlays** | `LightTarget`, `Tick`, `ModeChanged`, `ConfigChanged`, `SkyChanged` | `OutputTarget` |
 | **LightOutput** | `OutputTarget`, `RoleAssigned`, `RoleCleared`, `ReachabilityChanged` | `SetLight` |
 | **StatusModel** | `ConfigChanged`, `ModeChanged`, `DevicesUpdated`, `SkyChanged`, `Tick` | `StatusChanged` |
@@ -617,11 +622,11 @@ flowchart LR
 
 ### Programs
 
-Every mode is a program (deriving from `core::Program`, for posting): it
-decides what each bulb should show and posts `LightTarget`s, nothing else.
-`ProgramHost` holds one of each in a `std::tuple` in `Mode` order (checked
-at compile time, with each program's `kMode`) and runs the one the `Mode`
-selects. No virtuals: the host calls what a program has, and an event
+Every mode is a program (deriving from `core::Program`, for posting and
+its zone): it decides what each light in its zone should show and posts
+`LightTarget`s, nothing else. `ProgramHost` holds one of each per zone, in
+a `std::tuple` in `Mode` order (checked at compile time, with each
+program's `kMode`), and runs the one each zone's `Mode` selects. No virtuals: the host calls what a program has, and an event
 reaches a program only if it has `on()` for it.
 
 | Member | Called on | Daylight | Off | Red alert | Tuning |
@@ -678,8 +683,8 @@ on `SkyChanged`; a dead connection does it once the weather goes stale),
 the latest one goes out with a 2 s transition.
 
 To add a program: a `Mode` (the enum, `kModes`, `modeName`), a `Program`
-subclass, a member and its case in `ProgramHost::program()`, and whatever
-selects it (`ModeController`, the console). Nothing else changes.
+subclass, its place in `ProgramHost::Programs`, and whatever selects it (a
+zone's `Controls`, the console). Nothing else changes.
 
 ### Flows
 
@@ -835,7 +840,7 @@ Pairing a device (console `pair` or its address in `kAddresses`) is in DESIGN.md
 | `SetConfig` | `ProgramConfig` | Console (`config`) |
 | `SetIntensity` | `Selection` (all, a group or a role), percent | Console (`intensity`) |
 | `SetMinLevel` | `Selection`, level 1-254 | Console (`minlevel`), ProgramHost (`tune save`) |
-| `ModeRequested` | `Mode` | Console (`tune`, `tune off`) |
+| `ModeRequested` | `Mode`, zone (none: every zone that can run it) | Console (`tune`, `tune off`) |
 | `TuneLights` / `TuneSave` | `Selection`, level, optional kelvin / — | Console (`tune`) |
 | `RolesLoaded` / `PersistRoles` | every `DeviceRecord` | SettingsStore / DeviceRegistry |
 | `NetworkUp` | rejoined, `at` | ZigbeeAdapter |
@@ -843,7 +848,7 @@ Pairing a device (console `pair` or its address in `kAddresses`) is in DESIGN.md
 | `EndpointFound` | role, endpoint (0 = none) | ZigbeeAdapter |
 | `BindResult` / `PingResult` | role, ok (+ error, status) | ZigbeeAdapter |
 | `AckReceived` | short addr, RSSI, ZCL status | ZigbeeAdapter |
-| `ButtonPressed` | `Single` / `Double` / `Hold` / `Ambiguous`, source, `at` | ZigbeeAdapter, Console (`press`) |
+| `ButtonPressed` | which button, `Single` / `Double` / `Hold` / `Ambiguous`, source, `at` | ZigbeeAdapter, Console (`press`) |
 | `PairRequested` / `PairCanceled` | role / — | Console |
 | `UnpairRequested` | `Selection` | Console |
 | `OpenNetwork` | duration (s, default 180) | Console, DeviceRegistry |
@@ -852,7 +857,7 @@ Pairing a device (console `pair` or its address in `kAddresses`) is in DESIGN.md
 | `Discover` / `Bind` / `Ping` | role, short addr (+ ext addr, endpoint for `Bind`) | DeviceRegistry |
 | `ReachabilityChanged` | role, reachable | DeviceRegistry |
 | `DevicesUpdated` | per-role `DeviceStatus`, records, armed role | DeviceRegistry, 1 Hz |
-| `ModeChanged` | `Mode` (`Daylight` / `Off` / `RedAlert`) | ModeController |
+| `ModeChanged` | zone, `Mode` (`Daylight` / `Off` / `RedAlert` / `Tuning`) | ModeController |
 | `RefreshLights` | role, or every light | DeviceRegistry |
 | `LightTarget` | role, `LightState`, level and color transitions | the running program |
 | `OutputTarget` | the same: what the bulb does show | Overlays |
@@ -965,7 +970,7 @@ Each is commented where it is; undo them as GCC's modules mature.
 | Where | What | Why |
 |---|---|---|
 | `Event`'s copy/move/destructor (`events.cppm`), `Timer::~Timer` (`flow.cppm`), `Program::~Program` (`program.cppm`) | defined out of line, not implicit or inline | importers otherwise link to `std::variant` / `vector` internals nobody emitted |
-| `DaySpan`, `Mireds`, `Xy`, `HueSat` (`types.cppm`) | `operator==` spelled out, not defaulted | GCC crashes compiling a file that imports them and compares them |
+| `DaySpan`, `Mireds`, `Xy`, `HueSat` (`types.cppm`), `ZoneId` (`topology.cppm`) | `operator==` spelled out, not defaulted | GCC crashes compiling a file that imports them and compares them |
 | `parseRoleSet` (`types.cppm`) | a `find` loop, not `views::split` | its `subrange` fails to compile across modules |
 | `InternetSync` (`internet_sync.cppm` / `.cpp`) | definitions in a module implementation unit; the thread behind a `Task` | `std::jthread` and the C++20 semaphores in a `.cppm` crash GCC writing the module interface |
 | `kEventNames` (`events.cppm`) | names parsed from `__PRETTY_FUNCTION__` | no reflection until C++26 |
@@ -983,5 +988,5 @@ crash.
 - `DevicesUpdated` (~250 B) now sets every `Event`'s size; share it like
   `StatusChanged` if events grow further.
 - A presence sensor is planned to replace the fixed active window: a
-  `Presence` rule in the gate (`ev::kGate`, `installation.cppm`), before or
+  `Presence` rule in the gate (a zone's `gate`, `installation.cppm`), before or
   after the `Window`, depending on which should take precedence.

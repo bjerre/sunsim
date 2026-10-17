@@ -6,6 +6,7 @@
 export module sunsim.ev:settings;
 
 import std.compat;
+import :installation;
 import :types;
 
 export namespace sunsim::ev {
@@ -45,7 +46,7 @@ struct Days { // mon-fri | all | mon,wed,...; stored as Weekdays' bits, a u8
     Weekdays ProgramConfig::*field;
     const char              *key;
 };
-struct Lights { // none | WallB,WallD | wall ...: color lights only; stored as the set's bits, a u16
+struct Lights { // none | WallB,WallD | wall ...: takesWeather() lights only; stored as the set's bits, a u16
     RoleSet ProgramConfig::*field;
     const char             *key;
 };
@@ -301,9 +302,9 @@ std::expected<void, std::string> set(const Setting &setting, ProgramConfig &conf
         }
         bool operator()(const setting::Lights &k) const
         {
-            // The weather pulses a color: only lights that show one.
+            // The weather pulses a color: only lights that show one, in a weather zone.
             const auto set = parseRoleSet(text);
-            if (!set || std::ranges::any_of(kRoles, [&](Role r) { return !caps(r).color && contains(*set, r); })) {
+            if (!set || std::ranges::any_of(kRoles, [&](Role r) { return !takesWeather(r) && contains(*set, r); })) {
                 return false;
             }
             c.*k.field = *set;

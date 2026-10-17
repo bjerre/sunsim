@@ -30,14 +30,15 @@ void daylightTests()
     });
 
     test("the gate: the active hours fade at each edge; the first rule with an answer decides", [] {
-        const ProgramConfig c; // 08:00-19:00, Monday to Friday, 10 min fades
-        CHECK(core::openness(kGate, noon(), c) == 1.0);
-        CHECK(core::openness(kGate, at(7h + 59min), c) == 0.0);
-        CHECK(std::abs(core::openness(kGate, at(8h + 5min), c) - 0.5) < 1e-9);
-        CHECK(std::abs(core::openness(kGate, at(18h + 55min), c) - 0.5) < 1e-9);
+        const ProgramConfig c;                         // 08:00-19:00, Monday to Friday, 10 min fades
+        const Gate         &office = kZones[0].gate; // the active hours
+        CHECK(core::openness(office, noon(), c) == 1.0);
+        CHECK(core::openness(office, at(7h + 59min), c) == 0.0);
+        CHECK(std::abs(core::openness(office, at(8h + 5min), c) - 0.5) < 1e-9);
+        CHECK(std::abs(core::openness(office, at(18h + 55min), c) - 0.5) < 1e-9);
         TimeReading saturday = noon();
         saturday.local += std::chrono::days{4};
-        CHECK(core::openness(kGate, saturday, c) == 0.0);
+        CHECK(core::openness(office, saturday, c) == 0.0);
 
         const Window nine_to_five{.hours = DaySpan{9h, 17h}};
         CHECK(core::openness(Gate{}, noon(), c) == 0.0); // no rule answers: off
@@ -64,9 +65,6 @@ void daylightTests()
         static_assert(std::ranges::all_of(members(Group::Wall),
                                           [](Role r) { return std::holds_alternative<SunCurve>(kLookOf[r]); }));
         static_assert(std::holds_alternative<WorkCurve>(kLookOf[kWork]));
-        constexpr auto swapped = looksOf(std::array{Shows{"wall", WorkCurve{}}, Shows{"WORK", SunCurve{}}});
-        static_assert(std::holds_alternative<WorkCurve>(swapped[kWallC]) &&
-                      std::holds_alternative<SunCurve>(swapped[kWork]));
 
         Harness h;
         h.tick();

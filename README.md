@@ -279,7 +279,9 @@ paired button are picked out at the APS layer and dispatched by command
 receiver endpoint 2 still go through the older path: the On/Off attribute
 change, with single vs. double press resolved by timing
 (`ZigbeeAdapter::handleZclAction` posts `Press::Ambiguous`, resolved in
-`core::ModeController`).
+`core::ModeController`). What each press chooses is the button's
+`Controls` in its zone (`installation.cppm`), and it changes only that
+zone's mode.
 
 For a different button, set the `SUNSIM` log tag to DEBUG
 (`esp_log_level_set("SUNSIM", ESP_LOG_DEBUG)` or menuconfig): every

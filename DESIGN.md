@@ -197,7 +197,7 @@ flowchart TB
     CFG["ProgramConfig<br/>location, window, shift, amber, clouds"]
     FC["CloudCover forecast<br/>(fetched each morning)"]
 
-    T & CFG --> G["openness(kGate)<br/>0 outside days/hours, ramps over the fade"]
+    T & CFG --> G["openness(zone gate)<br/>0 outside days/hours, ramps over the fade"]
     T & CFG --> ST["computeSunTimes<br/>sunrise, sunset"]
     T & CFG --> SP["computeSunPosition<br/>azimuth, elevation"]
     T & FC --> CC["c = cloudCover(forecast, time)<br/>0 clear ... 1 overcast"]
@@ -404,17 +404,17 @@ turn off. Find the minimums with tuning mode (`TuningProgram`: every bulb
 steady at its minimum in the sunset's amber; `tune <light> <level>`, then
 `tune save`). Color is untouched; red alert is not scaled.
 
-### The gate: when the lights may be on (`ev::kGate`, `core::openness`)
+### The gate: when the lights may be on (a zone's `gate`, `core::openness`)
 
 What a light shows (its look) and when it may be on (the gate) are kept
-apart, so the gate can change without touching the light math. The gate
-is declared in `installation.cppm` as a list of rules. The first rule with
+apart, so the gate can change without touching the light math. Each zone
+declares its gate in `installation.cppm`, as a list of rules. The first rule with
 an answer decides, and when none answers the lights are off. A rule can be
 limited to one answer (`opensOnly()`, `closesOnly()`), leaving the other
 case to the rules after it, so a future presence rule can take precedence
 over the hours, or the other way around.
 
-Today the gate is one `Window` on the active hours, set with the `config`
+Today the one zone, the office, has a gate of one `Window` on the active hours, set with the `config`
 console command and persisted in NVS (`platform::SettingsStore`): on only
 on `active_days` (a `Weekdays` set, default Mon–Fri) in the `active` hours
 (a `DaySpan`, default 08:00–19:00), off otherwise. Inside it, the gate

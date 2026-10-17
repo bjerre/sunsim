@@ -266,6 +266,27 @@ void devicesTests()
         CHECK(off && off->power == false);
     });
 
+    test("zones: every light in one, with its look; buttons control theirs", [] {
+        static_assert(kZoneCount == 1 && kZoneOf[kWallA] == kZoneIds[0] && kZoneOf[kButton] == kZoneIds[0]);
+        static_assert(kControlsOf[kButton] && !kControlsOf[kWork]);
+        static_assert(takesWeather(kWallC) && !takesWeather(kButton));
+
+        // Another room: the wall in one zone, the work light (and the button) in another.
+        constexpr std::array zones{
+            ZoneSpec{.name = "wall", .lights = {{"wall", SunCurve{}}}, .weather = true},
+            ZoneSpec{.name     = "desk",
+                     .lights   = {{"WORK", WorkCurve{}}},
+                     .modes    = {Mode::Daylight, Mode::Off},
+                     .controls = {{.by = "button", .twice = std::nullopt}}},
+        };
+        constexpr Topology t = topologyOf(zones);
+        static_assert(t.zone_of[kWallE] == ZoneId{0} && t.zone_of[kWork] == ZoneId{1} && t.zone_of[kButton] == ZoneId{1});
+        static_assert(std::holds_alternative<WorkCurve>(t.look_of[kWork]) && std::holds_alternative<SunCurve>(t.look_of[kWallA]));
+        static_assert(t.controls_of[kButton] && !t.controls_of[kButton]->twice && t.controls_of[kButton]->hold == Mode::Off);
+        static_assert(zones[1].allows(Mode::Off) && !zones[1].allows(Mode::RedAlert));
+        // A light in no zone or two, a look on the button, a button picking red alert in "desk", ... don't compile.
+    });
+
     test("role sets: lists, groups and none", [] {
         CHECK(parseRoleSet("WallB,walld") == roleSet({kWallB, Role{Group::Wall, 3}}));
         CHECK(parseRoleSet("wall,Work")->count() == kLightCount);

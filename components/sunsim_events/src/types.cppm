@@ -439,7 +439,7 @@ struct ProgramConfig {
     double  amber_kelvin         = 1800.0;
     uint8_t amber_sweep_deg      = 3; // 0-kMaxAmberSweepDeg
 
-    // Active hours: the gate's window (ev::kGate) lets the lights be on only
+    // Active hours: the office's gate (ev::kZones) lets its lights be on only
     // on active_days, in the active hours; fading in and out over `fade` at
     // each edge.
     DaySpan              active{std::chrono::hours{8}, std::chrono::hours{19}};
@@ -649,25 +649,6 @@ struct DayInfo {
     bool  next_is_sunrise = true; // false = next event is today's sunset
     Hours next_event{};           // when the next event is
     Hours until_next{};           // how long until it
-};
-
-// ---- Status ---------------------------------------------------------------
-
-// Everything the `status`/`roles`/`config` console commands and the display
-// show, gathered in one place so they always agree.
-struct StatusSnapshot {
-    Instant                               at{}; // when this snapshot was taken
-    TimeReading                           time{};
-    DayInfo                               day{};
-    Mode                                  mode             = Mode::Daylight;
-    bool                                  gate_open        = false; // ev::kGate lets the lights be on
-    PerRole<DeviceStatus>                 devices{};
-    DeviceRecords                         records{};
-    std::optional<Role>                   armed;
-    ProgramConfig                         config{};
-    Peaks                                 peaks      = kDefaultPeaks;
-    MinLevels                             min_levels = kDefaultMinLevels;
-    Sky                                   sky{};
 };
 
 } // namespace sunsim::ev

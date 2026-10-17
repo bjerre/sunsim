@@ -6,6 +6,8 @@
 export module sunsim.ev:events;
 
 import std.compat;
+import :installation;
+import :topology;
 import :types;
 
 export namespace sunsim::ev {
@@ -103,6 +105,7 @@ enum class Press : uint8_t {     // what each one does is ModeController's call
 };
 enum class Source : uint8_t { Zigbee, Console };
 struct ButtonPressed {
+    Role    button{Group::Button}; // which one
     Press   press  = Press::Single;
     Source  source = Source::Zigbee;
     Instant at{};
@@ -125,7 +128,8 @@ struct OpenNetwork {
 struct FactoryReset {};
 struct SyncRequested {};         // fetch from the internet now (clock, ...): console `sync`, fast-day switches
 struct ModeRequested {           // console: `tune`, `tune off`
-    Mode mode = Mode::Daylight;
+    Mode                  mode = Mode::Daylight;
+    std::optional<ZoneId> zone{}; // nullopt: every zone that can run it
 };
 struct TuneLights {              // console `tune <lights> <level> [kelvin]`: the tuning program's levels
     Selection               lights;
@@ -169,8 +173,9 @@ struct DevicesUpdated {          // 1 Hz summary for the status model
 
 // ---- Mode, program, output ------------------------------------------------
 
-struct ModeChanged {             // switch to another program
-    Mode mode = Mode::Daylight;
+struct ModeChanged {             // a zone switches to another program
+    ZoneId zone{};
+    Mode   mode = Mode::Daylight;
 };
 struct RefreshLights {           // the running program re-applies now, with its quick transition
     std::optional<Role> role;    // nullopt = every light
@@ -194,6 +199,28 @@ struct SetLight {                // one bulb's ZCL commands, sent in field order
 };
 
 // ---- Status ---------------------------------------------------------------
+
+// A zone, as the status shows it.
+struct ZoneStatus {
+    Mode mode      = Mode::Daylight;
+    bool gate_open = false; // its gate lets its lights be on
+};
+
+// Everything the `status`/`roles`/`config` console commands and the display
+// show, gathered in one place so they always agree.
+struct StatusSnapshot {
+    Instant               at{}; // when this snapshot was taken
+    TimeReading           time{};
+    DayInfo               day{};
+    PerZone<ZoneStatus>   zones{};
+    PerRole<DeviceStatus> devices{};
+    DeviceRecords         records{};
+    std::optional<Role>   armed;
+    ProgramConfig         config{};
+    Peaks                 peaks      = kDefaultPeaks;
+    MinLevels             min_levels = kDefaultMinLevels;
+    Sky                   sky{};
+};
 
 struct StatusChanged {           // shared, not copied: it's by far the largest payload,
     std::shared_ptr<const StatusSnapshot> snapshot; // and every Event is as big as its largest

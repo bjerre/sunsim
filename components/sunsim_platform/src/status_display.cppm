@@ -181,10 +181,12 @@ void render(Ui &ui, const ev::StatusSnapshot &st)
         lv_label_set_text(ui.next_event, "time sync...");
     }
 
-    switch (st.mode) {
+    // The first zone's mode: the main one.
+    const ev::ZoneStatus &zone = st.zones[ev::kZoneIds[0]];
+    switch (zone.mode) {
     case ev::Mode::Daylight:
-        lv_label_set_text(ui.mode, st.gate_open ? "daylight" : "idle");
-        lv_obj_set_style_text_color(ui.mode, lv_color_hex(st.gate_open ? 0xffd27f : 0x888888), 0);
+        lv_label_set_text(ui.mode, zone.gate_open ? "daylight" : "idle");
+        lv_obj_set_style_text_color(ui.mode, lv_color_hex(zone.gate_open ? 0xffd27f : 0x888888), 0);
         break;
     case ev::Mode::Off:
         lv_label_set_text(ui.mode, "off");

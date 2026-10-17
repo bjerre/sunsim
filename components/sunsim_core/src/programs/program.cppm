@@ -5,12 +5,12 @@ import sunsim.ev;
 
 export namespace sunsim::core {
 
-// A lighting program: decides what every light should show and posts it as
-// LightTargets. It never deals with addresses, reachability or what was
+// A lighting program: decides what every light in its zone should show and
+// posts it as LightTargets. It never deals with addresses, reachability or what was
 // last sent; LightOutput does that, the same way for every program.
 //
-// ProgramHost owns one of each and runs the one the Mode selects. A program
-// derives from Program (for posting) and has:
+// ProgramHost owns one of each per zone and runs the one the zone's Mode
+// selects. A program derives from Program (for posting, and its zone) and has:
 //
 //   static constexpr ev::Mode kMode           the mode it is
 //   void refresh(role, now)                   re-apply `role` (nullopt = every light) now, with
@@ -26,7 +26,12 @@ export namespace sunsim::core {
 // `now` is nullopt until the clock's first Tick.
 class Program {
 public:
-    explicit Program(ev::Post post) : post_(std::move(post)) {}
+    // What every program is made with.
+    struct Context {
+        ev::Post   post;
+        ev::ZoneId zone;
+    };
+    explicit Program(Context context) : post_(std::move(context.post)), zone_(context.zone) {}
 
     Program(const Program &)            = delete;
     Program &operator=(const Program &) = delete;
@@ -34,11 +39,14 @@ public:
 protected:
     ~Program();
 
-    // Calls f(role) for each light, or only for `only` if it's given (and a light).
-    template <class F> static void forEachLight(std::optional<ev::Role> only, F &&f)
+    [[nodiscard]] ev::ZoneId zone() const noexcept { return zone_; }
+
+    // Calls f(role) for each light in the zone, or only for `only` if it's
+    // given (and one of them).
+    template <class F> void forEachLight(std::optional<ev::Role> only, F &&f) const
     {
         for (const ev::Role role : ev::lights()) {
-            if (!only || *only == role) {
+            if (ev::kZoneOf[role] == zone_ && (!only || *only == role)) {
                 f(role);
             }
         }
@@ -54,7 +62,8 @@ protected:
     }
 
 private:
-    ev::Post post_;
+    ev::Post   post_;
+    ev::ZoneId zone_;
 };
 
 // What ProgramHost needs of a program.

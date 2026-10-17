@@ -1,5 +1,6 @@
-// The room, as data: which device is which, what each light shows, and when
-// the lights may be on. Edit, build, flash. The words are :topology's.
+// The room, as data: which device is which, and the zones: what each light
+// shows, when it may be on, and what chooses its mode. Edit, build, flash.
+// The words are :topology's.
 
 export module sunsim.ev:installation;
 
@@ -22,19 +23,67 @@ inline constexpr List<Address, kRoleCount> kAddresses{
     {"Button", 0x0000000000000000},
 };
 
-// What each light shows: every light exactly one look.
-inline constexpr std::array kShows{
-    Shows{"Wall", SunCurve{}},
-    Shows{"Work", WorkCurve{}},
+// Lights that share a mode and a gate. Every light is in exactly one.
+inline constexpr std::array kZones{
+    ZoneSpec{
+        .name   = "office",
+        .lights = {{"Wall", SunCurve{}}, {"Work", WorkCurve{}}},
+        // The active hours (`config hours`, `days`, `fade`).
+        .gate     = {Window{.hours = &ProgramConfig::active, .days = &ProgramConfig::active_days,
+                            .fade = &ProgramConfig::fade}},
+        .controls = {{.by = "Button"}}, // single: daylight, double: red alert, hold: off
+        .weather  = true,
+    },
 };
 
-// When the lights may be on: the active hours (`config hours`, `days`, `fade`).
-inline constexpr Gate kGate{
-    Window{.hours = &ProgramConfig::active, .days = &ProgramConfig::active_days, .fade = &ProgramConfig::fade},
+// ---- Derived: the tables above per role and per zone, checked as they compile ----
+
+inline constexpr Addresses kAddressOf = addressesOf(kAddresses);
+
+inline constexpr Topology                         kTopology   = topologyOf(kZones);
+inline constexpr PerRole<std::optional<ZoneId>>   kZoneOf     = kTopology.zone_of;
+inline constexpr PerRole<Look>                    kLookOf     = kTopology.look_of;
+inline constexpr PerRole<std::optional<Controls>> kControlsOf = kTopology.controls_of;
+
+inline constexpr std::size_t kZoneCount = kZones.size();
+static_assert(kZoneCount >= 1 && kZoneCount <= 255, "1-255 zones");
+
+[[nodiscard]] constexpr const ZoneSpec &spec(ZoneId zone) noexcept { return kZones[zone.index]; }
+
+// Every zone, in order.
+inline constexpr std::array<ZoneId, kZoneCount> kZoneIds = [] {
+    std::array<ZoneId, kZoneCount> ids{};
+    for (std::size_t i = 0; i < kZoneCount; ++i) {
+        ids[i] = {static_cast<uint8_t>(i)};
+    }
+    return ids;
+}();
+
+// One T per zone, indexed by the zone.
+template <class T> struct PerZone {
+    std::array<T, kZoneCount> items{};
+
+    [[nodiscard]] constexpr T       &operator[](ZoneId zone) noexcept { return items[zone.index]; }
+    [[nodiscard]] constexpr const T &operator[](ZoneId zone) const noexcept { return items[zone.index]; }
 };
 
-// The tables above, per role; checked when they compile.
-inline constexpr Addresses     kAddressOf = addressesOf(kAddresses);
-inline constexpr PerRole<Look> kLookOf    = looksOf(kShows);
+// A light the weather may pulse: it shows color, in a weather zone.
+[[nodiscard]] constexpr bool takesWeather(Role role) noexcept
+{
+    return caps(role).color && kZoneOf[role] && spec(*kZoneOf[role]).weather;
+}
+
+} // namespace sunsim::ev
+
+namespace sunsim::ev {
+
+// (Outside the export: GCC won't export the lambda's local.)
+static_assert(std::ranges::all_of(kRoles,
+                                  [](Role r) {
+                                      const ProgramConfig defaults;
+                                      return takesWeather(r) ||
+                                             (!contains(defaults.precip_lights, r) && !contains(defaults.alert_lights, r));
+                                  }),
+              "the default weather lights (ProgramConfig) must be color lights in a weather zone");
 
 } // namespace sunsim::ev

@@ -10,16 +10,16 @@ import :tuning_program;
 
 export namespace sunsim::core {
 
-// Owns the lighting programs and runs the one the Mode selects: it starts
-// it on ModeChanged, and passes it the ticks and refreshes. Settings, the
-// weather and the console's tuning go to every program that handles them
-// (see Program). Keeps the latest time, for programs that need it when they
-// start or refresh. On `tune save` it posts the tuning program's levels as
-// the lights' minimums.
+// Owns the lighting programs, a set per zone, and runs the one each zone's
+// Mode selects: it starts it on the zone's ModeChanged, and passes it the
+// ticks and refreshes. Settings, the weather and the console's tuning go to
+// every program that handles them (see Program). Keeps the latest time, for
+// programs that need it when they start or refresh. On `tune save` it posts
+// the levels tuned in the zones that are tuning as the lights' minimums.
 //
 // Adding a program: a Mode (in sunsim::ev: the enum, kModes, modeName), a
 // Program subclass, its place in Programs here, and whatever selects it
-// (ModeController, console).
+// (a zone's Controls, the console).
 class ProgramHost {
 public:
     explicit ProgramHost(const ev::Post &post);
@@ -27,7 +27,7 @@ public:
     void on(const ev::ModeChanged &e);
     void on(const ev::Tick &e);
     void on(const ev::ProgramTick &e);
-    void on(const ev::RefreshLights &e) { running([&](auto &p) { p.refresh(e.role, time_); }); }
+    void on(const ev::RefreshLights &e);
     void on(const ev::NetworkUp &) { on(ev::RefreshLights{}); }
     void on(const ev::ConfigChanged &e);
     void on(const ev::SkyChanged &e) { toEvery(e); }
@@ -46,22 +46,39 @@ private:
     static_assert(std::tuple_size_v<Programs> == ev::kModes.size() && inModeOrder,
                   "Programs holds one program per Mode, in Mode order");
 
-    // f(the running program)
-    template <class F> void running(F &&f)
-    {
-        [&]<std::size_t... I>(std::index_sequence<I...>) {
-            ((std::to_underlying(mode_) == I ? f(std::get<I>(programs_)) : void()), ...);
-        }(std::make_index_sequence<std::tuple_size_v<Programs>>{});
-    }
+    // A zone's programs, and the mode it's in.
+    struct Zone {
+        Zone(const ev::Post &post, ev::ZoneId id)
+            : programs{[&]<std::size_t... I>(std::index_sequence<I...>) {
+                  return Programs{(void(I), Program::Context{post, id})...};
+              }(std::make_index_sequence<std::tuple_size_v<Programs>>{})}
+        {
+        }
 
-    // e to every program that handles it, or to the running one if it does.
+        // f(the running program)
+        template <class F> void running(F &&f)
+        {
+            [&]<std::size_t... I>(std::index_sequence<I...>) {
+                ((std::to_underlying(mode) == I ? f(std::get<I>(programs)) : void()), ...);
+            }(std::make_index_sequence<std::tuple_size_v<Programs>>{});
+        }
+
+        Programs programs;
+        ev::Mode mode = ev::Mode::Daylight;
+    };
+
+    // e to every program that handles it, or to each zone's running one if it does.
     template <class E> void toEvery(const E &e)
     {
-        std::apply([&](auto &...p) { (deliver(p, e), ...); }, programs_);
+        for (Zone &zone : zones_) {
+            std::apply([&](auto &...p) { (deliver(p, e), ...); }, zone.programs);
+        }
     }
     template <class E> void toRunning(const E &e)
     {
-        running([&](auto &p) { deliver(p, e); });
+        for (Zone &zone : zones_) {
+            zone.running([&](auto &p) { deliver(p, e); });
+        }
     }
     template <class P, class E> static void deliver(P &program, const E &e)
     {
@@ -70,23 +87,28 @@ private:
         }
     }
 
-    Programs programs_;
-    ev::Post post_;
-
-    ev::Mode                       mode_ = ev::Mode::Daylight;
-    std::optional<ev::TimeReading> time_; // latest, from Tick/ProgramTick
+    std::array<Zone, ev::kZoneCount> zones_;
+    ev::Post                         post_;
+    std::optional<ev::TimeReading>   time_; // latest, from Tick/ProgramTick
 };
 
 } // namespace sunsim::core
 
 namespace sunsim::core {
 
-ProgramHost::ProgramHost(const ev::Post &post) : programs_{post, post, post, post}, post_(post) {}
+ProgramHost::ProgramHost(const ev::Post &post)
+    : zones_{[&]<std::size_t... Z>(std::index_sequence<Z...>) {
+          return std::array<Zone, ev::kZoneCount>{Zone{post, ev::kZoneIds[Z]}...};
+      }(std::make_index_sequence<ev::kZoneCount>{})},
+      post_(post)
+{
+}
 
 void ProgramHost::on(const ev::ModeChanged &e)
 {
-    mode_ = e.mode;
-    running([&](auto &p) {
+    Zone &zone = zones_[e.zone.index];
+    zone.mode  = e.mode;
+    zone.running([&](auto &p) {
         if constexpr (requires { p.start(time_); }) {
             p.start(time_);
         } else {
@@ -107,6 +129,13 @@ void ProgramHost::on(const ev::ProgramTick &e)
     toRunning(e);
 }
 
+void ProgramHost::on(const ev::RefreshLights &e)
+{
+    for (Zone &zone : zones_) {
+        zone.running([&](auto &p) { p.refresh(e.role, time_); }); // a program skips lights not in its zone
+    }
+}
+
 void ProgramHost::on(const ev::ConfigChanged &e)
 {
     toEvery(e);
@@ -115,10 +144,15 @@ void ProgramHost::on(const ev::ConfigChanged &e)
 
 void ProgramHost::on(const ev::TuneSave &)
 {
-    const auto tuned = std::get<TuningProgram>(programs_).takeTuned();
-    for (const ev::Role role : ev::lights()) {
-        if (tuned[role]) {
-            post_(ev::SetMinLevel{.lights = role, .level = *tuned[role]});
+    for (Zone &zone : zones_) {
+        const auto tuned = std::get<TuningProgram>(zone.programs).takeTuned();
+        if (zone.mode != ev::Mode::Tuning) {
+            continue; // `tune` reached it, but it isn't tuning: nothing it saw counts
+        }
+        for (const ev::Role role : ev::lights()) {
+            if (tuned[role]) {
+                post_(ev::SetMinLevel{.lights = role, .level = *tuned[role]});
+            }
         }
     }
 }

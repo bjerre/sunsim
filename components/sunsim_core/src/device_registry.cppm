@@ -365,10 +365,8 @@ void DeviceRegistry::on(const ev::ButtonPressed &e)
     if (e.source != ev::Source::Zigbee) {
         return;
     }
-    for (const ev::Role role : ev::kRoles) { // a press doesn't say which button
-        if (ev::isButton(role) && record(role).valid) {
-            heard(role);
-        }
+    if (record(e.button).valid) {
+        heard(e.button);
     }
 }
 
