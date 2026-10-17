@@ -87,6 +87,32 @@ void modesTests()
         CHECK(modes.size() == 1 && modes[0].mode == Mode::Daylight);
     });
 
+    test("an ambiguous press alone resolves as the window ends (a Wake), not at the next Tick", [] {
+        Harness h;
+        h.tick();
+        const Instant pressed = h.now + 100ms;
+        h.post(ButtonPressed{.press = Press::Ambiguous, .at = pressed});
+        const auto wakes = h.all<WakeAt>();
+        CHECK(!wakes.empty() && wakes.back().at == pressed + 450ms); // asked to be woken as the window ends
+        CHECK(h.all<ModeChanged>().empty());
+        h.post(Wake{.at = pressed + 450ms});
+        const auto modes = h.all<ModeChanged>();
+        CHECK(modes.size() == 1 && modes[0].mode == Mode::Daylight);
+    });
+
+    test("red alert keeps its beat: a second Tick in the same second doesn't flip it", [] {
+        Harness h;
+        h.tick();
+        h.pairBulb(kWallA, 0xA1, 0x0001);
+        h.post(ButtonPressed{.press = Press::Double, .at = h.now});
+        h.tick();
+        h.clearLog();
+        h.post(Tick{.at = h.now + 300ms, .time = noon()}); // late, or a duplicate: same second
+        CHECK(h.all<SetLight>().empty());
+        h.tick();
+        CHECK(h.all<SetLight>().size() == 1); // the next second flips it
+    });
+
     test("ambiguous then a definite press within the window: the definite press wins", [] {
         Harness h;
         h.tick();

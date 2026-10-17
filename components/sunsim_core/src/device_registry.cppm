@@ -15,7 +15,8 @@ export namespace sunsim::core {
 //    button is then bound (Bind).
 //  - Liveness (a flow per light): acks, ping replies, announces and button
 //    presses count as "heard". Lights are pinged 15 s after the network is
-//    up (or after pairing), then every 60 s. A failed or unanswered ping
+//    up (or after pairing), plus their turn (spread across the minute by
+//    slot), then every 60 s. A failed or unanswered ping
 //    with nothing heard for a minute marks a light unreachable
 //    (ReachabilityChanged): its commands pause -
 //    sending to a missing device ties up the stack's buffers with retries
@@ -41,6 +42,7 @@ public:
     void on(const ev::PairCanceled &e);
     void on(const ev::UnpairRequested &e);
     void on(const ev::Tick &e);
+    void on(const ev::Wake &e) { timer_.tick(e.at); }
 
 private:
     struct Liveness {
@@ -75,7 +77,7 @@ private:
     ev::PerRole<Liveness>        liveness_{};
     std::optional<ev::Role>      armed_;
 
-    ev::Timer                    timer_;
+    ev::Timer                    timer_{[this](ev::Instant at) { post_(ev::WakeAt{at}); }};
     bool                         network_up_ = false; // nothing is sent before
     ev::Inbox<ev::NetworkUp>     network_{timer_};
     ev::Inbox<ev::EndpointFound> endpoints_{timer_};
@@ -99,6 +101,13 @@ constexpr auto kPingInterval     = 60s;  // reachable lights
 constexpr auto kUnreachablePing  = 15s;  // until they answer again
 constexpr auto kUnreachableAfter = 60s;  // of silence, plus a failed ping
 constexpr auto kOnlineWindow     = 150s; // shown as online: a couple of missed pings
+
+// The lights take turns: each is first pinged at its own point in the
+// interval, by slot, so the pings spread out instead of all going at once.
+constexpr ev::BootClock::duration pingTurn(ev::Role light) noexcept
+{
+    return kPingInterval * ev::slot(light) / ev::kRoleCount;
+}
 
 std::string_view name(ev::Role role) noexcept
 {
@@ -204,7 +213,7 @@ void DeviceRegistry::clear(ev::Role role)
 
 void DeviceRegistry::on(const ev::RolesLoaded &e)
 {
-    records_ = e.records;
+    records_ = *e.records;
     for (const ev::Role role : ev::kRoles) {
         if (!record(role).valid) {
             continue;
@@ -329,7 +338,7 @@ ev::Flow DeviceRegistry::keepAlive(ev::Role light)
     if (!network_up_) {
         co_await network_.next();
     }
-    co_await timer_.after(kFirstPing);
+    co_await timer_.after(kFirstPing + pingTurn(light));
     for (;;) {
         const ev::Instant sent = timer_.now();
         post_(ev::Ping{light, record(light).short_addr});
@@ -413,17 +422,17 @@ void DeviceRegistry::on(const ev::Tick &e)
 
 void DeviceRegistry::publishDevices()
 {
-    ev::DevicesUpdated u{.devices = {}, .records = records_, .armed = armed_};
+    ev::PerRole<ev::DeviceStatus> devices{};
     for (const ev::Role role : ev::kRoles) {
         const Liveness &l = liveness(role);
-        u.devices[role] = {.link         = link(role),
-                           .paired       = record(role).valid,
-                           .has_endpoint = record(role).endpoint != 0,
-                           .last_heard   = l.last_heard,
-                           .rssi         = l.rssi,
-                           .reachable    = l.reachable};
+        devices[role]     = {.link         = link(role),
+                             .paired       = record(role).valid,
+                             .has_endpoint = record(role).endpoint != 0,
+                             .last_heard   = l.last_heard,
+                             .rssi         = l.rssi,
+                             .reachable    = l.reachable};
     }
-    post_(u);
+    post_(ev::DevicesUpdated{.devices = devices, .records = records_, .armed = armed_});
 }
 
 } // namespace sunsim::core

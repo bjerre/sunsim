@@ -130,7 +130,7 @@ sequenceDiagram
         PH->>LO: LightTarget: the current program's state, 2 s
         LO->>ZA: SetLight
     end
-    Note over DR: bulbs also get a keepAlive flow:<br/>pinged 15 s in, then every 60 s
+    Note over DR: lights also get a keepAlive flow:<br/>pinged 15 s in plus their turn, then every 60 s
 ```
 
 `short_addr` is deliberately never put in the address table or treated as
@@ -171,14 +171,14 @@ stateDiagram-v2
     Any --> Daylight: Toggle (single press)
     Any --> RedAlert: On (double press)
     Any --> Off: Off (hold)
-    RedAlert --> RedAlert: Tick -> RedAlertProgram flips brightness
+    RedAlert --> RedAlert: each new second (Tick) -> RedAlertProgram flips brightness
 ```
 
 Fallback for buttons that do send to the bound receiver endpoint 2: the
 stack resolves `On`/`Off`/`Toggle` internally and only surfaces the
 resulting On/Off attribute (`EZB_ZCL_CORE_SET_ATTR_VALUE_CB_ID`), where
 `On` and `Toggle` look the same, so single vs. double press is resolved by
-timing (450ms, resolved on the next `Tick` — `core::ModeController`);
+timing (450ms: a `Wake` ends the window on time — `core::ModeController`);
 `OffWithEffect` and Scenes `RecallScene` are handled directly.
 
 ## 4. Daylight mathematical model
@@ -358,7 +358,8 @@ the sped-up loop shows today's sky. `config clouds off` ignores both.
 The same 15-minute fetch reads the WMO weather code (what's falling, and
 how hard) and NWS's active alerts for the location. `Overlays`, between the
 programs and `LightOutput`, re-checks them every Tick and has chosen lights
-pulse, like red alert: a fade each `fade_seconds`, between
+pulse, like red alert: a fade each `fade_seconds` of the Ticks' time (so
+lights of one tempo stay in step, however the Ticks arrive), between
 
 ```
 top    = 254 · peak / 100 · strength       (at least the light's minimum)

@@ -11,8 +11,8 @@ export namespace sunsim::core {
 // double -> red alert, hold -> off), posting ModeChanged. Press::Ambiguous
 // (an On/Toggle only seen as an attribute change, from buttons that use the
 // bound receiver endpoint) is resolved by timing: a second one within the
-// double-click window is a double press, otherwise it's a single press once
-// the window has passed (on the next Tick).
+// double-click window is a double press, otherwise it's a single press as
+// soon as the window has passed (its Timer asks for a Wake then).
 class ModeController {
 public:
     explicit ModeController(ev::Post post, std::chrono::milliseconds double_click_window = std::chrono::milliseconds{450});
@@ -20,6 +20,7 @@ public:
     void on(const ev::ButtonPressed &press) { presses_.deliver(press, press.at); }
     void on(const ev::ModeRequested &e);
     void on(const ev::Tick &tick) { timer_.tick(tick.at); }
+    void on(const ev::Wake &e) { timer_.tick(e.at); } // the double-click window, ended on time
 
 private:
     ev::Flow run(ev::Role button);
@@ -28,7 +29,7 @@ private:
 
     ev::Post                     post_;
     std::chrono::milliseconds    window_;
-    ev::Timer                    timer_;
+    ev::Timer                    timer_{[this](ev::Instant at) { post_(ev::WakeAt{at}); }};
     ev::Inbox<ev::ButtonPressed> presses_{timer_};
     ev::PerRole<ev::Flow>        flows_; // last: a run() per button, started once the rest exist
 };
