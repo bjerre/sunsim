@@ -252,10 +252,11 @@ three-light wall renames the stored roles once, keeping each bulb's place:
 `WallB` (the middle) becomes `WallC` and `WallC` (the west end) becomes
 `WallE`; pair the new bulbs as `WallB` and `WallD`.
 
-Alternatively, devices can be pre-assigned by IEEE address in
-[`main/role_manifest.json`](main/role_manifest.json) (used only when no `pair`
-is armed). Use the exact `ext=` value from the log, not a hand-copied label.
-Entries are by role name; one the layout doesn't have fails the build.
+Alternatively, devices can be pre-assigned by IEEE address in `kAddresses`
+in [`installation.cppm`](components/sunsim_events/src/installation.cppm)
+(used only when no `pair` is armed). Use the exact `ext=` value from the
+log, not a hand-copied label. Entries are by role name; one the layout
+doesn't have, or an address given twice, fails the build.
 
 You don't need all 7 devices present for sunsim to do something useful:
 whichever bulbs have joined get the program applied; missing ones are
@@ -339,14 +340,13 @@ Each component is one C++ module (`import sunsim.ev;` and so on, plus
 one piece of math), declaration and definitions together, and a
 component's main `.cppm` re-exports the partitions (one exception:
 `InternetSync`'s definitions are in `internet_sync.cpp`, see ARCHITECTURE.md
-§12). The only headers left are the generated `role_manifest.h` and the
-tests' `check.h`; logging is `ev::log::info(tag, "{}", ...)`, std::format
+§12). The only header left is the tests' `check.h`; logging is `ev::log::info(tag, "{}", ...)`, std::format
 strings checked at compile time.
 
 - `components/sunsim_events/` (`sunsim::ev`, module `sunsim.ev`) - the
   shared vocabulary: value types (`types.cppm`), the room
-  (`installation.cppm`: what each light shows and when the lights may be
-  on, in `topology.cppm`'s words), every event
+  (`installation.cppm`: which device is which, what each light shows and
+  when the lights may be on, in `topology.cppm`'s words), every event
   (`events.cppm`), the settings table (`settings.cppm`: what `config`
   shows and takes, and the NVS key of each), the `EventBus` (`bus.cppm`), coroutine flows
   (`flow.cppm`: `Flow`, `Timer`, `Inbox`), and `BootClock::now()`.
@@ -390,8 +390,7 @@ strings checked at compile time.
     minimum levels).
   - `console.cppm` - the serial REPL; `status_display.cppm` - the LCD.
 - `main/` - `main.cpp` (`App`: creates the bus and modules, platform wiring,
-  app task; and `app_main`), menuconfig (`Kconfig.projbuild`), and the role manifest
-  (`role_manifest.json` -> `role_manifest.h` via `gen_role_manifest.py`).
+  app task; and `app_main`) and menuconfig (`Kconfig.projbuild`).
 - `test/host/` - host tests for the pure layers, a file per area (see below).
 
 ## Host tests

@@ -9,8 +9,6 @@
 #include "freertos/task.h"
 #include "nvs_flash.h"
 
-#include "role_manifest.h"
-
 // Every #include before the first import (GCC).
 import std.compat;
 import sunsim.ev;
@@ -22,9 +20,6 @@ namespace sunsim {
 namespace {
 
 constexpr const char *kTag = "APP";
-
-// role_manifest.json, checked against the role layout at compile time.
-constexpr core::DeviceRegistry::Manifest kManifest = core::DeviceRegistry::manifestOf(kRoleManifest);
 
 ev::ProgramConfig defaultProgram()
 {
@@ -65,7 +60,7 @@ private:
 App::App()
     : settings_(bus_.post(), defaultProgram()), clock_(bus_.post()),
       internet_(bus_.post(), defaultProgram().latitude_deg, defaultProgram().longitude_deg), zigbee_(bus_.post()),
-      core_(bus_.post(), kManifest)
+      core_(bus_.post(), ev::kAddressOf)
 {
     core::wireCore(bus_, core_);
     // The platform modules, each to the events it handles. Settings before

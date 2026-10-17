@@ -64,7 +64,7 @@ The roles come from one table, `ev::kLayout` (`types.cppm`): Wall 5, Work
 1, Button 1. A wall light's letter is its place: light `i` of `n` sits at
 `x = 1 - 2i/(n-1)`. Changing the count there is all it takes for a
 different wall: the role names, positions, the display's dots and the
-manifest checks follow at compile time.
+address checks follow at compile time.
 
 ## 2. Device addressing & role assignment
 
@@ -81,15 +81,15 @@ Role (`WallA`-`WallE`, `Work`, `Button`: a group and an index within it,
 `ev::Role`, with the counts per group in `ev::kLayout`) comes from none of these.
 It's assigned when the device joins: to the role armed with the console's
 `pair <role>` (if the device doesn't already hold one), or else by looking
-up `ext_addr` in the optional build-time table
-[`main/role_manifest.json`](main/role_manifest.json). Pairing order never
-matters.
+up `ext_addr` in the installation's address table, `ev::kAddresses` in
+[`installation.cppm`](components/sunsim_events/src/installation.cppm).
+Pairing order never matters.
 
-The manifest is keyed by role name and checked against `ev::kLayout` at
-compile time (`DeviceRegistry::manifestOf`): a name the layout doesn't
-have, a role listed twice or an address given to two roles fails the
+The table is keyed by role name and checked against `ev::kLayout` at
+compile time (`ev::addressesOf`, into `kAddressOf`): a name that isn't one
+role, a role listed twice or an address given to two roles fails the
 build. So `kLayout` is the only thing to change for a bigger or smaller
-wall; the names, positions, display dots and manifest checks follow.
+wall; the names, positions, display dots and address checks follow.
 
 ```mermaid
 sequenceDiagram
@@ -107,7 +107,7 @@ sequenceDiagram
         DR->>SS: PersistRoles (if short_addr changed)
         DR->>LO: RoleAssigned (new address)
         Note over DR: endpoint known: RefreshLights, done
-    else a role is armed (`pair`), or ext_addr is in the manifest
+    else a role is armed (`pair`), or ext_addr is in kAddresses
         DR->>SS: PersistRoles (role assigned)
         DR->>LO: RoleAssigned (endpoint still 0)
     else unknown
@@ -131,7 +131,7 @@ sequenceDiagram
     Note over DR: bulbs also get a keepAlive flow:<br/>pinged 15 s in, then every 60 s
 ```
 
-`short_addr` is deliberately never put in the manifest or treated as
+`short_addr` is deliberately never put in the address table or treated as
 stable — it's refreshed from the announce signal every time, exactly as a
 network-assigned address should be.
 
@@ -142,14 +142,14 @@ unrecognized device is ignored rather than given a role, and its join
 attempt logs the exact address you need:
 
 ```
-W (12345) REGISTRY: Ignoring unknown device 0x1a2b (ext=0x00124b00223344aa): not in role manifest (use `pair <role>` to claim it)
+W (12345) REGISTRY: Ignoring unknown device 0x1a2b (ext=0x00124b00223344aa): not in the installation's addresses (use `pair <role>` to claim it)
 ```
 
 (`pair <role>` from the console is usually simpler: it gives the next
-device that joins that role.) For the manifest: open `./sunsim monitor`,
+device that joins that role.) For the address table: open `./sunsim monitor`,
 put one bulb into pairing mode at a time
 (so you know which log line is which physical device), copy the `ext=`
-value into the right role's entry in `role_manifest.json`, rebuild/reflash, then
+value into the right role's entry in `kAddresses`, rebuild/reflash, then
 re-trigger pairing on that bulb so it rejoins and matches.
 
 ## 3. Button input handling

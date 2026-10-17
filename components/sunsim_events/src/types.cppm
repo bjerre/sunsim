@@ -92,7 +92,7 @@ inline constexpr std::array kLayout{
 };
 
 // One device's job: its group, and which member of it. Assigned at pairing
-// time (console `pair`, or the build-time role manifest), never by join
+// time (console `pair`, or its address in installation.cppm), never by join
 // order.
 struct Role {
     Group   group = Group::Wall;

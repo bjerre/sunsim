@@ -7,9 +7,9 @@ export namespace sunsim::core {
 
 // Which device holds which role, and whether it's alive.
 //  - Pairing: a device announcing itself while a role is armed (console
-//    `pair`) gets that role, unless it already holds one; otherwise the
-//    build-time role manifest (IEEE address -> role) decides; anything else
-//    is ignored.
+//    `pair`) gets that role, unless it already holds one; otherwise its
+//    address in the installation (ev::kAddresses) decides; anything else is
+//    ignored.
 //  - Discovery (a flow per role): finds the device's endpoint
 //    (Discover/EndpointFound), retried every 15 s until it's known; the
 //    button is then bound (Bind).
@@ -26,35 +26,8 @@ export namespace sunsim::core {
 // Persists through PersistRoles; never touches storage or the radio itself.
 class DeviceRegistry {
 public:
-    using Manifest = ev::PerRole<uint64_t>; // IEEE address per role; 0 = no entry
-
-    // The build-time manifest (main/role_manifest.json: entries with a role
-    // name and an ext_addr) checked against the layout, so changing
-    // ev::kLayout needs nothing else changed. An entry naming no role, a
-    // role given twice, or one address given to two roles doesn't compile.
-    // Names ignore case; a 0 address is no entry.
-    template <std::ranges::input_range Entries>
-    [[nodiscard]] static consteval Manifest manifestOf(const Entries &entries)
-    {
-        Manifest manifest{};
-        for (const auto &entry : entries) {
-            const auto role = ev::parseRole(entry.role);
-            if (!role) {
-                roleManifestNamesAnUnknownRole();
-            } else if (entry.ext_addr != 0) {
-                if (manifest[*role] != 0) {
-                    roleManifestGivesARoleTwice();
-                }
-                if (std::ranges::contains(manifest.items, entry.ext_addr)) {
-                    roleManifestGivesAnAddressTwice();
-                }
-                manifest[*role] = entry.ext_addr;
-            }
-        }
-        return manifest;
-    }
-
-    DeviceRegistry(ev::Post post, Manifest manifest);
+    // addresses: who takes which role when it joins (ev::kAddressOf).
+    DeviceRegistry(ev::Post post, ev::Addresses addresses);
 
     void on(const ev::RolesLoaded &e);
     void on(const ev::NetworkUp &e);
@@ -70,12 +43,6 @@ public:
     void on(const ev::Tick &e);
 
 private:
-    // Not constexpr: reached while building a manifest, they stop the
-    // compile, and the error names them.
-    static void roleManifestNamesAnUnknownRole() noexcept {}
-    static void roleManifestGivesARoleTwice() noexcept {}
-    static void roleManifestGivesAnAddressTwice() noexcept {}
-
     struct Liveness {
         std::optional<ev::Instant> last_heard{}; // empty: not since boot
         int8_t     rssi      = 0;
@@ -88,7 +55,7 @@ private:
     [[nodiscard]] const Liveness &liveness(ev::Role role) const noexcept { return liveness_[role]; }
 
     [[nodiscard]] std::optional<ev::Role> roleByExt(uint64_t ext_addr) const noexcept;
-    [[nodiscard]] std::optional<ev::Role> roleFromManifest(uint64_t ext_addr) const noexcept;
+    [[nodiscard]] std::optional<ev::Role> roleFromAddress(uint64_t ext_addr) const noexcept;
     void assign(ev::Role role, uint64_t ext_addr, uint16_t short_addr);
     void clear(ev::Role role);
     void heard(ev::Role role);
@@ -103,7 +70,7 @@ private:
     ev::Flow keepAlive(ev::Role bulb);
 
     ev::Post                     post_;
-    Manifest                     manifest_;
+    ev::Addresses                addresses_;
     ev::DeviceRecords            records_{};
     ev::PerRole<Liveness>        liveness_{};
     std::optional<ev::Role>      armed_;
@@ -145,7 +112,10 @@ constexpr auto about(ev::Role role) noexcept
 }
 } // namespace
 
-DeviceRegistry::DeviceRegistry(ev::Post post, Manifest manifest) : post_(std::move(post)), manifest_(manifest) {}
+DeviceRegistry::DeviceRegistry(ev::Post post, ev::Addresses addresses)
+    : post_(std::move(post)), addresses_(addresses)
+{
+}
 
 std::optional<ev::Role> DeviceRegistry::roleByExt(uint64_t ext_addr) const noexcept
 {
@@ -157,10 +127,10 @@ std::optional<ev::Role> DeviceRegistry::roleByExt(uint64_t ext_addr) const noexc
     return std::nullopt;
 }
 
-std::optional<ev::Role> DeviceRegistry::roleFromManifest(uint64_t ext_addr) const noexcept
+std::optional<ev::Role> DeviceRegistry::roleFromAddress(uint64_t ext_addr) const noexcept
 {
     for (const ev::Role role : ev::kRoles) {
-        if (ext_addr != 0 && manifest_[role] == ext_addr) {
+        if (ext_addr != 0 && addresses_[role] == ext_addr) {
             return role;
         }
     }
@@ -283,11 +253,11 @@ void DeviceRegistry::on(const ev::DeviceAnnounced &e)
         return;
     }
 
-    const auto role = roleFromManifest(e.ext_addr);
+    const auto role = roleFromAddress(e.ext_addr);
     if (!role) {
         ev::log::warn(kTag,
-                      "Ignoring unknown device 0x{:04x} (ext=0x{:016x}): not in role manifest (use `pair <role>` to "
-                      "claim it)",
+                      "Ignoring unknown device 0x{:04x} (ext=0x{:016x}): not in the installation's addresses (use "
+                      "`pair <role>` to claim it)",
                       e.short_addr, e.ext_addr);
         return;
     }
@@ -296,7 +266,7 @@ void DeviceRegistry::on(const ev::DeviceAnnounced &e)
                       name(*role));
         return;
     }
-    ev::log::info(kTag, "New device joined -> {} (from role manifest)", name(*role));
+    ev::log::info(kTag, "New device joined -> {} (by its address)", name(*role));
     assign(*role, e.ext_addr, e.short_addr);
 }
 

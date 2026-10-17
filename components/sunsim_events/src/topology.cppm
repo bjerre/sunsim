@@ -54,6 +54,49 @@ private:
     std::size_t      size_ = 0;
 };
 
+// ---- Addresses: which device is which ---------------------------------------
+
+// A device's IEEE (EUI-64) address, from its label: when it joins, it takes
+// `role`.
+struct Address {
+    std::string_view role;         // one role: "WallA", "Work", any case
+    uint64_t         ext_addr = 0; // 0: not known yet (claim it with `pair`)
+};
+
+// Each role's address; 0: none given.
+using Addresses = PerRole<uint64_t>;
+
+namespace detail {
+// Not constexpr: reached while building kAddressOf, they stop the compile,
+// and the error names them.
+inline void anAddressNamesNoRole() noexcept {}
+inline void aRoleHasTwoAddresses() noexcept {}
+inline void anAddressIsGivenTwice() noexcept {}
+} // namespace detail
+
+// `entries` per role: a name that isn't one role, a role listed twice, or
+// one address given to two roles doesn't compile.
+template <std::ranges::input_range Entries> [[nodiscard]] consteval Addresses addressesOf(const Entries &entries)
+{
+    Addresses     addresses{};
+    PerRole<bool> listed{};
+    for (const Address &entry : entries) {
+        const auto role = parseRole(entry.role);
+        if (!role) {
+            detail::anAddressNamesNoRole();
+        }
+        if (listed[*role]) {
+            detail::aRoleHasTwoAddresses();
+        }
+        if (entry.ext_addr != 0 && std::ranges::contains(addresses.items, entry.ext_addr)) {
+            detail::anAddressIsGivenTwice();
+        }
+        listed[*role]    = true;
+        addresses[*role] = entry.ext_addr;
+    }
+    return addresses;
+}
+
 // ---- Looks: what a light shows ----------------------------------------------
 
 // The sun at the configured location: warm and dim at sunrise and sunset,

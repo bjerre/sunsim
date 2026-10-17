@@ -168,8 +168,11 @@ classDiagram
     StatusSnapshot ..> PerRole~T~ : devices, records, peaks
 ```
 
-The room's behavior is data too, in `installation.cppm`, written in
-`topology.cppm`'s words. `kShows` gives each light a look (a `Look`
+The rest of the room is data too, in `installation.cppm`, written in
+`topology.cppm`'s words. `kAddresses` gives roles' IEEE addresses, from
+the devices' labels, checked into `kAddressOf` (the `DeviceRegistry`
+gets it): a name that isn't one role, a role listed twice or an address
+given twice doesn't compile. `kShows` gives each light a look (a `Look`
 variant: `SunCurve`, `WorkCurve`), checked at compile time into
 `kLookOf`: a name the layout doesn't have, a light with two looks or none,
 or a look on a button doesn't compile. `kGate` says when the lights may be
@@ -264,7 +267,6 @@ classDiagram
         -optional~Role~ armed_
         -PerRole~Flow~ discovery_
         -PerRole~Flow~ keep_alive_
-        +manifestOf(entries) Manifest$
         +on(RolesLoaded / NetworkUp / DeviceAnnounced)
         +on(EndpointFound / PingResult / AckReceived)
         +on(PairRequested / UnpairRequested / ...)
@@ -807,7 +809,7 @@ sequenceDiagram
     end
 ```
 
-Pairing a device (console `pair` or the role manifest) is in DESIGN.md §2.
+Pairing a device (console `pair` or its address in `kAddresses`) is in DESIGN.md §2.
 
 ## 7. Event catalogue (`events.cppm`)
 

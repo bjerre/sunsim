@@ -28,8 +28,8 @@ export namespace sunsim::core {
 // All of the pure application logic. Platform code (radio, storage, clock,
 // console, display) talks to it only through events on the bus.
 struct CoreModules {
-    CoreModules(const ev::Post &post, DeviceRegistry::Manifest manifest)
-        : mode(post), registry(post, manifest), sky(post), programs(post), overlays(post), output(post), status(post)
+    CoreModules(const ev::Post &post, ev::Addresses addresses)
+        : mode(post), registry(post, addresses), sky(post), programs(post), overlays(post), output(post), status(post)
     {
     }
 

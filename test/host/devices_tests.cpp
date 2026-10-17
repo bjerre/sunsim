@@ -215,19 +215,15 @@ void devicesTests()
               persisted[0].records[kWork].valid);
     });
 
-    test("the role manifest is checked against the layout by name", [] {
-        struct Entry {
-            const char *role;
-            uint64_t    ext_addr;
-        };
-        constexpr std::array entries{Entry{"WallE", 0xE5}, Entry{"work", 0xB2}, Entry{"WallB", 0}};
-        constexpr auto manifest = core::DeviceRegistry::manifestOf(entries);
-        static_assert(manifest[kWallE] == 0xE5 && manifest[kWork] == 0xB2);
-        static_assert(manifest[kWallA] == 0 && manifest[kWallB] == 0); // 0: no entry
-        // Wrong names, a role given twice or an address given twice don't compile.
+    test("addresses are checked against the layout by name; a known one joins as its role", [] {
+        constexpr auto addresses =
+            addressesOf(std::array{Address{"WallE", 0xE5}, Address{"work", 0xB2}, Address{"WallB", 0}});
+        static_assert(addresses[kWallE] == 0xE5 && addresses[kWork] == 0xB2);
+        static_assert(addresses[kWallA] == 0 && addresses[kWallB] == 0); // 0: none given
+        // Wrong names, a role listed twice or an address given twice don't compile.
 
         EventBus          bus;
-        core::CoreModules core{bus.post(), manifest};
+        core::CoreModules core{bus.post(), addresses};
         std::vector<RoleAssigned> assigned;
         core::wireCore(bus, core);
         bus.on<RoleAssigned>([&](const RoleAssigned &e) { assigned.push_back(e); });
