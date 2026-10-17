@@ -306,8 +306,8 @@ LEDs. On a winter weekday this is visible from ~15:40 to sunset (~16:22).
 
 ### Work bulb (`DaylightSchedule::workState`)
 
-Bright, and **cool to warm** across the core work hours (`work_start_hour`
-to `work_end_hour`, default 08:30-17:30, inside the longer 08:00-19:00
+Bright, and **cool to warm** across the core work hours (`work`, a
+`DaySpan`, default 08:30-17:30, inside the longer 08:00-19:00
 active window it's on for) rather than tied to the sun: cool, blue-rich light in the morning supports alertness and
 circadian entrainment, while blue-rich light in the evening suppresses
 melatonin and delays sleep (cf. the evening-light guidance in Brown et
@@ -406,9 +406,9 @@ steady at its minimum in the sunset's amber; `tune <light> <level>`, then
 
 Both bulb types are gated by one shared window, set with the `config`
 console command and persisted in NVS (`platform::SettingsStore`):
-on only on `active_days` (default Mon–Fri) between `active_start_hour` and
-`active_end_hour` (default 08:00–19:00), off otherwise. Inside it, a gate
-factor ramps over `fade_minutes` (default 10) at each edge:
+on only on `active_days` (a `Weekdays` set, default Mon–Fri) in the
+`active` hours (a `DaySpan`, default 08:00–19:00), off otherwise. Inside
+it, a gate factor ramps over `fade` (default 10 min) at each edge:
 
 ```
 gate = 0                                               outside days/hours
@@ -418,7 +418,7 @@ level_out = round(gate · level), floored to min_level while gate > 0
 
 Only brightness is scaled; color temperature still follows the sun. The
 sun curve still applies inside the window, so in winter the wall bulbs go
-dark at real sunset even before `active_end_hour`.
+dark at real sunset even before the active hours end.
 
 ## 5. How location is provided
 
@@ -434,7 +434,8 @@ calculation — no GPS, just two numbers you configure once:
    calculation has to know which UTC instant "today, local time" actually
    is. `InternetSync` sets the clock to UTC over SNTP (at boot, then in the
    daily sync window); from there, `platform::Clock` derives the offset in effect
-   *today* (DST included) without a portable `tm_gmtoff` field (not
+   now (DST included; `utcOffset()` in `zone.cppm`, the one place that
+   touches `std::tm`) without a portable `tm_gmtoff` field (not
    available on this toolchain's `struct tm` — confirmed by test
    compile): it takes the current instant's local calendar fields
    (`localtime_r`, under the process's `TZ`, `CONFIG_SUNSIM_TZ`), reads
@@ -442,14 +443,17 @@ calculation — no GPS, just two numbers you configure once:
    difference from the instant itself is the offset. (An earlier version
    fed `gmtime_r`'s fields to `mktime()`; `gmtime_r` sets `tm_isdst = 0`,
    so that always gave the standard offset and put every sunrise/sunset an
-   hour early under DST.)
+   hour early under DST.) Everything past the clock works in `<chrono>`:
+   a `TimeReading` is a `std::chrono::local_seconds` plus that offset, and
+   gives its day, weekday, day of the year and time since midnight.
 
 `solar.cppm` implements the "Sunrise/Sunset Algorithm" from the
 *Almanac for Computers, 1990* (Nautical Almanac Office, US Naval
 Observatory) — the standard non-iterative closed-form approximation used
 by most embedded sunrise/sunset libraries (accurate to within a couple of
-minutes). Given latitude, longitude, day-of-year (`tm_yday + 1`), and the
-UTC offset above, it returns local sunrise/sunset as fractional hours.
+minutes). Given latitude, longitude, day-of-year (`TimeReading::dayOfYear()`), and
+the UTC offset above, it returns local sunrise/sunset as `ev::Hours`
+(fractional hours after midnight).
 Validated on the host against known reference times before wiring it in
 (equinox ≈ 06:00/18:00 everywhere; London ≈ 04:43/21:21 at the summer
 solstice and ≈ 08:04/15:53 at the winter solstice; Reykjavik's much longer

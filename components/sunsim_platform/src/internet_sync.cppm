@@ -1,7 +1,5 @@
 module;
 
-#include <time.h> // localtime_r (POSIX)
-
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
@@ -16,6 +14,7 @@ import std.compat;
 import sunsim.ev;
 import sunsim.weather;
 import :wifi;
+import :zone;
 
 export namespace sunsim::platform {
 
@@ -110,23 +109,6 @@ std::chrono::sys_seconds now() noexcept
     return std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now());
 }
 
-uint16_t minutesOf(double hours) noexcept
-{
-    return static_cast<uint16_t>(std::lround(hours * 60.0));
-}
-
-std::tm localTime(std::time_t t) noexcept
-{
-    std::tm local{};
-    localtime_r(&t, &local);
-    return local;
-}
-
-std::chrono::sys_days dateOf(const std::tm &t) noexcept
-{
-    return std::chrono::sys_days{std::chrono::year{t.tm_year + 1900} / 1 / 1} + std::chrono::days{t.tm_yday};
-}
-
 // A coordinate as the services like it: at most four decimals, no
 // trailing zeros (NWS redirects "44.9800" to "44.98").
 std::string coordinate(double degrees)
@@ -201,8 +183,8 @@ void InternetSync::start()
 
 void InternetSync::on(const ev::ConfigChanged &e)
 {
-    window_start_ = minutesOf(e.config.sync_start_hour);
-    window_end_   = minutesOf(e.config.sync_end_hour);
+    window_start_ = static_cast<uint16_t>(e.config.sync.start.count());
+    window_end_   = static_cast<uint16_t>(e.config.sync.end.count());
 }
 
 void InternetSync::on(const ev::SyncRequested &)
@@ -246,15 +228,13 @@ bool InternetSync::fetchCloudCover()
         return false;
     }
 
-    const std::tm  today = localTime(std::time(nullptr));
+    const auto     today = std::chrono::floor<std::chrono::days>(toLocal(now()));
     ev::CloudCover forecast;
-    forecast.year      = static_cast<int16_t>(today.tm_year + 1900);
-    forecast.yday      = static_cast<int16_t>(today.tm_yday);
+    forecast.day       = today;
     std::size_t placed = 0;
     for (const auto &[start, percent] : reader.hours()) {
-        const std::tm local = localTime(std::chrono::system_clock::to_time_t(start));
-        const long    slot  = (dateOf(local) - dateOf(today)).count() * 24 + local.tm_hour;
-        if (slot >= 0 && slot < static_cast<long>(ev::CloudCover::kHours)) {
+        const auto slot = std::chrono::floor<std::chrono::hours>(toLocal(start) - today).count();
+        if (slot >= 0 && std::cmp_less(slot, ev::CloudCover::kHours)) {
             forecast.percent[static_cast<std::size_t>(slot)] = percent;
             ++placed;
         }
@@ -363,15 +343,15 @@ bool InternetSync::due(const Job &job, const JobState &state, std::chrono::sys_s
         return !state.last_try || t - *state.last_try >= every->period;
     }
 
-    const std::tm local  = localTime(std::chrono::system_clock::to_time_t(t));
-    const auto    minute = std::chrono::minutes{local.tm_hour * 60 + local.tm_min};
-    const auto    start  = std::chrono::minutes{window_start_.load()};
-    if (minute < start || minute >= std::chrono::minutes{window_end_.load()}) {
+    const auto        local = toLocal(t);
+    const auto        since = local - std::chrono::floor<std::chrono::days>(local); // since midnight
+    const ev::DaySpan window{std::chrono::minutes{window_start_.load()}, std::chrono::minutes{window_end_.load()}};
+    if (!window.contains(since)) {
         return false;
     }
     // When today's window opened: done since then, nothing to do; else the
     // first try in it, or a retry.
-    const auto opened = t - (minute - start) - std::chrono::seconds{local.tm_sec};
+    const auto opened = t - (since - window.start);
     if (state.last_ok && *state.last_ok >= opened) {
         return false;
     }

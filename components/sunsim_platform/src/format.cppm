@@ -2,28 +2,27 @@
 module sunsim.platform:format; // internal: not exported
 
 import std.compat;
+import sunsim.ev;
 
 namespace sunsim::platform {
 
-// In tm_wday order.
-inline constexpr const char *kWeekdayNames[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-
-// Fractional hours as "HH:MM". 24:00 stays as is (a window ending at
+// A time after midnight as "HH:MM". 24:00 stays as is (a window ending at
 // midnight); anything later wraps into the next day.
-inline void formatClock(char *buf, std::size_t len, double hours)
+inline std::string clockText(ev::Hours after_midnight)
 {
-    long minutes = std::lround(hours * 60.0);
-    if (minutes > 24 * 60) {
-        minutes -= 24 * 60;
+    auto t = std::chrono::round<std::chrono::minutes>(after_midnight);
+    if (t > std::chrono::days{1}) {
+        t -= std::chrono::days{1};
     }
-    std::snprintf(buf, len, "%02ld:%02ld", minutes / 60, minutes % 60);
+    return std::format("{:02}:{:02}", std::chrono::floor<std::chrono::hours>(t).count(),
+                       (t % std::chrono::hours{1}).count());
 }
 
-// Fractional hours as "Xh MMm".
-inline void formatDuration(char *buf, std::size_t len, double hours)
+// A duration as "Xh MMm".
+inline std::string durationText(ev::Hours d)
 {
-    const long minutes = std::lround(hours * 60.0);
-    std::snprintf(buf, len, "%ldh %02ldm", minutes / 60, minutes % 60);
+    const auto t = std::chrono::round<std::chrono::minutes>(d);
+    return std::format("{}h {:02}m", std::chrono::floor<std::chrono::hours>(t).count(), (t % std::chrono::hours{1}).count());
 }
 
 } // namespace sunsim::platform

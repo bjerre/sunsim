@@ -63,8 +63,8 @@ void StatusModel::on(const ev::Tick &e)
 void StatusModel::publish()
 {
     const ev::TimeReading &t = snap_.time;
-    snap_.day = computeDayInfo(t.local, t.utc_offset_hours, snap_.config.latitude_deg, snap_.config.longitude_deg);
-    snap_.in_active_window = DaylightSchedule{snap_.config}.inActiveWindow(t.local);
+    snap_.day              = computeDayInfo(t, snap_.config.latitude_deg, snap_.config.longitude_deg);
+    snap_.in_active_window = DaylightSchedule{snap_.config}.inActiveWindow(t);
     post_(ev::StatusChanged{std::make_shared<const ev::StatusSnapshot>(snap_)});
 }
 

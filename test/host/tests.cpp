@@ -29,16 +29,18 @@ constexpr Role kButton{Group::Button};
         }                                                                                                              \
     } while (0)
 
-// A weekday at 12:00, clock set.
+// noon()'s day: a Tuesday, the 172nd day of the year.
+constexpr std::chrono::local_days kTuesday{std::chrono::year{2022} / std::chrono::June / 21};
+
+// That Tuesday at `time` after midnight, clock set, five hours behind UTC.
+TimeReading at(std::chrono::minutes time)
+{
+    return {.local = kTuesday + time, .utc_offset = -5h, .valid = true};
+}
+
 TimeReading noon()
 {
-    TimeReading t;
-    t.local.tm_wday = 2; // Tuesday
-    t.local.tm_yday = 171;
-    t.local.tm_hour = 12;
-    t.valid         = true;
-    t.utc_offset_hours = -5;
-    return t;
+    return at(12h);
 }
 
 // The core, wired like the firmware, plus a log of every event posted.
@@ -380,8 +382,7 @@ int main()
         CHECK(changes.size() == 1 && changes[0].role == kWork && !changes[0].reachable);
 
         h.clearLog();
-        TimeReading later = noon();
-        later.local.tm_hour = 14; // the curve has moved on since the last update
+        const TimeReading later = at(14h); // the curve has moved on since the last update
         h.post(ProgramTick{.time = later, .transition = 60s});
         bool to_work = false, to_wall = false;
         for (const auto &l : h.all<SetLight>()) {
@@ -524,8 +525,7 @@ int main()
 
     test("at sunset the amber glow sweeps the wall from the west end", [] {
         Harness h;
-        TimeReading dusk = noon();
-        dusk.local.tm_min = 55; // 17:55 UTC at 0°E: the sun ~2° up, in the west-northwest
+        const TimeReading dusk = at(12h + 55min); // 17:55 UTC at 0°E: the sun ~2° up, in the west-northwest
         h.tick(1, dusk);
         for (const Role wall : members(Group::Wall)) {
             h.pairBulb(wall, 0xA0 + wall.index, static_cast<uint16_t>(0x0010 + wall.index));
@@ -556,12 +556,11 @@ int main()
         CHECK(even.front() - swept.back() < 10); // and barely at the end nearest the sun
     });
 
-    // A forecast for noon()'s date (tm_year 0 = 1900, yday 171): 20% at
-    // 12:00, 60% at 13:00, the next day's noon 90%.
+    // A forecast for noon()'s date: 20% at 12:00, 60% at 13:00, the next
+    // day's noon 90%.
     const auto forecast = [] {
         CloudCover f;
-        f.year       = 1900;
-        f.yday       = 171;
+        f.day         = kTuesday;
         f.percent[12] = 20;
         f.percent[13] = 60;
         f.percent[36] = 90;
@@ -569,28 +568,24 @@ int main()
     }();
 
     test("cloud cover: interpolated by local hour; fast-day reads today's", [&] {
-        TimeReading t = noon();
-        t.local.tm_min = 30;
-        const auto half = core::cloudCover(forecast, t);
+        const auto half = core::cloudCover(forecast, at(12h + 30min));
         CHECK(half && std::abs(*half - 0.40) < 1e-9);
 
         TimeReading tomorrow = noon();
-        tomorrow.local.tm_yday = 172;
+        tomorrow.local += std::chrono::days{1};
         const auto next = core::cloudCover(forecast, tomorrow);
         CHECK(next && std::abs(*next - 0.90) < 1e-9); // hour 36, with no data at 37
 
         TimeReading sim = noon();
-        sim.local.tm_yday = 0; // fast-day's January 1
-        sim.simulated     = true;
+        sim.local       = std::chrono::local_days{2024y / std::chrono::January / 1} + 12h; // fast-day's week
+        sim.simulated   = true;
         const auto today = core::cloudCover(forecast, sim);
         CHECK(today && std::abs(*today - 0.20) < 1e-9);
 
         sim.simulated = false;
         CHECK(!core::cloudCover(forecast, sim));               // a date the forecast doesn't cover
         CHECK(!core::cloudCover(CloudCover{}, noon()));        // no forecast yet
-        TimeReading early = noon();
-        early.local.tm_hour = 3;
-        CHECK(!core::cloudCover(forecast, early));             // no data for 03:00
+        CHECK(!core::cloudCover(forecast, at(3h)));            // no data for 03:00
     });
 
     test("clouds dim the wall, cool it and flatten its sun direction", [] {
@@ -612,8 +607,7 @@ int main()
         Harness grey;
         grey.tick();
         CloudCover overcast;
-        overcast.year = 1900;
-        overcast.yday = 171;
+        overcast.day = kTuesday;
         overcast.percent.fill(100);
         grey.post(CloudCoverUpdated{overcast});
         const auto cloudy = wall(grey);
@@ -634,8 +628,7 @@ int main()
     });
 
     test("minimum levels keep the wall lit down to sunset, then off", [] {
-        TimeReading dusk = noon();
-        dusk.local.tm_min = 55; // the sun ~2 deg up
+        const TimeReading dusk = at(12h + 55min); // the sun ~2 deg up
         const auto westLevel = [](Harness &h, const TimeReading &t) {
             h.clearLog();
             h.post(ProgramTick{.time = t, .transition = 60s});
@@ -654,9 +647,7 @@ int main()
         CHECK(dim >= 1 && dim < 40);
         CHECK(floored >= 40);
 
-        TimeReading night = noon();
-        night.local.tm_hour = 13;
-        night.local.tm_min  = 30; // after sunset
+        const TimeReading night = at(13h + 30min); // after sunset
         CHECK(westLevel(h, night) == 0);
     });
 
@@ -934,8 +925,7 @@ int main()
     });
 
     test("snow outside active hours glows dimmer; not at all in off mode", [&] {
-        TimeReading night = noon();
-        night.local.tm_hour = 22;
+        const TimeReading night = at(22h);
 
         Harness lit;
         weatherRig(lit, noon());
@@ -964,8 +954,7 @@ int main()
     });
 
     test("a warning pulses red even with the lights off; a watch only on lit lights", [&] {
-        TimeReading night = noon();
-        night.local.tm_hour = 22;
+        const TimeReading night = at(22h);
         Harness h;
         weatherRig(h, night);
         h.post(ButtonPressed{.press = Press::Hold, .at = h.now}); // all off
@@ -1028,7 +1017,7 @@ int main()
         CHECK(is("sunshift", "25%") && is("ambersweep", "3 deg") && is("amber", "on"));
         CHECK(is("precip", "WallC") && is("alerts", "WallB,WallD"));
 
-        CHECK(takes("hours", "07:30-24:00") && c.active_start_hour == 7.5 && c.active_end_hour == 24.0);
+        CHECK((takes("hours", "07:30-24:00") && c.active == DaySpan{7h + 30min, 24h}));
         CHECK(takes("days", "sat,mon") && is("days", "mon,sat"));
         CHECK(takes("clouds", "off") && !c.clouds_enabled);
         CHECK(takes("alerts", "none") && is("alerts", "none"));
@@ -1044,7 +1033,7 @@ int main()
         CHECK(!takes("amber", "yes"));
         CHECK(!takes("days", "mon,funday"));
         CHECK(!takes("precip", "Button"));        // not a light
-        CHECK(before.active_start_hour == c.active_start_hour && before.sun_shift_percent == c.sun_shift_percent &&
+        CHECK(before.active == c.active && before.sun_shift_percent == c.sun_shift_percent &&
               before.precip_lights == c.precip_lights); // nothing changed
 
         const auto error = set(*findSetting("sunshift"), c, "lots");

@@ -98,9 +98,8 @@ void DaylightProgram::emit(ev::Role role, const ev::TimeReading &time, ev::Trans
     if (time.valid) {
         clock_warned_ = false;
         state         = role.group == ev::Group::Work
-                            ? schedule_.workState(time.local)
-                            : schedule_.wallState(time.local, time.utc_offset_hours, wallPosition(role),
-                                                  cloud_percent_ / 100.0);
+                            ? schedule_.workState(time)
+                            : schedule_.wallState(time, wallPosition(role), cloud_percent_ / 100.0);
     } else if (!clock_warned_) {
         clock_warned_ = true;
         SUNSIM_LOGW(kTag, "Clock not set yet (no time sync) - holding lights off");

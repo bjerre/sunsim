@@ -15,7 +15,8 @@ set(modules "src/platform.cppm"
             "src/status_display.cppm"
             "src/status_slot.cppm"
             "src/wifi.cppm"
-            "src/zigbee_adapter.cppm")
+            "src/zigbee_adapter.cppm"
+            "src/zone.cppm")
 
 idf_component_register(SRCS ${modules}
                        REQUIRES sunsim_events esp_timer esp_event espressif__esp-zigbee-lib

@@ -32,6 +32,43 @@ using Instant = BootClock::time_point;
 // Zigbee transition times: tenths of a second.
 using Transition = std::chrono::duration<uint16_t, std::deci>;
 
+// Fractional hours: for the solar math and what's shown from it.
+using Hours = std::chrono::duration<double, std::ratio<3600>>;
+
+// A stretch of the day, from `start` to `end` after local midnight
+// (start < end <= 24 h): the active hours, the work hours, the sync window.
+struct DaySpan {
+    std::chrono::minutes start{};
+    std::chrono::minutes end{};
+
+    [[nodiscard]] constexpr bool contains(std::chrono::seconds since_midnight) const noexcept
+    {
+        return since_midnight >= start && since_midnight < end;
+    }
+    [[nodiscard]] constexpr bool valid() const noexcept
+    {
+        return start >= std::chrono::minutes{0} && end <= std::chrono::days{1} && start < end;
+    }
+
+    // Spelled out: defaulted, GCC 15 crashes compiling an importer that uses it.
+    friend constexpr bool operator==(DaySpan a, DaySpan b) noexcept { return a.start == b.start && a.end == b.end; }
+};
+
+// A set of weekdays.
+struct Weekdays {
+    uint8_t bits = 0; // bit n: weekday n, as std::chrono::weekday::c_encoding() (0 = Sunday)
+
+    [[nodiscard]] constexpr bool contains(std::chrono::weekday day) const noexcept
+    {
+        return (bits >> day.c_encoding()) & 1U;
+    }
+    constexpr void insert(std::chrono::weekday day) noexcept { bits |= static_cast<uint8_t>(1U << day.c_encoding()); }
+
+    friend constexpr bool operator==(Weekdays, Weekdays) noexcept = default;
+};
+inline constexpr Weekdays kMondayToFriday{0b0111110};
+inline constexpr Weekdays kEveryDay{0b1111111};
+
 // ---- Roles ----------------------------------------------------------------
 
 // What a device does. Each group can hold any number of devices.
@@ -312,8 +349,6 @@ struct DeviceStatus {
 
 // ---- Program settings -----------------------------------------------------
 
-inline constexpr uint8_t kMondayToFriday = 0b0111110; // bit n = tm_wday n (0 = Sunday)
-inline constexpr uint8_t kEveryDay       = 0b1111111;
 
 // Everything the programs (and the internet sync) can be tuned with. See
 // DESIGN.md §4.
@@ -341,25 +376,22 @@ struct ProgramConfig {
     double  amber_kelvin         = 1800.0;
     uint8_t amber_sweep_deg      = 3; // 0-kMaxAmberSweepDeg
 
-    // Active window, shared by all bulbs: on only on active_days between
-    // active_start_hour and active_end_hour; fade_minutes at each edge.
-    double  active_start_hour = 8.0;
-    double  active_end_hour   = 19.0;
-    double  fade_minutes      = 10.0;
-    uint8_t active_days       = kMondayToFriday;
+    // Active window, shared by all bulbs: on only on active_days, in the
+    // active hours; fading in and out over `fade` at each edge.
+    DaySpan              active{std::chrono::hours{8}, std::chrono::hours{19}};
+    std::chrono::minutes fade{10};
+    Weekdays             active_days = kMondayToFriday;
 
     // Work light: cool -> warm (ease-in) across the core work hours, cool
     // before them and warm after.
-    double   work_start_hour  = 8.5;  // 08:30
-    double   work_end_hour    = 17.5; // 17:30
-    uint16_t work_cool_mireds = 167;  // ~6000K
-    uint16_t work_warm_mireds = 333;  // ~3000K
+    DaySpan  work{std::chrono::minutes{8 * 60 + 30}, std::chrono::minutes{17 * 60 + 30}};
+    uint16_t work_cool_mireds = 167; // ~6000K
+    uint16_t work_warm_mireds = 333; // ~3000K
 
     // Internet sync window: once a day in it, the clock is synced (and the
     // day's internet data fetched), retrying every 10 min within it on
     // failure. Before the active window, so the data is ready for the day.
-    double sync_start_hour = 4.0;
-    double sync_end_hour   = 5.0;
+    DaySpan sync{std::chrono::hours{4}, std::chrono::hours{5}};
 
     // Cloud cover over the wall (the hourly forecast, CloudCover): under
     // full overcast the wall is up to cloud_dim_percent dimmer and its
@@ -405,13 +437,12 @@ inline constexpr MinLevels kDefaultMinLevels = [] {
 // ---- Weather --------------------------------------------------------------
 
 // The hourly cloud cover forecast (InternetSync fetches it each sync): 48
-// local hours from 00:00 of the day it was fetched. year == 0: none yet.
+// local hours from 00:00 of the day it was fetched.
 struct CloudCover {
     static constexpr uint8_t     kNoData = 0xFF;
     static constexpr std::size_t kHours  = 48;
 
-    int16_t                       year = 0; // the local date of hour 0
-    int16_t                       yday = 0; // tm_yday
+    std::optional<std::chrono::local_days> day; // hour 0's date; none: no forecast yet
     std::array<uint8_t, kHours>   percent = [] {
         std::array<uint8_t, kHours> a{};
         a.fill(kNoData);
@@ -527,20 +558,33 @@ struct Sky {
 
 // What time the program runs on: the real clock, or the debug fast-day clock.
 struct TimeReading {
-    std::tm local{};
-    double  utc_offset_hours = 0.0; // local civil offset incl. DST, + = East
-    bool    valid            = false; // false until the clock has been set (SNTP)
-    bool    simulated        = false; // debug fast-day clock
+    std::chrono::local_seconds local{};      // the wall-clock time where the lights are
+    std::chrono::minutes       utc_offset{}; // local - UTC, DST included (+ = East)
+    bool                       valid     = false; // false until the clock has been set (SNTP)
+    bool                       simulated = false; // debug fast-day clock
+
+    [[nodiscard]] constexpr std::chrono::local_days day() const noexcept
+    {
+        return std::chrono::floor<std::chrono::days>(local);
+    }
+    [[nodiscard]] constexpr std::chrono::seconds sinceMidnight() const noexcept { return local - day(); }
+    [[nodiscard]] constexpr std::chrono::weekday weekday() const noexcept { return std::chrono::weekday{day()}; }
+    [[nodiscard]] constexpr int dayOfYear() const noexcept // 1-366
+    {
+        const std::chrono::year_month_day date{day()};
+        return static_cast<int>((day() - std::chrono::local_days{date.year() / 1 / 1}).count()) + 1;
+    }
 };
 
-// Today's daylight as shown by the status display/console.
+// Today's daylight as shown by the status display/console: times are after
+// local midnight.
 struct DayInfo {
-    double sunrise_hour     = 0.0; // today, local fractional hours
-    double sunset_hour      = 0.0;
-    double day_length_hours = 0.0;
-    bool   next_is_sunrise  = true;  // false = next event is today's sunset
-    double next_event_hour  = 0.0;   // local hours of the next event
-    double hours_until_next = 0.0;
+    Hours sunrise{};
+    Hours sunset{};
+    Hours day_length{};
+    bool  next_is_sunrise = true; // false = next event is today's sunset
+    Hours next_event{};           // when the next event is
+    Hours until_next{};           // how long until it
 };
 
 // ---- Status ---------------------------------------------------------------

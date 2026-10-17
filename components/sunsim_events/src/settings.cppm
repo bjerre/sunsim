@@ -27,26 +27,23 @@ struct Number { // a whole number in a range; stored as a u8
     [[nodiscard]] constexpr bool accepts(long v) const noexcept { return v >= min && v <= max; }
 };
 struct Minutes { // a duration; stored as whole minutes, a u16
-    double ProgramConfig::*field;
-    uint16_t               max;
-    const char            *key;
+    std::chrono::minutes ProgramConfig::*field;
+    std::chrono::minutes                 max;
+    const char                          *key;
 
-    [[nodiscard]] constexpr bool accepts(long v) const noexcept { return v >= 0 && v <= max; }
-};
-struct Span { // HH:MM-HH:MM; each end stored as minutes after midnight, a u16
-    double ProgramConfig::*start;
-    double ProgramConfig::*end;
-    const char            *start_key;
-    const char            *end_key;
-
-    [[nodiscard]] static constexpr bool accepts(long start_min, long end_min) noexcept
+    [[nodiscard]] constexpr bool accepts(std::chrono::minutes v) const noexcept
     {
-        return start_min >= 0 && end_min <= 24 * 60 && start_min < end_min;
+        return v >= std::chrono::minutes{0} && v <= max;
     }
 };
-struct Days { // mon-fri | all | mon,wed,...: bit n = tm_wday n; stored as a u8
-    uint8_t ProgramConfig::*field;
-    const char             *key;
+struct Span { // HH:MM-HH:MM; each end stored as minutes after midnight, a u16
+    DaySpan ProgramConfig::*field;
+    const char             *start_key;
+    const char             *end_key;
+};
+struct Days { // mon-fri | all | mon,wed,...; stored as Weekdays' bits, a u8
+    Weekdays ProgramConfig::*field;
+    const char              *key;
 };
 struct Lights { // none | WallB,WallD | wall ...: bulbs only; stored as the set's bits, a u16
     RoleSet ProgramConfig::*field;
@@ -66,11 +63,10 @@ struct Setting {
 inline constexpr std::array kSettings = [] {
     using PC = ProgramConfig;
     return std::array{
-        Setting{"hours", setting::Span{&PC::active_start_hour, &PC::active_end_hour, "act.start", "act.end"},
-                "when the lights may be on"},
+        Setting{"hours", setting::Span{&PC::active, "act.start", "act.end"}, "when the lights may be on"},
         Setting{"days", setting::Days{&PC::active_days, "act.days"}, "the days they may be on"},
-        Setting{"fade", setting::Minutes{&PC::fade_minutes, 180, "act.fade"}, "fade in and out at each edge of the hours"},
-        Setting{"workhours", setting::Span{&PC::work_start_hour, &PC::work_end_hour, "work.start", "work.end"},
+        Setting{"fade", setting::Minutes{&PC::fade, std::chrono::minutes{180}, "act.fade"}, "fade in and out at each edge of the hours"},
+        Setting{"workhours", setting::Span{&PC::work, "work.start", "work.end"},
                 "the work light: cool -> warm across these"},
         Setting{"sunshift", setting::Number{&PC::sun_shift_percent, 0, 100, "%", "sun.shift"},
                 "the wall dims away from the sun by up to this (0: off)"},
@@ -85,8 +81,7 @@ inline constexpr std::array kSettings = [] {
         Setting{"weather", setting::OnOff{&PC::weather_enabled, "wx.on"}, "the weather lights"},
         Setting{"precip", setting::Lights{&PC::precip_lights, "wx.precip"}, "the lights that pulse for rain and snow"},
         Setting{"alerts", setting::Lights{&PC::alert_lights, "wx.alert"}, "the lights that pulse for NWS alerts"},
-        Setting{"syncwindow", setting::Span{&PC::sync_start_hour, &PC::sync_end_hour, "sync.start", "sync.end"},
-                "the daily clock and forecast sync"},
+        Setting{"syncwindow", setting::Span{&PC::sync, "sync.start", "sync.end"}, "the daily clock and forecast sync"},
     };
 }();
 
@@ -156,28 +151,36 @@ std::optional<long> wholeNumber(std::string_view text) noexcept
     return err == std::errc{} && end == text.data() + text.size() ? std::optional{value} : std::nullopt;
 }
 
-// "HH:MM" as minutes after midnight (24:00 allowed).
-std::optional<long> clockMinutes(std::string_view text) noexcept
+// "HH:MM" as a time after midnight (24:00 allowed).
+std::optional<std::chrono::minutes> clockTime(std::string_view text) noexcept
 {
     const auto colon = text.find(':');
-    if (colon == std::string_view::npos) {
+    if (colon == std::string_view::npos || text.size() - colon != 3) {
         return std::nullopt;
     }
     const auto h = wholeNumber(text.substr(0, colon));
     const auto m = wholeNumber(text.substr(colon + 1));
-    if (!h || !m || *h < 0 || *m < 0 || *m > 59 || text.size() - colon != 3) {
+    if (!h || !m || *h < 0 || *m < 0 || *m > 59) {
         return std::nullopt;
     }
-    return *h * 60 + *m;
+    return std::chrono::hours{*h} + std::chrono::minutes{*m};
 }
 
-std::string clockText(double hours)
+std::string clockText(std::chrono::minutes t)
 {
-    const long minutes = std::lround(hours * 60.0);
-    return std::format("{:02}:{:02}", minutes / 60, minutes % 60);
+    return std::format("{:02}:{:02}", std::chrono::floor<std::chrono::hours>(t).count(), (t % std::chrono::hours{1}).count());
 }
 
-std::optional<uint8_t> parseDays(std::string_view text) noexcept
+// Monday first, as they're typed and shown.
+constexpr std::array kWeek = {std::chrono::Monday, std::chrono::Tuesday,  std::chrono::Wednesday, std::chrono::Thursday,
+                              std::chrono::Friday, std::chrono::Saturday, std::chrono::Sunday};
+
+std::string_view dayName(std::chrono::weekday day) noexcept
+{
+    return kDayNames[day.c_encoding()];
+}
+
+std::optional<Weekdays> parseDays(std::string_view text) noexcept
 {
     if (text == "mon-fri") {
         return kMondayToFriday;
@@ -185,34 +188,34 @@ std::optional<uint8_t> parseDays(std::string_view text) noexcept
     if (text == "all") {
         return kEveryDay;
     }
-    uint8_t mask = 0;
+    Weekdays days;
     for (;;) {
         const auto comma = text.find(',');
-        const auto day   = std::ranges::find(kDayNames, text.substr(0, comma));
-        if (day == kDayNames.end()) {
+        const auto day   = std::ranges::find(kWeek, text.substr(0, comma), dayName);
+        if (day == kWeek.end()) {
             return std::nullopt;
         }
-        mask |= static_cast<uint8_t>(1U << (day - kDayNames.begin()));
+        days.insert(*day);
         if (comma == std::string_view::npos) {
-            return mask;
+            return days;
         }
         text.remove_prefix(comma + 1);
     }
 }
 
-std::string daysText(uint8_t mask)
+std::string daysText(Weekdays days)
 {
-    if (mask == kMondayToFriday) {
+    if (days == kMondayToFriday) {
         return "mon-fri";
     }
-    if (mask == kEveryDay) {
+    if (days == kEveryDay) {
         return "all";
     }
     std::string text;
-    for (int i = 1; i <= 7; ++i) { // Monday first
-        if (const int day = i % 7; (mask >> day) & 1U) {
+    for (const std::chrono::weekday day : kWeek) {
+        if (days.contains(day)) {
             text += text.empty() ? "" : ",";
-            text += kDayNames[day];
+            text += dayName(day);
         }
     }
     return text.empty() ? "none" : text;
@@ -234,7 +237,7 @@ std::string lightsText(const RoleSet &lights)
 struct Syntax {
     std::string operator()(const setting::OnOff &) const { return "on|off"; }
     std::string operator()(const setting::Number &k) const { return std::format("{}-{}", k.min, k.max); }
-    std::string operator()(const setting::Minutes &k) const { return std::format("0-{} (minutes)", k.max); }
+    std::string operator()(const setting::Minutes &k) const { return std::format("0-{} (minutes)", k.max.count()); }
     std::string operator()(const setting::Span &) const { return "HH:MM-HH:MM"; }
     std::string operator()(const setting::Days &) const { return "mon-fri|all|mon,tue,..."; }
     std::string operator()(const setting::Lights &) const { return "none|WallC|WallB,WallD|..."; }
@@ -270,28 +273,27 @@ std::expected<void, std::string> set(const Setting &setting, ProgramConfig &conf
         bool operator()(const setting::Minutes &k) const
         {
             const auto v = wholeNumber(text);
-            if (!v || !k.accepts(*v)) {
+            if (!v || !k.accepts(std::chrono::minutes{*v})) {
                 return false;
             }
-            c.*k.field = static_cast<double>(*v);
+            c.*k.field = std::chrono::minutes{*v};
             return true;
         }
         bool operator()(const setting::Span &k) const
         {
             const auto dash  = text.find('-');
-            const auto start = clockMinutes(text.substr(0, dash));
-            const auto end   = dash == std::string_view::npos ? std::nullopt : clockMinutes(text.substr(dash + 1));
-            if (!start || !end || !setting::Span::accepts(*start, *end)) {
+            const auto start = clockTime(text.substr(0, dash));
+            const auto end   = dash == std::string_view::npos ? std::nullopt : clockTime(text.substr(dash + 1));
+            if (!start || !end || !DaySpan{*start, *end}.valid()) {
                 return false;
             }
-            c.*k.start = *start / 60.0;
-            c.*k.end   = *end / 60.0;
+            c.*k.field = {*start, *end};
             return true;
         }
         bool operator()(const setting::Days &k) const
         {
             const auto days = parseDays(text);
-            if (!days || *days == 0) {
+            if (!days || days->bits == 0) {
                 return false;
             }
             c.*k.field = *days;
@@ -320,10 +322,10 @@ std::string show(const Setting &setting, const ProgramConfig &c)
 
         std::string operator()(const setting::OnOff &k) const { return c.*k.field ? "on" : "off"; }
         std::string operator()(const setting::Number &k) const { return std::format("{}{}", c.*k.field, k.unit); }
-        std::string operator()(const setting::Minutes &k) const { return std::format("{} min", std::lround(c.*k.field)); }
+        std::string operator()(const setting::Minutes &k) const { return std::format("{} min", (c.*k.field).count()); }
         std::string operator()(const setting::Span &k) const
         {
-            return clockText(c.*k.start) + "-" + clockText(c.*k.end);
+            return clockText((c.*k.field).start) + "-" + clockText((c.*k.field).end);
         }
         std::string operator()(const setting::Days &k) const { return daysText(c.*k.field); }
         std::string operator()(const setting::Lights &k) const { return lightsText(c.*k.field); }

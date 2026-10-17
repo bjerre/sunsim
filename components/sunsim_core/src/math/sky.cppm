@@ -15,24 +15,14 @@ export namespace sunsim::core {
 
 namespace sunsim::core {
 
-namespace {
-std::chrono::sys_days dateOf(int year, int yday) noexcept
-{
-    return std::chrono::sys_days{std::chrono::year{year} / 1 / 1} + std::chrono::days{yday};
-}
-} // namespace
-
 std::optional<double> cloudCover(const ev::CloudCover &forecast, const ev::TimeReading &time) noexcept
 {
-    if (forecast.year == 0 || !time.valid) {
+    if (!forecast.day || !time.valid) {
         return std::nullopt;
     }
-    const long days = time.simulated ? 0
-                                     : (dateOf(time.local.tm_year + 1900, time.local.tm_yday) -
-                                        dateOf(forecast.year, forecast.yday))
-                                           .count();
-    const double hour =
-        days * 24.0 + time.local.tm_hour + time.local.tm_min / 60.0 + time.local.tm_sec / 3600.0;
+    // Hours into the forecast; fast-day's simulated day reads its first day.
+    const ev::Hours into{time.simulated ? time.sinceMidnight() : time.local - *forecast.day};
+    const double    hour = into.count();
     if (hour < 0.0 || hour > ev::CloudCover::kHours - 1.0) {
         return std::nullopt;
     }

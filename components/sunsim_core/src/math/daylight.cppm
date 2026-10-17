@@ -28,22 +28,17 @@ public:
     constexpr DaylightSchedule() noexcept : config_{} {}
     explicit constexpr DaylightSchedule(Config config) noexcept : config_(config) {}
 
-    // utc_offset_hours: the local civil UTC offset in effect on local_time's
-    // date, including DST, positive = East of Greenwich. Needed because
-    // std::tm alone doesn't carry it (no portable tm_gmtoff on this
-    // toolchain) - see platform::Clock for how it's derived.
-    // wall_position: where the bulb sits along the (south) wall, +1 = east
+    // `time` carries the local civil UTC offset in effect (DST included;
+    // see platform::Clock for how it's derived), which the sun's position
+    // needs. wall_position: where the bulb sits along the (south) wall, +1 = east
     // end, 0 = middle, -1 = west end; drives the sun-direction dimming and
     // the amber sweep. cloud: the cloud cover now, 0 (clear) to 1 (overcast).
-    [[nodiscard]] LightState wallState(const std::tm &local_time, double utc_offset_hours,
-                                       double wall_position = 0.0, double cloud = 0.0) const noexcept;
-    [[nodiscard]] LightState workState(const std::tm &local_time) const noexcept;
+    [[nodiscard]] LightState wallState(const ev::TimeReading &time, double wall_position = 0.0,
+                                       double cloud = 0.0) const noexcept;
+    [[nodiscard]] LightState workState(const ev::TimeReading &time) const noexcept;
 
     // True inside the active window (lights may be on), including its fades.
-    [[nodiscard]] bool inActiveWindow(const std::tm &local_time) const noexcept
-    {
-        return activeGate(local_time) > 0.0;
-    }
+    [[nodiscard]] bool inActiveWindow(const ev::TimeReading &time) const noexcept { return activeGate(time) > 0.0; }
 
     [[nodiscard]] const Config &config() const noexcept { return config_; }
     void setConfig(const Config &config) noexcept { config_ = config; }
@@ -51,7 +46,7 @@ public:
 private:
     // 0 = off (outside active days/hours), 1 = full curve, ramping between
     // the two across the fade at each edge of the active window.
-    [[nodiscard]] double activeGate(const std::tm &local_time) const noexcept;
+    [[nodiscard]] double activeGate(const ev::TimeReading &time) const noexcept;
 
     Config config_;
 };
@@ -59,14 +54,6 @@ private:
 } // namespace sunsim::core
 
 namespace sunsim::core {
-
-namespace {
-double hourOfDay(const std::tm &t) noexcept
-{
-    return t.tm_hour + t.tm_min / 60.0 + t.tm_sec / 3600.0;
-}
-
-} // namespace
 
 void planckianXy(double kelvin, float &x_out, float &y_out) noexcept
 {
@@ -93,43 +80,40 @@ void planckianXy(double kelvin, float &x_out, float &y_out) noexcept
     y_out = static_cast<float>(y);
 }
 
-double DaylightSchedule::activeGate(const std::tm &local_time) const noexcept
+double DaylightSchedule::activeGate(const ev::TimeReading &time) const noexcept
 {
-    if (((config_.active_days >> local_time.tm_wday) & 1U) == 0) {
+    const std::chrono::seconds now = time.sinceMidnight();
+    if (!config_.active_days.contains(time.weekday()) || !config_.active.contains(now)) {
         return 0.0;
     }
-    const double hour = hourOfDay(local_time);
-    if (hour < config_.active_start_hour || hour >= config_.active_end_hour) {
-        return 0.0;
-    }
-    if (config_.fade_minutes <= 0.0) {
+    if (config_.fade <= std::chrono::minutes{0}) {
         return 1.0;
     }
-    const double fade_hours = config_.fade_minutes / 60.0;
-    const double fade_in    = (hour - config_.active_start_hour) / fade_hours;
-    const double fade_out   = (config_.active_end_hour - hour) / fade_hours;
+    // How far into the fade at either edge, 0 to 1 and beyond.
+    const auto fade_in  = std::chrono::duration<double>{now - config_.active.start} / config_.fade;
+    const auto fade_out = std::chrono::duration<double>{config_.active.end - now} / config_.fade;
     return std::fmin(1.0, std::fmin(fade_in, fade_out));
 }
 
-LightState DaylightSchedule::wallState(const std::tm &local_time, double utc_offset_hours,
-                                       double wall_position, double cloud) const noexcept
+LightState DaylightSchedule::wallState(const ev::TimeReading &time, double wall_position, double cloud) const noexcept
 {
     // Clouds make the light diffuse: dimmer, cooler, no sun direction and
     // no golden glow, each in proportion to the cover.
     const double overcast = config_.clouds_enabled ? std::clamp(cloud, 0.0, 1.0) : 0.0;
 
-    const double gate = activeGate(local_time);
+    const double gate = activeGate(time);
     if (gate <= 0.0) {
         return {.on = false, .level = 0, .mireds = config_.warm_mireds};
     }
 
-    const double hour        = hourOfDay(local_time);
-    const int    day_of_year = local_time.tm_yday + 1;
-    const SunTimes sun =
-        computeSunTimes(config_.latitude_deg, config_.longitude_deg, day_of_year, utc_offset_hours);
+    const ev::Hours now{time.sinceMidnight()};
+    const ev::Hours utc_offset{time.utc_offset};
+    const int       day_of_year = time.dayOfYear();
+    const SunTimes  sun = computeSunTimes(config_.latitude_deg, config_.longitude_deg, day_of_year, utc_offset);
 
-    double sunrise = sun.sunrise_hour;
-    double sunset  = sun.sunset_hour;
+    const double hour    = now.count();
+    double       sunrise = sun.sunrise.count();
+    double       sunset  = sun.sunset.count();
     if (sunset <= sunrise) {
         // The window spills past local midnight (near-polar summer): unwrap
         // it onto a single increasing scale rather than treating every hour
@@ -153,7 +137,7 @@ LightState DaylightSchedule::wallState(const std::tm &local_time, double utc_off
     // bulb is from it: 0 under the sun, 1 at the opposite end. Bulbs further
     // away dim, by up to sun_shift_percent.
     const SunPosition pos =
-        computeSunPosition(config_.latitude_deg, config_.longitude_deg, day_of_year, hour, utc_offset_hours);
+        computeSunPosition(config_.latitude_deg, config_.longitude_deg, day_of_year, now, utc_offset);
     const double sun_x     = std::sin(pos.azimuth_deg * std::numbers::pi / 180.0);
     const double away      = std::fabs(wall_position - sun_x) / 2.0;
     const double direction = 1.0 - (config_.sun_shift_percent / 100.0) * away * (1.0 - overcast);
@@ -188,9 +172,9 @@ LightState DaylightSchedule::wallState(const std::tm &local_time, double utc_off
     return state;
 }
 
-LightState DaylightSchedule::workState(const std::tm &local_time) const noexcept
+LightState DaylightSchedule::workState(const ev::TimeReading &time) const noexcept
 {
-    const double gate = activeGate(local_time);
+    const double gate = activeGate(time);
     if (gate <= 0.0) {
         return {.on = false, .level = 0, .mireds = config_.work_warm_mireds};
     }
@@ -199,8 +183,10 @@ LightState DaylightSchedule::workState(const std::tm &local_time) const noexcept
         level = config_.min_level;
     }
 
-    const double window   = config_.work_end_hour - config_.work_start_hour;
-    const double progress = std::fmin(1.0, std::fmax(0.0, (hourOfDay(local_time) - config_.work_start_hour) / window));
+    // How far through the work hours, 0 to 1.
+    const double progress = std::clamp(
+        std::chrono::duration<double>{time.sinceMidnight() - config_.work.start} / (config_.work.end - config_.work.start),
+        0.0, 1.0);
     const double warmth   = progress * progress; // ease-in: stays cool through the morning
     const auto   mireds   = static_cast<uint16_t>(
         std::lround(config_.work_cool_mireds + warmth * (config_.work_warm_mireds - config_.work_cool_mireds)));

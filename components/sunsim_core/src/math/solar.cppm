@@ -1,12 +1,13 @@
 export module sunsim.core:solar;
 
 import std.compat;
+import sunsim.ev;
 
 export namespace sunsim::core {
 
 struct SunTimes {
-    double sunrise_hour; // local civil time, fractional hours, normalized to [0,24)
-    double sunset_hour;  // local civil time, fractional hours, normalized to [0,24)
+    ev::Hours sunrise; // after local midnight, in [0, 24 h)
+    ev::Hours sunset;
 };
 
 // Local civil-time sunrise/sunset for a given latitude/longitude and day of
@@ -15,8 +16,8 @@ struct SunTimes {
 //
 //   latitude_deg      degrees North (negative = South).
 //   longitude_deg     degrees East (negative = West).
-//   day_of_year       1-366 (e.g. tm_yday + 1).
-//   utc_offset_hours  the local civil UTC offset in effect on that day,
+//   day_of_year       1-366 (TimeReading::dayOfYear()).
+//   utc_offset        the local civil UTC offset in effect on that day,
 //                     including DST, positive = East of Greenwich (see
 //                     platform::Clock for how it's derived).
 //
@@ -25,19 +26,19 @@ struct SunTimes {
 // than left as a domain error, which degenerates to a same-valued
 // sunrise/sunset (zero-length or full-length day) rather than NaN.
 [[nodiscard]] SunTimes computeSunTimes(double latitude_deg, double longitude_deg, int day_of_year,
-                                        double utc_offset_hours) noexcept;
+                                        ev::Hours utc_offset) noexcept;
 
 struct SunPosition {
     double azimuth_deg;   // compass bearing, clockwise from North: 90 = East, 180 = South, 270 = West
     double elevation_deg; // above the horizon; negative = below
 };
 
-// Where the sun is in the sky at local_hour (fractional local civil hours)
-// on day_of_year, via NOAA's general solar position equations (fractional-
+// Where the sun is in the sky at `local_time` (after local midnight) on
+// day_of_year, via NOAA's general solar position equations (fractional-
 // year Fourier fits for declination and the equation of time; accurate to
 // a fraction of a degree). Arguments as for computeSunTimes.
 [[nodiscard]] SunPosition computeSunPosition(double latitude_deg, double longitude_deg, int day_of_year,
-                                             double local_hour, double utc_offset_hours) noexcept;
+                                             ev::Hours local_time, ev::Hours utc_offset) noexcept;
 
 } // namespace sunsim::core
 
@@ -105,16 +106,17 @@ double sunEventLocalHour(double latitude_deg, double longitude_deg, int day_of_y
 
 } // namespace
 
-SunTimes computeSunTimes(double latitude_deg, double longitude_deg, int day_of_year, double utc_offset_hours) noexcept
+SunTimes computeSunTimes(double latitude_deg, double longitude_deg, int day_of_year, ev::Hours utc_offset) noexcept
 {
-    return {.sunrise_hour = sunEventLocalHour(latitude_deg, longitude_deg, day_of_year, utc_offset_hours, true),
-            .sunset_hour  = sunEventLocalHour(latitude_deg, longitude_deg, day_of_year, utc_offset_hours, false)};
+    const double offset = utc_offset.count();
+    return {.sunrise = ev::Hours{sunEventLocalHour(latitude_deg, longitude_deg, day_of_year, offset, true)},
+            .sunset  = ev::Hours{sunEventLocalHour(latitude_deg, longitude_deg, day_of_year, offset, false)}};
 }
 
-SunPosition computeSunPosition(double latitude_deg, double longitude_deg, int day_of_year, double local_hour,
-                               double utc_offset_hours) noexcept
+SunPosition computeSunPosition(double latitude_deg, double longitude_deg, int day_of_year, ev::Hours local_time,
+                               ev::Hours utc_offset) noexcept
 {
-    const double utc_hour = local_hour - utc_offset_hours;
+    const double utc_hour = (local_time - utc_offset).count();
 
     // Fractional year (radians).
     const double g = 2.0 * std::numbers::pi / 365.0 * (day_of_year - 1 + (utc_hour - 12.0) / 24.0);

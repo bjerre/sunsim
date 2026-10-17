@@ -167,19 +167,14 @@ void buildUi(Ui &ui)
 
 void render(Ui &ui, const ev::StatusSnapshot &st)
 {
-    char a[16];
-    char b[16];
-
     if (st.time.valid) {
-        lv_label_set_text_fmt(ui.time, "%02d:%02d", st.time.local.tm_hour, st.time.local.tm_min);
-        lv_label_set_text_fmt(ui.weekday, "%s%s", st.time.simulated ? "sim " : "", kWeekdayNames[st.time.local.tm_wday % 7]);
-
-        formatDuration(a, sizeof(a), st.day.day_length_hours);
-        lv_label_set_text_fmt(ui.day_length, "Day %s", a);
-
-        formatDuration(a, sizeof(a), st.day.hours_until_next);
-        formatClock(b, sizeof(b), st.day.next_event_hour);
-        lv_label_set_text_fmt(ui.next_event, "%s %s  %s", st.day.next_is_sunrise ? "Rise" : "Set", a, b);
+        const ev::DayInfo &day = st.day;
+        lv_label_set_text(ui.time, std::format("{:%H:%M}", st.time.local).c_str());
+        lv_label_set_text(ui.weekday, std::format("{}{:%a}", st.time.simulated ? "sim " : "", st.time.weekday()).c_str());
+        lv_label_set_text(ui.day_length, ("Day " + durationText(day.day_length)).c_str());
+        lv_label_set_text(ui.next_event, std::format("{} {}  {}", day.next_is_sunrise ? "Rise" : "Set",
+                                                     durationText(day.until_next), clockText(day.next_event))
+                                             .c_str());
     } else {
         lv_label_set_text(ui.time, "--:--");
         lv_label_set_text(ui.weekday, "");

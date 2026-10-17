@@ -101,20 +101,6 @@ std::optional<ev::Selection> parseSelectionArg(const char *arg)
     return selection;
 }
 
-void printClock(double hours)
-{
-    char text[16];
-    formatClock(text, sizeof(text), hours);
-    std::fputs(text, stdout);
-}
-
-void printHoursMinutes(double hours)
-{
-    char text[16];
-    formatDuration(text, sizeof(text), hours);
-    std::fputs(text, stdout);
-}
-
 // ---- roles / pair / unpair / open ---------------------------------------------
 
 int cmdRoles(int, char **)
@@ -523,23 +509,17 @@ int cmdStatus(int, char **)
     }
 
     if (st->time.valid) {
-        std::printf("time    %s %02d:%02d%s\n", kWeekdayNames[st->time.local.tm_wday % 7], st->time.local.tm_hour,
-                    st->time.local.tm_min, st->time.simulated ? "  (simulated)" : "");
+        const std::string now = std::format("{:%a %H:%M}", st->time.local);
+        std::printf("time    %s%s\n", now.c_str(), st->time.simulated ? "  (simulated)" : "");
     } else {
         std::printf("time    NOT SET - waiting for time sync (lights held off)\n");
     }
 
-    std::printf("day     ");
-    printHoursMinutes(st->day.day_length_hours);
-    std::printf("  (sunrise ");
-    printClock(st->day.sunrise_hour);
-    std::printf(", sunset ");
-    printClock(st->day.sunset_hour);
-    std::printf(")\nnext    %s in ", st->day.next_is_sunrise ? "sunrise" : "sunset");
-    printHoursMinutes(st->day.hours_until_next);
-    std::printf(" (");
-    printClock(st->day.next_event_hour);
-    std::printf(")\n");
+    const ev::DayInfo &day = st->day;
+    std::printf("day     %s  (sunrise %s, sunset %s)\n", durationText(day.day_length).c_str(),
+                clockText(day.sunrise).c_str(), clockText(day.sunset).c_str());
+    std::printf("next    %s in %s (%s)\n", day.next_is_sunrise ? "sunrise" : "sunset", durationText(day.until_next).c_str(),
+                clockText(day.next_event).c_str());
 
     if (st->sky.cloud_percent) {
         std::printf("sky     %u%% cloud (%s)%s\n", *st->sky.cloud_percent, st->sky.cloud_live ? "now" : "forecast",

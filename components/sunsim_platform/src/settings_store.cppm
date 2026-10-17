@@ -165,9 +165,9 @@ template <class T> std::optional<T> get(nvs_handle_t h, const char *key)
     return err == ESP_OK ? std::optional{value} : std::nullopt;
 }
 
-uint16_t toMinutes(double hours) noexcept
+uint16_t stored(std::chrono::minutes m) noexcept
 {
-    return static_cast<uint16_t>(std::lround(hours * 60.0));
+    return static_cast<uint16_t>(m.count());
 }
 
 // Reads a setting into the config, if stored and valid.
@@ -189,23 +189,23 @@ struct LoadSetting {
     }
     void operator()(const ev::setting::Minutes &k) const
     {
-        if (const auto v = get<uint16_t>(h, k.key); v && k.accepts(*v)) {
-            c.*k.field = *v;
+        if (const auto v = get<uint16_t>(h, k.key); v && k.accepts(std::chrono::minutes{*v})) {
+            c.*k.field = std::chrono::minutes{*v};
         }
     }
     void operator()(const ev::setting::Span &k) const
     {
         const auto start = get<uint16_t>(h, k.start_key);
         const auto end   = get<uint16_t>(h, k.end_key);
-        if (start && end && ev::setting::Span::accepts(*start, *end)) {
-            c.*k.start = *start / 60.0;
-            c.*k.end   = *end / 60.0;
+        if (const ev::DaySpan span{std::chrono::minutes{start.value_or(0)}, std::chrono::minutes{end.value_or(0)}};
+            start && end && span.valid()) {
+            c.*k.field = span;
         }
     }
     void operator()(const ev::setting::Days &k) const
     {
         if (const auto v = get<uint8_t>(h, k.key); v && *v != 0) {
-            c.*k.field = *v;
+            c.*k.field = ev::Weekdays{*v};
         }
     }
     void operator()(const ev::setting::Lights &k) const
@@ -223,13 +223,13 @@ struct SaveSetting {
 
     void operator()(const ev::setting::OnOff &k) const { w.u8(k.key, c.*k.field ? 1 : 0); }
     void operator()(const ev::setting::Number &k) const { w.u8(k.key, c.*k.field); }
-    void operator()(const ev::setting::Minutes &k) const { w.u16(k.key, static_cast<uint16_t>(std::lround(c.*k.field))); }
+    void operator()(const ev::setting::Minutes &k) const { w.u16(k.key, stored(c.*k.field)); }
     void operator()(const ev::setting::Span &k) const
     {
-        w.u16(k.start_key, toMinutes(c.*k.start));
-        w.u16(k.end_key, toMinutes(c.*k.end));
+        w.u16(k.start_key, stored((c.*k.field).start));
+        w.u16(k.end_key, stored((c.*k.field).end));
     }
-    void operator()(const ev::setting::Days &k) const { w.u8(k.key, c.*k.field); }
+    void operator()(const ev::setting::Days &k) const { w.u8(k.key, (c.*k.field).bits); }
     void operator()(const ev::setting::Lights &k) const { w.u16(k.key, static_cast<uint16_t>((c.*k.field).to_ulong())); }
 };
 
