@@ -115,8 +115,3 @@ needs `ProgramConfig`.
 
 The display shows only the first zone's mode. Show every zone's, or the
 office's plus a compact line for the others.
-
-## Smaller items
-
-- [ ] Compile-time check: a gate rule after `Always` or after a two-way
-      `Window` can never answer.

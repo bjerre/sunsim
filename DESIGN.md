@@ -412,7 +412,9 @@ declares its gate in `installation.cppm`, as a list of rules. The first rule wit
 an answer decides, and when none answers the lights are off. A rule can be
 limited to one answer (`opensOnly()`, `closesOnly()`), leaving the other
 case to the rules after it, so a future presence rule can take precedence
-over the hours, or the other way around.
+over the hours, or the other way around. A rule after one that always
+answers (`Always`, or a `Window` with both answers) would never be asked,
+so it doesn't compile.
 
 Today the one zone, the office, has a gate of one `Window` on the active hours, set with the `config`
 console command and persisted in NVS (`platform::SettingsStore`): on only
