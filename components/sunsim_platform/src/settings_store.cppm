@@ -56,10 +56,10 @@ constexpr const char *kLegacyBlobKey = "roles";
 
 // "<role>.<field>", at most 15 chars (NVS key limit).
 struct Key {
-    char text[16];
+    char text[16]{};
     Key(std::string_view role_name, const char *field)
     {
-        std::snprintf(text, sizeof(text), "%.*s.%s", static_cast<int>(role_name.size()), role_name.data(), field);
+        std::format_to_n(text, sizeof(text) - 1, "{}.{}", role_name, field); // stays NUL-terminated
     }
     Key(ev::Role role, const char *field) : Key(ev::roleName(role), field) {}
 };

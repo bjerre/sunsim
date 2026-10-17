@@ -35,16 +35,12 @@ std::chrono::sys_seconds now() noexcept
 // trailing zeros (NWS redirects "44.9800" to "44.98").
 std::string coordinate(double degrees)
 {
-    char text[16];
-    std::snprintf(text, sizeof(text), "%.4f", degrees);
-    std::string_view s{text};
-    while (s.ends_with('0')) {
-        s.remove_suffix(1);
+    std::string text = std::format("{:.4f}", degrees);
+    text.erase(text.find_last_not_of('0') + 1);
+    if (text.ends_with('.')) {
+        text.pop_back();
     }
-    if (s.ends_with('.')) {
-        s.remove_suffix(1);
-    }
-    return std::string{s};
+    return text;
 }
 
 struct Header {

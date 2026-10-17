@@ -446,13 +446,10 @@ bool ZigbeeAdapter::handleApsIndication(const ezb_apsde_data_ind_t *ind)
     // Diagnostics (enable DEBUG for the ZIGBEE tag to see a device's real
     // traffic), skipping the bulbs' routine ZCL Default Responses.
     if (cluster_cmd || cmd != zcl::kDefaultResponse) {
-        char hex[3 * 16 + 1] = {};
-        for (uint16_t i = 0; i < ind->asdu_length && i < 16; ++i) {
-            std::snprintf(hex + 3 * i, 4, "%02x ", ind->asdu[i]);
-        }
-        ev::log::debug(kTag, "RX from 0x{:04x} ep{} -> ep{} cluster 0x{:04x} {} cmd 0x{:02x}{} rssi {} | {}", src,
+        const std::span frame{ind->asdu, std::min<std::size_t>(ind->asdu_length, 16)};
+        ev::log::debug(kTag, "RX from 0x{:04x} ep{} -> ep{} cluster 0x{:04x} {} cmd 0x{:02x}{} rssi {} | {::02x}", src,
                        ind->src_endpoint, ind->dst_endpoint, ind->cluster_id, cluster_cmd ? "cluster" : "global", cmd,
-                       mfr ? " (mfr-specific)" : "", ind->rssi, hex);
+                       mfr ? " (mfr-specific)" : "", ind->rssi, frame);
     }
 
     // The paired button. SONOFF SNZB-01-style buttons say which press it was

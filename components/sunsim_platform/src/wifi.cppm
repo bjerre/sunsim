@@ -97,12 +97,12 @@ constexpr uint16_t kMaxScanRecords = 20;
 
 // Slot keys "wifi<n>.ssid" / "wifi<n>.pass".
 struct SlotKeys {
-    char ssid[16];
-    char pass[16];
+    char ssid[16]{};
+    char pass[16]{};
     explicit SlotKeys(std::size_t slot)
     {
-        std::snprintf(ssid, sizeof(ssid), "wifi%u.ssid", static_cast<unsigned>(slot));
-        std::snprintf(pass, sizeof(pass), "wifi%u.pass", static_cast<unsigned>(slot));
+        std::format_to_n(ssid, sizeof(ssid) - 1, "wifi{}.ssid", slot); // they stay NUL-terminated
+        std::format_to_n(pass, sizeof(pass) - 1, "wifi{}.pass", slot);
     }
 };
 
