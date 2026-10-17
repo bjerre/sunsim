@@ -102,6 +102,20 @@ role).
 
 Needs the board.
 
+## Paced, coalescing Zigbee send queue
+
+Every command goes out the moment it's posted, so a ProgramTick, red alert
+or a weather pulse sends every light's commands in the same few
+milliseconds: fine at 6 lights, past the stack's buffers at 25 (GitHub #14).
+
+- [ ] One pending `SetLight` per light in `ZigbeeAdapter`, a newer one
+      merged over it; sent round-robin at a fixed rate (~25 ms apart).
+- [ ] Log the queue's high-water mark with the send-failure report.
+- [ ] Try it on the board with every light paired, in red alert and
+      `weather simulate warning`.
+
+Needs the board.
+
 ## Rename `Mode::Daylight` to `Mode::Auto`
 
 The mode means "run the zone's own looks and gate", which reads wrong for
