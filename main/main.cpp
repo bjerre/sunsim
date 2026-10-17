@@ -5,7 +5,6 @@
 #include <time.h>   // tzset (POSIX)
 
 #include "esp_check.h"
-#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
@@ -97,7 +96,7 @@ void App::appTask(void *arg)
     // Handlers may call into the Zigbee stack, which needs its lock - and
     // the lock only exists once the stack is initialised.
     app.zigbee_.waitUntilReady();
-    ESP_LOGI(kTag, "Processing events");
+    ev::log::info(kTag, "Processing events");
 
     platform::ZigbeeAdapter::StackLock stack;
     for (;;) {

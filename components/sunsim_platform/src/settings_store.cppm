@@ -1,6 +1,5 @@
 module;
 
-#include "esp_log.h"
 #include "nvs.h"
 
 export module sunsim.platform:settings_store;
@@ -137,7 +136,7 @@ public:
             err_ = nvs_commit(h_);
         }
         if (!ok()) {
-            ESP_LOGE(kTag, "Failed to save %s: %s", what_, esp_err_to_name(err_));
+            ev::log::error(kTag, "Failed to save {}: {}", what_, esp_err_to_name(err_));
         }
     }
 
@@ -261,7 +260,7 @@ void migrateLayout()
 {
     Nvs nvs{NVS_READWRITE};
     if (!nvs.ok()) {
-        ESP_LOGE(kTag, "Can't open NVS to check the role layout: %s", esp_err_to_name(nvs.error()));
+        ev::log::error(kTag, "Can't open NVS to check the role layout: {}", esp_err_to_name(nvs.error()));
         return;
     }
     const nvs_handle_t h      = nvs.get();
@@ -273,9 +272,9 @@ void migrateLayout()
     const bool moved_b = moveRole(h, "WallB", "WallC");
     nvs_set_u8(h, kLayoutKey, kFiveLightWall);
     if (const esp_err_t err = nvs_commit(h); err != ESP_OK) {
-        ESP_LOGE(kTag, "Failed to save the role layout: %s", esp_err_to_name(err));
+        ev::log::error(kTag, "Failed to save the role layout: {}", esp_err_to_name(err));
     } else if (moved_b || moved_c) {
-        ESP_LOGW(kTag, "Five-light wall: stored WallB is now WallC, WallC is now WallE (same places on the wall)");
+        ev::log::warn(kTag, "Five-light wall: stored WallB is now WallC, WallC is now WallE (same places on the wall)");
     }
 }
 } // namespace
@@ -295,7 +294,7 @@ void SettingsStore::loadAll()
 
     Nvs nvs{NVS_READONLY};
     if (!nvs.ok()) {
-        ESP_LOGI(kTag, "Nothing stored yet");
+        ev::log::info(kTag, "Nothing stored yet");
     } else {
         const nvs_handle_t h = nvs.get();
 
@@ -307,8 +306,8 @@ void SettingsStore::loadAll()
             d.valid = true;
             nvs_get_u16(h, Key(role, "short").text, &d.short_addr); // 0 if missing; refreshed on next announce
             nvs_get_u8(h, Key(role, "ep").text, &d.endpoint);       // 0 if missing; triggers rediscovery
-            ESP_LOGI(kTag, "Restored %s: ext=0x%016llx short=0x%04x ep=%d", ev::roleName(role).data(),
-                     static_cast<unsigned long long>(d.ext_addr), d.short_addr, d.endpoint);
+            ev::log::info(kTag, "Restored {}: ext=0x{:016x} short=0x{:04x} ep={}", ev::roleName(role).data(),
+                          d.ext_addr, d.short_addr, d.endpoint);
         }
 
         for (const ev::Setting &setting : ev::kSettings) {
@@ -396,7 +395,7 @@ void SettingsStore::on(const ev::PersistRoles &e)
 
 void SettingsStore::on(const ev::FactoryReset &)
 {
-    ESP_LOGW(kTag, "Clearing all roles");
+    ev::log::warn(kTag, "Clearing all roles");
     on(ev::PersistRoles{}); // all records invalid -> keys erased
 }
 

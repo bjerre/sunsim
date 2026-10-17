@@ -2,7 +2,6 @@ module;
 
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
-#include "esp_log.h"
 #include "esp_netif_sntp.h"
 #include "esp_pthread.h"
 #include "freertos/FreeRTOS.h" // pdMS_TO_TICKS, for the SNTP wait
@@ -53,42 +52,43 @@ struct Header {
     const char *value;
 };
 
+using Outcome = std::expected<void, std::string>;
+
 // GET over HTTPS (checked against the certificate bundle), handing the body
-// to `sink` a chunk at a time as it arrives. False on any failure (the sink
-// may have seen part of the body).
-bool httpsGet(const std::string &url, const std::function<void(std::string_view)> &sink,
-              std::initializer_list<Header> headers = {})
+// to `sink` a chunk at a time as it arrives; or why not (the sink may have
+// seen part of the body).
+Outcome httpsGet(const std::string &url, const std::function<void(std::string_view)> &sink,
+                 std::initializer_list<Header> headers = {})
 {
     esp_http_client_config_t config{};
     config.url               = url.c_str();
     config.crt_bundle_attach = esp_crt_bundle_attach;
     config.timeout_ms        = 30'000; // slow while Zigbee shares the radio
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (client == nullptr) {
-        return false;
+    const std::unique_ptr<std::remove_pointer_t<esp_http_client_handle_t>, decltype(&esp_http_client_cleanup)> client{
+        esp_http_client_init(&config), &esp_http_client_cleanup};
+    if (!client) {
+        return std::unexpected{"no HTTP client"};
     }
     for (const Header &h : headers) {
-        esp_http_client_set_header(client, h.name, h.value);
+        esp_http_client_set_header(client.get(), h.name, h.value);
     }
-    bool ok = false;
-    if (esp_http_client_open(client, 0) == ESP_OK && esp_http_client_fetch_headers(client) >= 0) {
-        const int status = esp_http_client_get_status_code(client);
-        if (status == 200) {
-            char chunk[512];
-            int  n = 0;
-            while ((n = esp_http_client_read(client, chunk, sizeof(chunk))) > 0) {
-                sink({chunk, static_cast<std::size_t>(n)});
-            }
-            ok = n == 0;
-        } else {
-            ESP_LOGW(kTag, "HTTP %d from %s", status, url.c_str());
-        }
+    if (esp_http_client_open(client.get(), 0) != ESP_OK || esp_http_client_fetch_headers(client.get()) < 0) {
+        return std::unexpected{"could not reach " + url};
+    }
+    Outcome outcome;
+    if (const int status = esp_http_client_get_status_code(client.get()); status != 200) {
+        outcome = std::unexpected{std::format("HTTP {} from {}", status, url)};
     } else {
-        ESP_LOGW(kTag, "Could not reach %s", url.c_str());
+        char chunk[512];
+        int  n = 0;
+        while ((n = esp_http_client_read(client.get(), chunk, sizeof(chunk))) > 0) {
+            sink({chunk, static_cast<std::size_t>(n)});
+        }
+        if (n < 0) {
+            outcome = std::unexpected{"the reply was cut off"};
+        }
     }
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
-    return ok;
+    return outcome; // the cleanup closes the connection
 }
 } // namespace
 
@@ -139,7 +139,7 @@ void InternetSync::on(const ev::SyncRequested &)
 
 // ---- The jobs ----
 
-bool InternetSync::syncClock()
+InternetSync::Outcome InternetSync::syncClock()
 {
     // Long: while Zigbee shares the radio (busiest in fast-day mode, with
     // light commands every second) requests get lost. lwIP resends after
@@ -151,24 +151,24 @@ bool InternetSync::syncClock()
     const bool synced =
         esp_netif_sntp_sync_wait(pdMS_TO_TICKS(std::chrono::milliseconds{kTimeout}.count())) == ESP_OK;
     esp_netif_sntp_deinit();
-    if (synced) {
-        const std::time_t t = std::time(nullptr);
-        ESP_LOGI(kTag, "Clock synced: %s", std::ctime(&t));
+    if (!synced) {
+        return std::unexpected{"no time server answered"};
     }
-    return synced;
+    ev::log::info(kTag, "Clock synced: {:%F %T} UTC", now());
+    return {};
 }
 
 // Open-Meteo's hourly cloud cover (free, no key), yesterday through the
 // day after tomorrow in UTC so every local hour of today and tomorrow is
 // covered whatever the time zone, placed by local hour from today's 00:00.
-bool InternetSync::fetchCloudCover()
+InternetSync::Outcome InternetSync::fetchCloudCover()
 {
     const std::string url = "https://api.open-meteo.com/v1/forecast?latitude=" + coordinate(latitude_deg_) +
                             "&longitude=" + coordinate(longitude_deg_) +
                             "&hourly=cloud_cover&timeformat=unixtime&timezone=GMT&past_days=1&forecast_days=3";
     weather::ForecastReader reader;
-    if (!httpsGet(url, [&](std::string_view chunk) { reader.feed(chunk); })) {
-        return false;
+    if (auto got = httpsGet(url, [&](std::string_view chunk) { reader.feed(chunk); }); !got) {
+        return got;
     }
 
     const auto     today = std::chrono::floor<std::chrono::days>(toLocal(now()));
@@ -183,57 +183,59 @@ bool InternetSync::fetchCloudCover()
         }
     }
     if (placed == 0) {
-        ESP_LOGW(kTag, "Unexpected forecast reply");
-        return false;
+        return std::unexpected{"no forecast in the reply"};
     }
-    ESP_LOGI(kTag, "Cloud cover, %u hours; today 08:00 %u%%, 12:00 %u%%, 16:00 %u%%", static_cast<unsigned>(placed),
-             forecast.percent[8], forecast.percent[12], forecast.percent[16]);
+    ev::log::info(kTag, "Cloud cover, {} hours; today 08:00 {}%, 12:00 {}%, 16:00 {}%", placed, forecast.percent[8],
+                  forecast.percent[12], forecast.percent[16]);
     post_(ev::CloudCoverUpdated{forecast});
-    return true;
+    return {};
 }
 
 // Open-Meteo's `current`: 15-minute model data (in the US, HRRR's).
-bool InternetSync::fetchConditions()
+InternetSync::Outcome InternetSync::fetchConditions()
 {
     const std::string url = "https://api.open-meteo.com/v1/forecast?latitude=" + coordinate(latitude_deg_) +
                             "&longitude=" + coordinate(longitude_deg_) +
                             "&current=cloud_cover,weather_code&timeformat=unixtime";
     weather::ConditionsReader reader;
-    if (!httpsGet(url, [&](std::string_view chunk) { reader.feed(chunk); })) {
-        return false;
+    if (auto got = httpsGet(url, [&](std::string_view chunk) { reader.feed(chunk); }); !got) {
+        return got;
     }
     const auto now = reader.conditions();
     if (!now) {
-        ESP_LOGW(kTag, "Unexpected conditions reply");
-        return false;
+        return std::unexpected{"no conditions in the reply"};
     }
-    ESP_LOGI(kTag, "Now: %u%% cloud, %s%s%s", now->cloud_percent,
-             now->precip == ev::Precip::None ? "" : ev::intensityName(now->intensity),
-             now->precip == ev::Precip::None ? "" : " ", ev::precipName(now->precip));
+    if (now->precip == ev::Precip::None) {
+        ev::log::info(kTag, "Now: {}% cloud, nothing falling", now->cloud_percent);
+    } else {
+        ev::log::info(kTag, "Now: {}% cloud, {} {}", now->cloud_percent, ev::intensityName(now->intensity),
+                      ev::precipName(now->precip));
+    }
     post_(ev::ConditionsUpdated{.now = *now, .at = ev::BootClock::now()});
-    return true;
+    return {};
 }
 
 // The National Weather Service's alerts in force for the location (US
 // only; elsewhere the reply is empty). It asks for a User-Agent.
-bool InternetSync::fetchAlerts()
+InternetSync::Outcome InternetSync::fetchAlerts()
 {
     const std::string url = "https://api.weather.gov/alerts/active?status=actual&point=" +
                             coordinate(latitude_deg_) + "," + coordinate(longitude_deg_);
     weather::AlertsReader reader;
-    if (!httpsGet(url, [&](std::string_view chunk) { reader.feed(chunk); },
-                  {{"User-Agent", "sunsim (ESP32 daylight simulator)"}, {"Accept", "application/geo+json"}})) {
-        return false;
+    if (auto got = httpsGet(url, [&](std::string_view chunk) { reader.feed(chunk); },
+                            {{"User-Agent", "sunsim (ESP32 daylight simulator)"}, {"Accept", "application/geo+json"}});
+        !got) {
+        return got;
     }
     const ev::Alerts alerts = reader.inForce(now(), ev::BootClock::now());
     if (alerts.count == 0) {
-        ESP_LOGI(kTag, "No weather alerts");
+        ev::log::info(kTag, "No weather alerts");
     }
     for (const ev::Alert &alert : alerts.list()) {
-        ESP_LOGI(kTag, "Alert: %s (%s)", alert.event.data(), ev::alertLevelName(alert.level));
+        ev::log::info(kTag, "Alert: {} ({})", alert.event.data(), ev::alertLevelName(alert.level));
     }
     post_(ev::AlertsUpdated{.alerts = alerts, .at = ev::BootClock::now()});
-    return true;
+    return {};
 }
 
 // ---- Scheduling ----
@@ -258,19 +260,30 @@ void InternetSync::run(bool everything)
         return;
     }
 
-    ESP_LOGI(kTag, "Syncing");
+    ev::log::info(kTag, "Syncing");
     const WifiSession wifi;
     for (std::size_t i = 0; i < kJobCount; ++i) {
         if (!chosen[i]) {
             continue;
         }
-        // Without a clock HTTPS can't check certificates: don't try.
-        const bool clock = kJobs[i].run == &InternetSync::syncClock;
-        const bool done  = wifi.connected() && (clock || now() >= kClockSetAfter) && (this->*kJobs[i].run)();
-        ESP_LOGI(kTag, "  %s: %s", kJobs[i].name, done ? "ok" : "failed");
+        const Job    &job    = kJobs[i];
+        const Outcome outcome = [&]() -> Outcome {
+            if (!wifi.connected()) {
+                return std::unexpected{"no Wi-Fi"};
+            }
+            if (job.run != &InternetSync::syncClock && now() < kClockSetAfter) {
+                return std::unexpected{"no clock yet (HTTPS can't check certificates)"};
+            }
+            return (this->*job.run)();
+        }();
+        if (outcome) {
+            ev::log::info(kTag, "  {}: ok", job.name);
+        } else {
+            ev::log::warn(kTag, "  {}: failed ({})", job.name, outcome.error());
+        }
         // Read after the job: the clock sync itself moves the clock.
         state_[i].last_try = now();
-        if (done) {
+        if (outcome) {
             state_[i].last_ok = state_[i].last_try;
         }
     }

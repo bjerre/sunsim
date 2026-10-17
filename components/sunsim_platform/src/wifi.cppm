@@ -2,7 +2,6 @@ module;
 
 #include "esp_coexist.h"
 #include "esp_event.h"
-#include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
@@ -13,6 +12,7 @@ module;
 module sunsim.platform:wifi; // internal: not exported
 
 import std.compat;
+import sunsim.ev;
 
 namespace sunsim::platform {
 
@@ -263,7 +263,7 @@ void WifiSession::onWifiEvent(void *arg, esp_event_base_t event_base, int32_t ev
         }
         // e.g. 201 = no AP found, 15/204 = handshake failed (usually a wrong password)
         const auto *d = static_cast<const wifi_event_sta_disconnected_t *>(event_data);
-        ESP_LOGI(kTag, "  attempt %d failed (reason %d)", self->retry_count_ + 1, d ? d->reason : -1);
+        ev::log::info(kTag, "  attempt {} failed (reason {})", self->retry_count_ + 1, d ? d->reason : -1);
         if (self->retry_count_ < kMaxRetries) {
             ++self->retry_count_;
             esp_wifi_connect();
@@ -285,7 +285,7 @@ std::vector<WifiNetwork> WifiSession::candidates(const std::vector<WifiNetwork> 
     uint16_t                      count = kMaxScanRecords;
     if (esp_wifi_scan_start(nullptr, true) != ESP_OK ||
         esp_wifi_scan_get_ap_records(&count, records.data()) != ESP_OK) {
-        ESP_LOGW(kTag, "Scan failed; trying saved networks in order");
+        ev::log::warn(kTag, "Scan failed; trying saved networks in order");
         return saved;
     }
     records.resize(count); // the driver returns them strongest first
@@ -297,20 +297,20 @@ std::vector<WifiNetwork> WifiSession::candidates(const std::vector<WifiNetwork> 
             const bool already = std::any_of(seen.begin(), seen.end(),
                                              [&](const WifiNetwork &s) { return s.ssid == n.ssid; });
             if (n.ssid == ssid && !already) {
-                ESP_LOGI(kTag, "In range: \"%s\" (%d dBm)", n.ssid.c_str(), r.rssi);
+                ev::log::info(kTag, "In range: \"{}\" ({} dBm)", n.ssid.c_str(), r.rssi);
                 seen.push_back(n);
             }
         }
     }
     if (seen.empty()) {
-        ESP_LOGW(kTag, "No saved network seen in the scan; trying each anyway (it may be hidden)");
+        ev::log::warn(kTag, "No saved network seen in the scan; trying each anyway (it may be hidden)");
         // What *is* around, to tell "out of range" from a typo or a 5 GHz-only
         // network (the C6 is 2.4 GHz only).
-        ESP_LOGI(kTag, "Scan found %u network(s)%s", static_cast<unsigned>(records.size()),
-                 records.empty() ? "" : ", strongest first:");
+        ev::log::info(kTag, "Scan found {} network(s){}", static_cast<unsigned>(records.size()),
+                      records.empty() ? "" : ", strongest first:");
         for (std::size_t i = 0; i < records.size() && i < 8; ++i) {
-            ESP_LOGI(kTag, "  \"%s\" (%d dBm, channel %d)", reinterpret_cast<const char *>(records[i].ssid),
-                     records[i].rssi, records[i].primary);
+            ev::log::info(kTag, "  \"{}\" ({} dBm, channel {})", reinterpret_cast<const char *>(records[i].ssid),
+                          records[i].rssi, records[i].primary);
         }
         return saved;
     }
@@ -324,7 +324,7 @@ bool WifiSession::connect(const WifiNetwork &network, std::chrono::milliseconds 
     std::strncpy(reinterpret_cast<char *>(wifi_config.sta.password), network.password.c_str(), kMaxPasswordLen);
     esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
 
-    ESP_LOGI(kTag, "Connecting to \"%s\"", network.ssid.c_str());
+    ev::log::info(kTag, "Connecting to \"{}\"", network.ssid.c_str());
     xEventGroupClearBits(event_group_, kGotIpBit | kFailBit);
     retry_count_ = 0;
     connecting_  = true;
@@ -336,7 +336,7 @@ bool WifiSession::connect(const WifiNetwork &network, std::chrono::milliseconds 
     if (bits & kGotIpBit) {
         return true;
     }
-    ESP_LOGW(kTag, "Could not connect to \"%s\"", network.ssid.c_str());
+    ev::log::warn(kTag, "Could not connect to \"{}\"", network.ssid.c_str());
     esp_wifi_disconnect();
     return false;
 }
@@ -345,11 +345,11 @@ WifiSession::WifiSession(std::chrono::milliseconds connect_timeout)
 {
     const WifiNetworks saved = loadWifiNetworks();
     if (saved.networks.empty()) {
-        ESP_LOGW(kTag, "No Wi-Fi network configured (use `wifi add <ssid> <password>`)");
+        ev::log::warn(kTag, "No Wi-Fi network configured (use `wifi add <ssid> <password>`)");
         return;
     }
     if (!ensureWifiStackInitialized()) {
-        ESP_LOGE(kTag, "Failed to bring up Wi-Fi netif");
+        ev::log::error(kTag, "Failed to bring up Wi-Fi netif");
         return;
     }
 
@@ -366,7 +366,7 @@ WifiSession::WifiSession(std::chrono::milliseconds connect_timeout)
             return;
         }
     }
-    ESP_LOGW(kTag, "No Wi-Fi network reachable");
+    ev::log::warn(kTag, "No Wi-Fi network reachable");
 }
 
 WifiSession::~WifiSession()

@@ -9,7 +9,6 @@ module;
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_vendor.h"
-#include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -285,13 +284,13 @@ void startStatusDisplay(const StatusSlot &status)
     esp_lcd_panel_io_handle_t io    = nullptr;
     esp_lcd_panel_handle_t    panel = nullptr;
     if (initPanel(io, panel) != ESP_OK) {
-        ESP_LOGE(kTag, "LCD init failed; continuing without the display");
+        ev::log::error(kTag, "LCD init failed; continuing without the display");
         return;
     }
 
     const lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     if (lvgl_port_init(&port_cfg) != ESP_OK) {
-        ESP_LOGE(kTag, "LVGL init failed; continuing without the display");
+        ev::log::error(kTag, "LVGL init failed; continuing without the display");
         return;
     }
 
@@ -309,7 +308,7 @@ void startStatusDisplay(const StatusSlot &status)
     disp_cfg.flags.buff_dma   = 1;
     disp_cfg.flags.swap_bytes = 1;
     if (!lvgl_port_add_disp(&disp_cfg)) {
-        ESP_LOGE(kTag, "LVGL display registration failed; continuing without the display");
+        ev::log::error(kTag, "LVGL display registration failed; continuing without the display");
         return;
     }
 
@@ -328,7 +327,7 @@ void startStatusDisplay(const StatusSlot &status)
     gpio_set_level(static_cast<gpio_num_t>(CONFIG_SUNSIM_DISPLAY_PIN_BL), 1);
 
     xTaskCreate(&displayTask, "display", 4096, &ctx, 2, nullptr);
-    ESP_LOGI(kTag, "Status display started");
+    ev::log::info(kTag, "Status display started");
 }
 
 } // namespace sunsim::platform

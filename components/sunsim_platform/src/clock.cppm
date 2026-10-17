@@ -1,7 +1,6 @@
 module;
 
 #include "esp_check.h"
-#include "esp_log.h"
 #include "esp_timer.h"
 #include "sdkconfig.h"
 
@@ -66,8 +65,8 @@ Clock::Clock(ev::Post post) : post_(std::move(post))
 #if CONFIG_SUNSIM_DEBUG_FAST_DAY
     fast_day_.emplace(std::chrono::seconds{CONFIG_SUNSIM_DEBUG_DAY_SECONDS});
     update_interval_ = kFastDayUpdateInterval;
-    ESP_LOGW(kTag, "DEBUG FAST DAY MODE: one active window every %d s (`fastday off` for real time)",
-             CONFIG_SUNSIM_DEBUG_DAY_SECONDS);
+    ev::log::warn(kTag, "DEBUG FAST DAY MODE: one active window every {} s (`fastday off` for real time)",
+                  CONFIG_SUNSIM_DEBUG_DAY_SECONDS);
 #endif
 }
 
@@ -126,11 +125,11 @@ void Clock::on(const ev::SetFastDay &e)
     if (e.on) {
         fast_day_.emplace(e.day_length); // (re)starts the loop
         update_interval_ = kFastDayUpdateInterval;
-        ESP_LOGW(kTag, "Fast-day mode: one active window every %lld s", static_cast<long long>(e.day_length.count()));
+        ev::log::warn(kTag, "Fast-day mode: one active window every {} s", static_cast<long long>(e.day_length.count()));
     } else if (was_on) {
         fast_day_.reset();
         update_interval_ = kUpdateInterval;
-        ESP_LOGI(kTag, "Fast-day mode off: real time");
+        ev::log::info(kTag, "Fast-day mode off: real time");
     } else {
         return; // already off
     }

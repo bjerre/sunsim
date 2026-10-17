@@ -7,7 +7,6 @@ module;
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "esp_check.h"
-#include "esp_log.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
 
@@ -184,7 +183,7 @@ ZigbeeAdapter::ZigbeeAdapter(ev::Post post) : post_(std::move(post)), ready_(xEv
 
 void ZigbeeAdapter::start()
 {
-    ESP_LOGI(kTag, "Starting Zigbee stack");
+    ev::log::info(kTag, "Starting Zigbee stack");
     // 6 KB: the stack's callbacks run here and post events (~256 B per copy).
     xTaskCreate(&ZigbeeAdapter::taskTrampoline, "Zigbee_main", 6144, this, 5, nullptr);
 }
@@ -303,14 +302,14 @@ void ZigbeeAdapter::handleSignal(const ezb_app_signal_t *app_signal)
 
     switch (signal_type) {
     case EZB_ZDO_SIGNAL_SKIP_STARTUP:
-        ESP_LOGI(kTag, "Initialize Zigbee stack");
+        ev::log::info(kTag, "Initialize Zigbee stack");
         ezb_bdb_start_top_level_commissioning(EZB_BDB_MODE_INITIALIZATION);
         break;
     case EZB_BDB_SIGNAL_DEVICE_FIRST_START:
     case EZB_BDB_SIGNAL_DEVICE_REBOOT: {
         const auto status = params<ezb_bdb_comm_status_t>(app_signal);
         if (status == EZB_BDB_STATUS_SUCCESS) {
-            ESP_LOGI(kTag, "Device started up in%s factory-reset mode", ezb_bdb_is_factory_new() ? "" : " non");
+            ev::log::info(kTag, "Device started up in{} factory-reset mode", ezb_bdb_is_factory_new() ? "" : " non");
             if (ezb_bdb_is_factory_new()) {
                 ezb_bdb_start_top_level_commissioning(EZB_BDB_MODE_NETWORK_FORMATION);
             } else {
@@ -318,7 +317,7 @@ void ZigbeeAdapter::handleSignal(const ezb_app_signal_t *app_signal)
                 post_(ev::NetworkUp{.rejoined = true, .at = ev::BootClock::now()});
             }
         } else {
-            ESP_LOGW(kTag, "%s failed with status(0x%02x), retrying", ezb_app_signal_to_string(signal_type), status);
+            ev::log::warn(kTag, "{} failed with status(0x{:02x}), retrying", ezb_app_signal_to_string(signal_type), status);
             scheduleCommissioningRetry(EZB_BDB_MODE_INITIALIZATION, std::chrono::milliseconds{1000});
         }
     } break;
@@ -327,23 +326,23 @@ void ZigbeeAdapter::handleSignal(const ezb_app_signal_t *app_signal)
         if (status == EZB_BDB_STATUS_SUCCESS) {
             ezb_extpanid_t ext_pan_id;
             ezb_nwk_get_extended_panid(&ext_pan_id);
-            ESP_LOGI(kTag, "Formed network: PAN(0x%04hx, EXT:0x%llx) Channel(%d) Short(0x%04hx)", ezb_nwk_get_panid(),
-                     static_cast<unsigned long long>(ext_pan_id.u64), ezb_nwk_get_current_channel(),
-                     ezb_nwk_get_short_address());
+            ev::log::info(kTag, "Formed network: PAN(0x{:04x}, EXT:0x{:x}) Channel({}) Short(0x{:04x})", ezb_nwk_get_panid(),
+                          uint64_t{ext_pan_id.u64}, ezb_nwk_get_current_channel(),
+                          ezb_nwk_get_short_address());
             ezb_bdb_start_top_level_commissioning(EZB_BDB_MODE_NETWORK_STEERING);
         } else {
-            ESP_LOGW(kTag, "Failed to form network with status(0x%02x), retrying", status);
+            ev::log::warn(kTag, "Failed to form network with status(0x{:02x}), retrying", status);
             scheduleCommissioningRetry(EZB_BDB_MODE_NETWORK_FORMATION, std::chrono::milliseconds{1000});
         }
     } break;
     case EZB_BDB_SIGNAL_STEERING: {
         const auto status = params<ezb_bdb_comm_status_t>(app_signal);
         if (status == EZB_BDB_STATUS_SUCCESS) {
-            ESP_LOGI(kTag, "Network formed. Type `pair <role>` (e.g. `pair WallA`), then reset that device.");
+            ev::log::info(kTag, "Network formed. Type `pair <role>` (e.g. `pair WallA`), then reset that device.");
             ezb_bdb_open_network(ev::kDefaultOpenTime.count());
             post_(ev::NetworkUp{.rejoined = false, .at = ev::BootClock::now()});
         } else {
-            ESP_LOGW(kTag, "Steering failed with status(0x%02x), retrying", status);
+            ev::log::warn(kTag, "Steering failed with status(0x{:02x}), retrying", status);
             scheduleCommissioningRetry(EZB_BDB_MODE_NETWORK_STEERING, std::chrono::milliseconds{1000});
         }
     } break;
@@ -353,23 +352,23 @@ void ZigbeeAdapter::handleSignal(const ezb_app_signal_t *app_signal)
     } break;
     case EZB_ZDO_SIGNAL_DEVICE_UPDATE: {
         const auto &update = params<ezb_zdo_signal_device_update_params_t>(app_signal);
-        ESP_LOGI(kTag, "Device Update: ext=0x%llx short=0x%04hx status=%d tc_action=%d parent_short=0x%04hx",
-                 static_cast<unsigned long long>(update.device_addr.u64), update.short_addr, update.status,
-                 update.tc_action, update.parent_short);
+        ev::log::info(kTag, "Device Update: ext=0x{:x} short=0x{:04x} status={} tc_action={} parent_short=0x{:04x}",
+                      update.device_addr.u64, update.short_addr, update.status,
+                      update.tc_action, update.parent_short);
     } break;
     case EZB_ZDO_SIGNAL_LEAVE: {
-        ESP_LOGI(kTag, "Device left network, type(0x%02x)", params<ezb_zdo_signal_leave_params_t>(app_signal).leave_type);
+        ev::log::info(kTag, "Device left network, type(0x{:02x})", params<ezb_zdo_signal_leave_params_t>(app_signal).leave_type);
     } break;
     case EZB_NWK_SIGNAL_PERMIT_JOIN_STATUS: {
         const auto duration = params<uint8_t>(app_signal);
         if (duration) {
-            ESP_LOGI(kTag, "Network open for %d seconds", duration);
+            ev::log::info(kTag, "Network open for {} seconds", duration);
         } else {
-            ESP_LOGW(kTag, "Network closed to new devices");
+            ev::log::warn(kTag, "Network closed to new devices");
         }
     } break;
     default:
-        ESP_LOGI(kTag, "Zigbee APP Signal: %s(0x%02x)", ezb_app_signal_to_string(signal_type), signal_type);
+        ev::log::info(kTag, "Zigbee APP Signal: {}(0x{:02x})", ezb_app_signal_to_string(signal_type), signal_type);
         break;
     }
 }
@@ -390,15 +389,15 @@ void ZigbeeAdapter::handleZclAction(ezb_zcl_core_action_callback_id_t callback_i
         auto *m = static_cast<ezb_zcl_set_attr_value_message_t *>(message);
         if (m && m->info.dst_ep == kButtonRxEp && m->info.cluster_id == EZB_ZCL_CLUSTER_ID_ON_OFF) {
             const bool on = *static_cast<uint8_t *>(m->in.attribute.data.value) != 0;
-            ESP_LOGI(kTag, "Button On/Off attribute -> %d", on);
+            ev::log::info(kTag, "Button On/Off attribute -> {}", on);
             pressed(on ? ev::Press::Ambiguous : ev::Press::Hold);
         }
     } break;
     case EZB_ZCL_CORE_SCENES_RECALL_SCENE_CB_ID: {
         auto *m = static_cast<ezb_zcl_scenes_recall_scene_message_t *>(message);
         if (m && m->info.dst_ep == kButtonRxEp) {
-            ESP_LOGI(kTag, "Button Scenes RecallScene (group=0x%04x scene=%d) -> treated as double-press",
-                     m->in.group_id, m->in.scene_id);
+            ev::log::info(kTag, "Button Scenes RecallScene (group=0x{:04x} scene={}) -> treated as double-press",
+                          m->in.group_id, m->in.scene_id);
             pressed(ev::Press::Double);
         }
     } break;
@@ -408,8 +407,8 @@ void ZigbeeAdapter::handleZclAction(ezb_zcl_core_action_callback_id_t callback_i
         // attribute change, so it needs its own case.
         auto *m = static_cast<ezb_zcl_on_off_off_with_effect_message_t *>(message);
         if (m && m->info.dst_ep == kButtonRxEp) {
-            ESP_LOGI(kTag, "Button OffWithEffect (effect=%d variant=%d) -> treated as long-press",
-                     m->in.effect_id, m->in.effect_variant);
+            ev::log::info(kTag, "Button OffWithEffect (effect={} variant={}) -> treated as long-press",
+                          m->in.effect_id, m->in.effect_variant);
             pressed(ev::Press::Hold);
         }
     } break;
@@ -421,7 +420,7 @@ void ZigbeeAdapter::handleZclAction(ezb_zcl_core_action_callback_id_t callback_i
                                   .status     = rsp->in.status_code});
         }
         if (rsp->in.status_code != 0) { // success acks arrive several times a second; only failures matter
-            ESP_LOGW(kTag, "Default response status(0x%02x)", rsp->in.status_code);
+            ev::log::warn(kTag, "Default response status(0x{:02x})", rsp->in.status_code);
         }
     } break;
     default:
@@ -451,9 +450,9 @@ bool ZigbeeAdapter::handleApsIndication(const ezb_apsde_data_ind_t *ind)
         for (uint16_t i = 0; i < ind->asdu_length && i < 16; ++i) {
             std::snprintf(hex + 3 * i, 4, "%02x ", ind->asdu[i]);
         }
-        ESP_LOGD(kTag, "RX from 0x%04x ep%d -> ep%d cluster 0x%04x %s cmd 0x%02x%s rssi %d | %s", src,
-                 ind->src_endpoint, ind->dst_endpoint, ind->cluster_id, cluster_cmd ? "cluster" : "global", cmd,
-                 mfr ? " (mfr-specific)" : "", ind->rssi, hex);
+        ev::log::debug(kTag, "RX from 0x{:04x} ep{} -> ep{} cluster 0x{:04x} {} cmd 0x{:02x}{} rssi {} | {}", src,
+                       ind->src_endpoint, ind->dst_endpoint, ind->cluster_id, cluster_cmd ? "cluster" : "global", cmd,
+                       mfr ? " (mfr-specific)" : "", ind->rssi, hex);
     }
 
     // The paired button. SONOFF SNZB-01-style buttons say which press it was
@@ -466,15 +465,15 @@ bool ZigbeeAdapter::handleApsIndication(const ezb_apsde_data_ind_t *ind)
     }
     switch (static_cast<zcl::OnOff>(cmd)) {
     case zcl::OnOff::Toggle:
-        ESP_LOGI(kTag, "Button: single press (Toggle)");
+        ev::log::info(kTag, "Button: single press (Toggle)");
         pressed(ev::Press::Single);
         break;
     case zcl::OnOff::On:
-        ESP_LOGI(kTag, "Button: double press (On)");
+        ev::log::info(kTag, "Button: double press (On)");
         pressed(ev::Press::Double);
         break;
     case zcl::OnOff::Off:
-        ESP_LOGI(kTag, "Button: hold (Off)");
+        ev::log::info(kTag, "Button: hold (Off)");
         pressed(ev::Press::Hold);
         break;
     default:
@@ -487,10 +486,10 @@ void ZigbeeAdapter::onMatchDescResult(const ezb_zdo_match_desc_req_result_t *res
 {
     const ev::Role role = roleFromCtx(user_ctx);
     if (!zdoOk(result) || result->rsp->match_length == 0) {
-        ESP_LOGW(kTag, "Could not find %s endpoint for %s (err=0x%x status=0x%x matches=%d), will retry",
-                 ev::isBulb(role) ? "light" : "On/Off output", ev::roleName(role).data(),
-                 result ? result->error : -1, (result && result->rsp) ? result->rsp->status : -1,
-                 (result && result->rsp) ? result->rsp->match_length : -1);
+        ev::log::warn(kTag, "Could not find {} endpoint for {} (err=0x{:x} status=0x{:x} matches={}), will retry",
+                      ev::isBulb(role) ? "light" : "On/Off output", ev::roleName(role).data(),
+                      result ? result->error : -1, (result && result->rsp) ? result->rsp->status : -1,
+                      (result && result->rsp) ? result->rsp->match_length : -1);
         s_self->post_(ev::EndpointFound{.role = role, .endpoint = 0});
         return;
     }
@@ -547,12 +546,12 @@ void ZigbeeAdapter::countSend(ezb_err_t err)
     const ev::Instant now = ev::BootClock::now();
     if (now - report_start_ >= kSendReport) {
         if (send_failures_ > 0) {
-            ESP_LOGW(kTag, "%lu of %lu bulb commands not queued in the last %llds (last err 0x%x)",
-                     static_cast<unsigned long>(send_failures_), static_cast<unsigned long>(sends_),
-                     secondsOf(now - report_start_), last_send_error_);
+            ev::log::warn(kTag, "{} of {} bulb commands not queued in the last {}s (last err 0x{:x})",
+                          send_failures_, sends_,
+                          secondsOf(now - report_start_), last_send_error_);
         } else {
-            ESP_LOGD(kTag, "%lu bulb commands sent in the last %llds", static_cast<unsigned long>(sends_),
-                     secondsOf(now - report_start_));
+            ev::log::debug(kTag, "{} bulb commands sent in the last {}s", sends_,
+                           secondsOf(now - report_start_));
         }
         sends_           = 0;
         send_failures_   = 0;
@@ -617,13 +616,13 @@ void ZigbeeAdapter::on(const ev::OpenNetwork &e)
 {
     const ezb_err_t err = ezb_bdb_open_network(e.duration.count());
     if (err != EZB_ERR_NONE) {
-        ESP_LOGW(kTag, "Could not open network (err 0x%x) - has it finished forming?", err);
+        ev::log::warn(kTag, "Could not open network (err 0x{:x}) - has it finished forming?", err);
     }
 }
 
 void ZigbeeAdapter::on(const ev::FactoryReset &)
 {
-    ESP_LOGW(kTag, "Clearing the Zigbee network, then restarting");
+    ev::log::warn(kTag, "Clearing the Zigbee network, then restarting");
     esp_zigbee_factory_reset(); // does not return
 }
 

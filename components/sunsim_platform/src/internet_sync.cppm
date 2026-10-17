@@ -50,10 +50,13 @@ private:
     };
     using Cadence = std::variant<Daily, Every>;
 
+    // A job's result: done, or why not.
+    using Outcome = std::expected<void, std::string>;
+
     struct Job {
         const char *name;
-        bool (InternetSync::*run)();
-        Cadence when;
+        Outcome (InternetSync::*run)();
+        Cadence     when;
     };
     struct JobState {
         std::optional<std::chrono::sys_seconds> last_try;
@@ -63,10 +66,10 @@ private:
     static const std::array<Job, kJobCount> kJobs;
 
     void run(bool everything);
-    bool syncClock();
-    bool fetchCloudCover();
-    bool fetchConditions();
-    bool fetchAlerts();
+    Outcome syncClock();
+    Outcome fetchCloudCover();
+    Outcome fetchConditions();
+    Outcome fetchAlerts();
     [[nodiscard]] bool due(const Job &job, const JobState &state, std::chrono::sys_seconds now) const;
     void loop(std::stop_token stop);
 

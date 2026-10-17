@@ -193,7 +193,7 @@ void DeviceRegistry::setReachable(ev::Role role, bool reachable)
         }
     } else {
         ev::log::warn(kTag, "{} not answering - pausing its light commands (powered off or out of range?)",
-                    name(role));
+                      name(role));
     }
 }
 
@@ -278,7 +278,7 @@ void DeviceRegistry::on(const ev::DeviceAnnounced &e)
         const ev::Role role = *armed_;
         armed_.reset();
         ev::log::info(kTag, "Paired ext=0x{:016x} short=0x{:04x} -> {}", e.ext_addr,
-                    e.short_addr, name(role));
+                      e.short_addr, name(role));
         assign(role, e.ext_addr, e.short_addr);
         return;
     }
@@ -286,14 +286,14 @@ void DeviceRegistry::on(const ev::DeviceAnnounced &e)
     const auto role = roleFromManifest(e.ext_addr);
     if (!role) {
         ev::log::warn(kTag,
-                    "Ignoring unknown device 0x{:04x} (ext=0x{:016x}): not in role manifest (use `pair <role>` to "
-                    "claim it)",
-                    e.short_addr, e.ext_addr);
+                      "Ignoring unknown device 0x{:04x} (ext=0x{:016x}): not in role manifest (use `pair <role>` to "
+                      "claim it)",
+                      e.short_addr, e.ext_addr);
         return;
     }
     if (record(*role).valid) {
         ev::log::warn(kTag, "Ignoring device 0x{:04x}: {} already assigned to a different device", e.short_addr,
-                    name(*role));
+                      name(*role));
         return;
     }
     ev::log::info(kTag, "New device joined -> {} (from role manifest)", name(*role));
@@ -372,7 +372,7 @@ ev::Flow DeviceRegistry::keepAlive(ev::Role bulb)
             const Liveness &l = liveness(bulb);
             if (!l.last_heard || timer_.now() - *l.last_heard > kUnreachableAfter) {
                 ev::log::debug(kTag, "Ping to {} failed (err=0x{:x} status=0x{:x})", name(bulb), reply ? reply->error : -1,
-                            reply ? reply->status : -1);
+                               reply ? reply->status : -1);
                 setReachable(bulb, false);
             }
         }
@@ -410,9 +410,9 @@ void DeviceRegistry::on(const ev::PairRequested &e)
     armed_ = e.role;
     post_(ev::OpenNetwork{});
     ev::log::info(kTag,
-                "Armed {}: factory-reset / power on the device now. The next device that joins and doesn't already "
-                "hold a role becomes {}.",
-                name(e.role), name(e.role));
+                  "Armed {}: factory-reset / power on the device now. The next device that joins and doesn't already "
+                  "hold a role becomes {}.",
+                  name(e.role), name(e.role));
 }
 
 void DeviceRegistry::on(const ev::PairCancelled &)

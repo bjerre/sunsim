@@ -1,7 +1,6 @@
 module;
 
 #include "esp_console.h"
-#include "esp_log.h"
 #include "esp_system.h"
 #include "sdkconfig.h"
 
