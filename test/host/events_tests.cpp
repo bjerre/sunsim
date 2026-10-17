@@ -67,13 +67,10 @@ void eventsTests()
         };
         CHECK(is("hours", "08:00-19:00") && is("days", "mon-fri") && is("fade", "10 min"));
         CHECK(is("sunshift", "25%") && is("ambersweep", "3 deg") && is("amber", "on"));
-        CHECK(is("precip", "WallC") && is("alerts", "WallB,WallD"));
 
         CHECK((takes("hours", "07:30-24:00") && c.active == DaySpan{7h + 30min, 24h}));
         CHECK(takes("days", "sat,mon") && is("days", "mon,sat"));
         CHECK(takes("clouds", "off") && !c.clouds_enabled);
-        CHECK(takes("alerts", "none") && is("alerts", "none"));
-        CHECK(takes("precip", "wall") && is("precip", "WallA,WallB,WallC,WallD,WallE"));
 
         const ProgramConfig before = c;
         CHECK(!takes("hours", "19:00-08:00"));    // backwards
@@ -84,9 +81,8 @@ void eventsTests()
         CHECK(!takes("fade", "-1"));
         CHECK(!takes("amber", "yes"));
         CHECK(!takes("days", "mon,funday"));
-        CHECK(!takes("precip", "Button"));        // not a light
-        CHECK(before.active == c.active && before.sun_shift_percent == c.sun_shift_percent &&
-              before.precip_lights == c.precip_lights); // nothing changed
+        CHECK(before.active == c.active && before.sun_shift_percent == c.sun_shift_percent); // nothing changed
+        CHECK(!findSetting("precip") && !findSetting("alerts")); // declared in the zones instead
 
         const auto error = set(*findSetting("sunshift"), c, "lots");
         CHECK(!error && error.error() == "sunshift takes 0-100");
@@ -96,9 +92,9 @@ void eventsTests()
         const auto keys = settingKeys();
         for (const std::string_view key : {"act.start", "act.end", "act.fade", "act.days", "work.start", "work.end",
                                            "sun.shift", "sun.amber", "sun.sweep", "sky.on", "sky.dim", "sky.cool",
-                                           "sync.start", "sync.end", "wx.on", "wx.precip", "wx.alert"}) {
+                                           "sync.start", "sync.end", "wx.on"}) {
             CHECK(std::ranges::contains(keys, key));
         }
-        CHECK(keys.size() == 17);
+        CHECK(keys.size() == 15);
     });
 }

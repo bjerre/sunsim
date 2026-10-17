@@ -75,6 +75,19 @@ Per zone, either presence or the hours can take precedence.
 
 Needs the board: the Zigbee reporting can't be tested on the host.
 
+## Gate model: first answer wins, or All / Any?
+
+Decide before presence is built (GitHub #13). Now a gate is a list where
+the first rule with an answer decides, with `opensOnly()` / `closesOnly()`
+for precedence: it can say anything, but has to be worked out to be read.
+The alternative, `All{...}` / `Any{...}` (fades by min and max, an unknown
+sensor neutral), reads as what you mean and can't have unreachable rules,
+but can't say "presence decides, the hours only while the sensor is dead".
+
+- [ ] Choose the model.
+- [ ] If `All` / `Any`: what a lone `Presence` gate does while its sensor is
+      unknown.
+
 ## More than one button
 
 `kLayout` allows one button at most, because ZigbeeAdapter tells presses
@@ -96,17 +109,16 @@ grow lights. Rename it, keeping `daylight` as a console alias.
 
 ## The whole room in installation.cppm
 
-`kLayout` (the groups and their kinds) still lives in `types.cppm`, because
-`ProgramConfig` needs the role count (through `RoleSet`) and the topology
-needs `ProgramConfig`.
+`kLayout` (the groups and their kinds) still lives in `types.cppm`. One
+obstacle is gone: `ProgramConfig` no longer depends on the layout, since
+the weather lights moved into the zones. But `topology.cppm`'s checks use
+the roles, which are derived from `kLayout`, and installation.cppm uses the
+checks.
 
-- [ ] Reorder `sunsim.ev`'s partitions: basics -> program_config ->
-      topology -> installation -> roles.
-- [ ] Make `RoleSet` a fixed-capacity set (32 roles, `static_assert`ed).
-      Its NVS type changes from u16 to u32, so stored weather lights reset
-      once.
-- [ ] Move the weather lights' defaults into the zone:
-      `Weather{.precip = {"WallC"}, .alerts = {"WallB", "WallD"}}`.
+- [ ] Reorder `sunsim.ev`'s partitions so `kLayout` can sit in
+      installation.cppm. Options: give the layout a partition of its own
+      that installation.cppm re-exports, or make the checks independent of
+      the roles until they're instantiated.
 - [ ] Move the default peaks into the zone: `Shows{..., .peak = 90}`.
 - [ ] Optional: replace the `Group` enum with names (a group is its place
       in `kLayout`).

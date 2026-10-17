@@ -438,6 +438,19 @@ int cmdSync(Console &console, int, char **)
 
 // ---- weather -------------------------------------------------------------------
 
+// "WallB,WallD", or "none".
+std::string lightsText(const ev::RoleSet &set)
+{
+    std::string text;
+    for (const ev::Role role : ev::lights()) {
+        if (ev::contains(set, role)) {
+            text += text.empty() ? "" : ",";
+            text += ev::roleName(role);
+        }
+    }
+    return text.empty() ? "none" : text;
+}
+
 void printWeather(const ev::StatusSnapshot &st)
 {
     if (st.sky.conditions) {
@@ -459,9 +472,9 @@ void printWeather(const ev::StatusSnapshot &st)
         std::println("alert    {} ({}), {} min left", alert.event.data(), ev::alertLevelName(alert.level),
                      left.count());
     }
-    for (const std::string_view name : {"weather", "precip", "alerts"}) {
-        printSetting(*ev::findSetting(name), st.config);
-    }
+    printSetting(*ev::findSetting("weather"), st.config);
+    std::println("precip   {}", lightsText(ev::kWeatherLights.precip));
+    std::println("alerts   {}", lightsText(ev::kWeatherLights.alerts));
 }
 
 // What `weather simulate` takes for rain and snow.

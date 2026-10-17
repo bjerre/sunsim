@@ -260,11 +260,12 @@ void devicesTests()
     test("zones: every light in one, with its look; buttons control theirs", [] {
         static_assert(kZoneCount == 1 && kZoneOf[kWallA] == kZoneIds[0] && kZoneOf[kButton] == kZoneIds[0]);
         static_assert(kControlsOf[kButton] && !kControlsOf[kWork]);
-        static_assert(takesWeather(kWallC) && !takesWeather(kButton));
+        static_assert(contains(kWeatherLights.precip, kWallC) && contains(kWeatherLights.alerts, kWallB) &&
+                      !contains(kWeatherLights.alerts, kWallC));
 
         // Another room: the wall in one zone, the work light (and the button) in another.
         constexpr std::array zones{
-            ZoneSpec{.name = "wall", .lights = {{"wall", SunCurve{}}}, .weather = true},
+            ZoneSpec{.name = "wall", .lights = {{"wall", SunCurve{}}}, .weather = Weather{.precip = {"wall"}}},
             ZoneSpec{.name     = "desk",
                      .lights   = {{"WORK", WorkCurve{}}},
                      .modes    = {Mode::Daylight, Mode::Off},
@@ -275,6 +276,7 @@ void devicesTests()
         static_assert(std::holds_alternative<WorkCurve>(t.look_of[kWork]) && std::holds_alternative<SunCurve>(t.look_of[kWallA]));
         static_assert(t.controls_of[kButton] && !t.controls_of[kButton]->twice && t.controls_of[kButton]->hold == Mode::Off);
         static_assert(zones[1].allows(Mode::Off) && !zones[1].allows(Mode::RedAlert));
+        static_assert(t.weather.precip.count() == 5 && contains(t.weather.precip, kWallE) && t.weather.alerts.none());
         // A light in no zone or two, a look on the button, a button picking red alert in "desk", ... don't compile.
 
         // A gate's rules after one that always answers are never asked, so that doesn't compile either.
@@ -287,12 +289,5 @@ void devicesTests()
                      .gate   = {nine_to_five.closesOnly(), nine_to_five.opensOnly(), Always{}}},
         };
         static_assert(topologyOf(layered).zone_of[kWork] == ZoneId{0}); // one-way rules first: fine
-    });
-
-    test("role sets: lists, groups and none", [] {
-        CHECK(parseRoleSet("WallB,walld") == roleSet({kWallB, Role{Group::Wall, 3}}));
-        CHECK(parseRoleSet("wall,Work")->count() == kLightCount);
-        CHECK(parseRoleSet("none")->none());
-        CHECK(!parseRoleSet("WallB,attic"));
     });
 }

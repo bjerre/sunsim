@@ -34,7 +34,7 @@ Console commands (also in `monitor`); `./sunsim cmd help` lists them all:
   unpair <role|group|all>                forget a device, so it can be re-paired
   config [<setting> <value>]             hours, workhours, syncwindow, fade, sunshift,
                                          amber, ambersweep, clouds, clouddim, cloudcool,
-                                         weather, precip, alerts, days
+                                         weather, days
   intensity [<light|group|all> <1-100>]  each light's peak brightness, %
   minlevel [<light|group|all> <1-254>]   each light's minimum level while on
   tune [<light|group|all> <level> [K] | save | off]   find each bulb's lowest visible level

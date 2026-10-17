@@ -207,12 +207,6 @@ struct LoadSetting {
             c.*k.field = ev::Weekdays{*v};
         }
     }
-    void operator()(const ev::setting::Lights &k) const
-    {
-        if (const auto v = get<uint16_t>(h, k.key)) {
-            c.*k.field = ev::RoleSet{*v};
-        }
-    }
 };
 
 // Writes a setting from the config.
@@ -229,7 +223,6 @@ struct SaveSetting {
         w.u16(k.end_key, stored((c.*k.field).end));
     }
     void operator()(const ev::setting::Days &k) const { w.u8(k.key, (c.*k.field).bits); }
-    void operator()(const ev::setting::Lights &k) const { w.u16(k.key, static_cast<uint16_t>((c.*k.field).to_ulong())); }
 };
 
 // Moves one key's value to another key; false if there was none.

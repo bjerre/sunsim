@@ -32,7 +32,7 @@ inline constexpr std::array kZones{
         .gate     = {Window{.hours = &ProgramConfig::active, .days = &ProgramConfig::active_days,
                             .fade = &ProgramConfig::fade}},
         .controls = {{.by = "Button"}}, // single: daylight, double: red alert, hold: off
-        .weather  = true,
+        .weather  = Weather{.precip = {"WallC"}, .alerts = {"WallB", "WallD"}},
     },
 };
 
@@ -40,10 +40,11 @@ inline constexpr std::array kZones{
 
 inline constexpr Addresses kAddressOf = addressesOf(kAddresses);
 
-inline constexpr Topology                         kTopology   = topologyOf(kZones);
-inline constexpr PerRole<std::optional<ZoneId>>   kZoneOf     = kTopology.zone_of;
-inline constexpr PerRole<Look>                    kLookOf     = kTopology.look_of;
-inline constexpr PerRole<std::optional<Controls>> kControlsOf = kTopology.controls_of;
+inline constexpr Topology                         kTopology      = topologyOf(kZones);
+inline constexpr PerRole<std::optional<ZoneId>>   kZoneOf        = kTopology.zone_of;
+inline constexpr PerRole<Look>                    kLookOf        = kTopology.look_of;
+inline constexpr PerRole<std::optional<Controls>> kControlsOf    = kTopology.controls_of;
+inline constexpr WeatherLights                    kWeatherLights = kTopology.weather;
 
 inline constexpr std::size_t kZoneCount = kZones.size();
 static_assert(kZoneCount >= 1 && kZoneCount <= 255, "1-255 zones");
@@ -66,24 +67,5 @@ template <class T> struct PerZone {
     [[nodiscard]] constexpr T       &operator[](ZoneId zone) noexcept { return items[zone.index]; }
     [[nodiscard]] constexpr const T &operator[](ZoneId zone) const noexcept { return items[zone.index]; }
 };
-
-// A light the weather may pulse: it shows color, in a weather zone.
-[[nodiscard]] constexpr bool takesWeather(Role role) noexcept
-{
-    return caps(role).color && kZoneOf[role] && spec(*kZoneOf[role]).weather;
-}
-
-} // namespace sunsim::ev
-
-namespace sunsim::ev {
-
-// (Outside the export: GCC won't export the lambda's local.)
-static_assert(std::ranges::all_of(kRoles,
-                                  [](Role r) {
-                                      const ProgramConfig defaults;
-                                      return takesWeather(r) ||
-                                             (!contains(defaults.precip_lights, r) && !contains(defaults.alert_lights, r));
-                                  }),
-              "the default weather lights (ProgramConfig) must be color lights in a weather zone");
 
 } // namespace sunsim::ev
