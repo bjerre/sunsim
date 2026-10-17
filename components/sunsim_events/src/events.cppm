@@ -130,7 +130,7 @@ struct ModeRequested {           // console: `tune`, `tune off`
 struct TuneLights {              // console `tune <lights> <level> [kelvin]`: the tuning program's levels
     Selection               lights;
     uint8_t                 level = 1;
-    std::optional<uint16_t> kelvin; // none: keep the colour
+    std::optional<uint16_t> kelvin{}; // none: keep the colour
 };
 struct TuneSave {};              // console `tune save`: the tuned levels become the minimums
 

@@ -876,6 +876,11 @@ events each test posts:
 ./sunsim test
 ```
 
+One file per area (`devices_tests.cpp`, `modes_tests.cpp`,
+`daylight_tests.cpp`, `weather_tests.cpp`, `events_tests.cpp`), sharing the
+module `sunsim.test` (`harness.cppm`: the `Harness`, a fixed Tuesday to run
+on, the runner) and `check.h` (`CHECK`, a macro, so a header).
+
 Covered: console pairing end to end; a paired device is never re-claimed by
 `pair`; unknown devices ignored; double press -> red pulses -> single press
 re-syncs; hold -> all off; ambiguous On/Toggle timing; clock-not-set holds
@@ -918,11 +923,30 @@ bus delivering 40k events from two threads in each poster's order.
   multi-step behaviour moved into coroutine flows; the components became
   C++ modules; the bus wrapped eventpp until clangd couldn't build it next
   to `import std`, and is now its own (under 100 lines); roles became groups
-  (`kLayout`) for the five-light wall.
+  (`kLayout`) for the five-light wall. Then: modules attach themselves to
+  the bus by their `on()` overloads; `SkyModel` judges the weather for
+  everyone; the settings became one table; time became `<chrono>`, colours
+  a `std::variant`.
 - Considered and rejected: ESP-IDF's `esp_event` (C-only, memcpy'd POD
   payloads, no host build).
 
-## 12. Open questions
+## 12. Compiler workarounds (GCC 15, C++ modules)
+
+Each is commented where it is; undo them as GCC's modules mature.
+
+| Where | What | Why |
+|---|---|---|
+| `Event`'s copy/move/destructor (`events.cppm`), `Timer::~Timer` (`flow.cppm`), `Program::~Program` (`program.cppm`) | defined out of line, not implicit or inline | importers otherwise link to `std::variant` / `vector` internals nobody emitted |
+| `DaySpan`, `Mireds`, `Xy`, `HueSat` (`types.cppm`) | `operator==` spelled out, not defaulted | GCC crashes compiling a file that imports them and compares them |
+| `parseRoleSet` (`types.cppm`) | a `find` loop, not `views::split` | its `subrange` fails to compile across modules |
+| `InternetSync` (`internet_sync.cppm` / `.cpp`) | definitions in a module implementation unit; the thread behind a `Task` | `std::jthread` and the C++20 semaphores in a `.cppm` crash GCC writing the module interface |
+| `kEventNames` (`events.cppm`) | names parsed from `__PRETTY_FUNCTION__` | no reflection until C++26 |
+
+The FreeRTOS tasks (Zigbee, app, display) stay FreeRTOS tasks: as
+`std::jthread`s each would need its own implementation unit, for the same
+crash.
+
+## 13. Open questions
 
 - One queue is ample at a few events a second; should time-critical
   `SetLight` traffic ever bypass the rest?

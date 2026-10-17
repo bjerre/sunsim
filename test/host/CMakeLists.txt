@@ -34,5 +34,9 @@ target_sources(sunsim_weather PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${WEATHER} F
 target_link_libraries(sunsim_weather PUBLIC sunsim_events)
 
 find_package(Threads REQUIRED)
-add_executable(sunsim_tests tests.cpp)
+# One file per area (devices, modes, daylight, weather, events), sharing the
+# module sunsim.test (harness.cppm) and check.h.
+add_executable(sunsim_tests main.cpp devices_tests.cpp modes_tests.cpp daylight_tests.cpp weather_tests.cpp
+                            events_tests.cpp)
+target_sources(sunsim_tests PRIVATE FILE_SET CXX_MODULES FILES harness.cppm)
 target_link_libraries(sunsim_tests PRIVATE sunsim_core sunsim_weather Threads::Threads)

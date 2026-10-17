@@ -386,7 +386,7 @@ generated `role_manifest.h`.
 - `main/` - `main.cpp` (`App`: creates the bus and modules, platform wiring,
   app task; and `app_main`), menuconfig (`Kconfig.projbuild`), and the role manifest
   (`role_manifest.json` -> `role_manifest.h` via `gen_role_manifest.py`).
-- `test/host/` - host tests for the core (see below).
+- `test/host/` - host tests for the pure layers, a file per area (see below).
 
 ## Host tests
 

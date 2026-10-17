@@ -150,6 +150,24 @@ ev::Role roleFromCtx(void *ctx)
     return ev::kRoles[static_cast<std::size_t>(reinterpret_cast<intptr_t>(ctx))];
 }
 
+// A signal's parameters, as the type the signal carries.
+template <class T> const T &params(const ezb_app_signal_t *signal)
+{
+    return *static_cast<const T *>(ezb_app_signal_get_params(signal));
+}
+
+// The ZCL frame header's fields that pick out the button's commands (ZCL
+// spec 2.4.1): the frame control byte, then (if manufacturer-specific) a
+// 2-byte manufacturer code, the sequence number, and the command.
+namespace zcl {
+constexpr uint8_t kFrameTypeMask        = 0x03; // frame control bits 0-1
+constexpr uint8_t kClusterSpecific      = 0x01; // ... a cluster's own command, not a global one
+constexpr uint8_t kManufacturerSpecific = 0x04; // frame control bit 2
+constexpr uint8_t kDefaultResponse      = 0x0B; // the global command
+
+enum class OnOff : uint8_t { Off = 0x00, On = 0x01, Toggle = 0x02 }; // On/Off cluster commands
+} // namespace zcl
+
 // A ZDO request got through and the device answered SUCCESS.
 template <class Result> bool zdoOk(const Result *result)
 {
@@ -290,7 +308,7 @@ void ZigbeeAdapter::handleSignal(const ezb_app_signal_t *app_signal)
         break;
     case EZB_BDB_SIGNAL_DEVICE_FIRST_START:
     case EZB_BDB_SIGNAL_DEVICE_REBOOT: {
-        const auto status = *static_cast<const ezb_bdb_comm_status_t *>(ezb_app_signal_get_params(app_signal));
+        const auto status = params<ezb_bdb_comm_status_t>(app_signal);
         if (status == EZB_BDB_STATUS_SUCCESS) {
             ESP_LOGI(kTag, "Device started up in%s factory-reset mode", ezb_bdb_is_factory_new() ? "" : " non");
             if (ezb_bdb_is_factory_new()) {
@@ -305,7 +323,7 @@ void ZigbeeAdapter::handleSignal(const ezb_app_signal_t *app_signal)
         }
     } break;
     case EZB_BDB_SIGNAL_FORMATION: {
-        const auto status = *static_cast<const ezb_bdb_comm_status_t *>(ezb_app_signal_get_params(app_signal));
+        const auto status = params<ezb_bdb_comm_status_t>(app_signal);
         if (status == EZB_BDB_STATUS_SUCCESS) {
             ezb_extpanid_t ext_pan_id;
             ezb_nwk_get_extended_panid(&ext_pan_id);
@@ -319,7 +337,7 @@ void ZigbeeAdapter::handleSignal(const ezb_app_signal_t *app_signal)
         }
     } break;
     case EZB_BDB_SIGNAL_STEERING: {
-        const auto status = *static_cast<const ezb_bdb_comm_status_t *>(ezb_app_signal_get_params(app_signal));
+        const auto status = params<ezb_bdb_comm_status_t>(app_signal);
         if (status == EZB_BDB_STATUS_SUCCESS) {
             ESP_LOGI(kTag, "Network formed. Type `pair <role>` (e.g. `pair WallA`), then reset that device.");
             ezb_bdb_open_network(ev::kDefaultOpenTime.count());
@@ -330,23 +348,20 @@ void ZigbeeAdapter::handleSignal(const ezb_app_signal_t *app_signal)
         }
     } break;
     case EZB_ZDO_SIGNAL_DEVICE_ANNCE: {
-        const auto *params =
-            static_cast<const ezb_zdo_signal_device_annce_params_t *>(ezb_app_signal_get_params(app_signal));
-        post_(ev::DeviceAnnounced{.ext_addr = params->device_addr.u64, .short_addr = params->short_addr});
+        const auto &announce = params<ezb_zdo_signal_device_annce_params_t>(app_signal);
+        post_(ev::DeviceAnnounced{.ext_addr = announce.device_addr.u64, .short_addr = announce.short_addr});
     } break;
     case EZB_ZDO_SIGNAL_DEVICE_UPDATE: {
-        const auto *params =
-            static_cast<const ezb_zdo_signal_device_update_params_t *>(ezb_app_signal_get_params(app_signal));
+        const auto &update = params<ezb_zdo_signal_device_update_params_t>(app_signal);
         ESP_LOGI(kTag, "Device Update: ext=0x%llx short=0x%04hx status=%d tc_action=%d parent_short=0x%04hx",
-                 static_cast<unsigned long long>(params->device_addr.u64), params->short_addr, params->status,
-                 params->tc_action, params->parent_short);
+                 static_cast<unsigned long long>(update.device_addr.u64), update.short_addr, update.status,
+                 update.tc_action, update.parent_short);
     } break;
     case EZB_ZDO_SIGNAL_LEAVE: {
-        const auto *leave = static_cast<const ezb_zdo_signal_leave_params_t *>(ezb_app_signal_get_params(app_signal));
-        ESP_LOGI(kTag, "Device left network, type(0x%02x)", leave->leave_type);
+        ESP_LOGI(kTag, "Device left network, type(0x%02x)", params<ezb_zdo_signal_leave_params_t>(app_signal).leave_type);
     } break;
     case EZB_NWK_SIGNAL_PERMIT_JOIN_STATUS: {
-        const auto duration = *static_cast<const uint8_t *>(ezb_app_signal_get_params(app_signal));
+        const auto duration = params<uint8_t>(app_signal);
         if (duration) {
             ESP_LOGI(kTag, "Network open for %d seconds", duration);
         } else {
@@ -419,20 +434,19 @@ bool ZigbeeAdapter::handleApsIndication(const ezb_apsde_data_ind_t *ind)
     if (!ind || ind->profile_id == 0 || ind->asdu_length < 3) {
         return false; // ZDO, or too short to be ZCL
     }
-    const uint8_t fc  = ind->asdu[0];
-    const bool    mfr = fc & 0x04; // manufacturer-specific: 2-byte code before TSN
+    const uint8_t frame_control = ind->asdu[0];
+    const bool    mfr           = frame_control & zcl::kManufacturerSpecific;
     if (mfr && ind->asdu_length < 5) {
         return false;
     }
     const uint8_t  cmd         = ind->asdu[mfr ? 4 : 2];
-    const bool     cluster_cmd = (fc & 0x03) == 0x01;
+    const bool     cluster_cmd = (frame_control & zcl::kFrameTypeMask) == zcl::kClusterSpecific;
     const bool     from_short  = ind->src_address.addr_mode == EZB_ADDR_MODE_SHORT;
     const uint16_t src         = from_short ? ind->src_address.u.short_addr : 0xffff;
 
     // Diagnostics (enable DEBUG for the ZIGBEE tag to see a device's real
     // traffic), skipping the bulbs' routine ZCL Default Responses.
-    constexpr uint8_t kDefaultRsp = 0x0B;
-    if (cluster_cmd || cmd != kDefaultRsp) {
+    if (cluster_cmd || cmd != zcl::kDefaultResponse) {
         char hex[3 * 16 + 1] = {};
         for (uint16_t i = 0; i < ind->asdu_length && i < 16; ++i) {
             std::snprintf(hex + 3 * i, 4, "%02x ", ind->asdu[i]);
@@ -450,16 +464,16 @@ bool ZigbeeAdapter::handleApsIndication(const ezb_apsde_data_ind_t *ind)
         mfr) {
         return false;
     }
-    switch (cmd) {
-    case 0x02: // Toggle
+    switch (static_cast<zcl::OnOff>(cmd)) {
+    case zcl::OnOff::Toggle:
         ESP_LOGI(kTag, "Button: single press (Toggle)");
         pressed(ev::Press::Single);
         break;
-    case 0x01: // On
+    case zcl::OnOff::On:
         ESP_LOGI(kTag, "Button: double press (On)");
         pressed(ev::Press::Double);
         break;
-    case 0x00: // Off
+    case zcl::OnOff::Off:
         ESP_LOGI(kTag, "Button: hold (Off)");
         pressed(ev::Press::Hold);
         break;
