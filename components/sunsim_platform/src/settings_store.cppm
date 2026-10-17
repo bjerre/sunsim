@@ -17,6 +17,7 @@ export namespace sunsim::platform {
 //   program   "act.start" "act.end" "act.fade" "act.days" "work.start"
 //             "work.end" "sun.shift" "sun.amber" "sun.sweep" "sync.start"
 //             "sync.end" "sky.on" "sky.dim" "sky.cool"  (hours stored as minutes)
+//             "wx.on" "wx.precip" "wx.alert"  (light sets as role bits by slot)
 //   intensity "<role>.peak" (percent), "<role>.min" (minimum level)
 //   "layout"  which role layout the keys follow (see migrateLayout())
 // Wi-Fi credentials are kept separately (:wifi).
@@ -71,6 +72,10 @@ constexpr const char *kCloudDimKey  = "sky.dim";
 constexpr const char *kCloudCoolKey = "sky.cool";
 constexpr const char *kSyncStartKey = "sync.start";
 constexpr const char *kSyncEndKey   = "sync.end";
+constexpr const char *kWeatherKey   = "wx.on";
+constexpr const char *kPrecipKey    = "wx.precip";
+constexpr const char *kAlertKey     = "wx.alert";
+static_assert(ev::kRoleCount <= 16, "light sets are stored as 16 bits");
 
 uint16_t toMinutes(double hours) noexcept
 {
@@ -293,6 +298,16 @@ void SettingsStore::loadAll()
         if (nvs_get_u8(h, kCloudCoolKey, &byte) == ESP_OK && byte <= 100) {
             config_.cloud_cool_percent = byte;
         }
+        if (nvs_get_u8(h, kWeatherKey, &byte) == ESP_OK) {
+            config_.weather_enabled = byte != 0;
+        }
+        uint16_t bits = 0;
+        if (nvs_get_u16(h, kPrecipKey, &bits) == ESP_OK) {
+            config_.precip_lights = ev::RoleSet{bits};
+        }
+        if (nvs_get_u16(h, kAlertKey, &bits) == ESP_OK) {
+            config_.alert_lights = ev::RoleSet{bits};
+        }
         for (const ev::Role role : ev::kRoles) {
             if (nvs_get_u8(h, Key(role, "peak").text, &byte) == ESP_OK && byte >= 1 && byte <= 100) {
                 peaks_[role] = byte;
@@ -327,6 +342,9 @@ void SettingsStore::onSetConfig(const ev::SetConfig &e)
     w.u8(kCloudsKey, config_.clouds_enabled ? 1 : 0);
     w.u8(kCloudDimKey, config_.cloud_dim_percent);
     w.u8(kCloudCoolKey, config_.cloud_cool_percent);
+    w.u8(kWeatherKey, config_.weather_enabled ? 1 : 0);
+    w.u16(kPrecipKey, static_cast<uint16_t>(config_.precip_lights.to_ulong()));
+    w.u16(kAlertKey, static_cast<uint16_t>(config_.alert_lights.to_ulong()));
     w.commit();
     publish();
 }

@@ -43,8 +43,16 @@ struct SetMinLevel {             // console `minlevel ...`, `tune save`
     Selection lights;            // non-bulbs in it are skipped
     uint8_t   level = 1;         // 1-254
 };
-struct CloudCoverUpdated {       // InternetSync, after each fetch
+struct CloudCoverUpdated {       // InternetSync, after each daily fetch
     CloudCover forecast{};
+};
+struct ConditionsUpdated {       // InternetSync, every 15 min; console `weather simulate`
+    Conditions now{};
+    Instant    at{};             // when fetched: it goes stale kWeatherFreshFor later
+};
+struct AlertsUpdated {           // InternetSync, every 15 min (none in force: count 0)
+    Alerts  alerts{};
+    Instant at{};
 };
 struct RolesLoaded {             // at boot from NVS
     DeviceRecords records{};
@@ -169,6 +177,7 @@ struct LightTarget {             // what a bulb should show, from the running pr
     Transition level_transition{};
     Transition color_transition{};
 };
+struct OutputTarget : LightTarget {}; // what it does show: Overlays' pick, for LightOutput
 struct SetLight {                // one bulb's ZCL commands, sent in field order
     uint16_t                                  short_addr = 0;
     uint8_t                                   endpoint   = 0;
@@ -191,6 +200,7 @@ struct StatusChanged {           // shared, not copied: it's by far the largest 
 
 using Payload = std::variant<Heartbeat, Tick, ProgramTick, SetFastDay,                                 //
                              ConfigChanged, SetConfig, SetIntensity, SetMinLevel, CloudCoverUpdated,  //
+                             ConditionsUpdated, AlertsUpdated,                                        //
                              RolesLoaded, PersistRoles,                                               //
                              NetworkUp, DeviceAnnounced, EndpointFound, BindResult, PingResult,       //
                              AckReceived, ButtonPressed,                                              //
@@ -198,20 +208,21 @@ using Payload = std::variant<Heartbeat, Tick, ProgramTick, SetFastDay,          
                              SyncRequested, ModeRequested, TuneLights, TuneSave,                      //
                              RoleAssigned, RoleCleared, Discover, Bind, Ping, ReachabilityChanged,    //
                              DevicesUpdated,                                                          //
-                             ModeChanged, RefreshLights, LightTarget, SetLight,                      //
+                             ModeChanged, RefreshLights, LightTarget, OutputTarget, SetLight,        //
                              StatusChanged>;
 
 // Names for tracing, in Payload order.
 inline constexpr const char *kEventNames[] = {
     "Heartbeat", "Tick", "ProgramTick", "SetFastDay",
     "ConfigChanged", "SetConfig", "SetIntensity", "SetMinLevel", "CloudCoverUpdated",
+    "ConditionsUpdated", "AlertsUpdated",
     "RolesLoaded", "PersistRoles",
     "NetworkUp", "DeviceAnnounced", "EndpointFound", "BindResult", "PingResult",
     "AckReceived", "ButtonPressed",
     "PairRequested", "PairCancelled", "UnpairRequested", "OpenNetwork", "FactoryReset",
     "SyncRequested", "ModeRequested", "TuneLights", "TuneSave",
     "RoleAssigned", "RoleCleared", "Discover", "Bind", "Ping", "ReachabilityChanged", "DevicesUpdated",
-    "ModeChanged", "RefreshLights", "LightTarget", "SetLight",
+    "ModeChanged", "RefreshLights", "LightTarget", "OutputTarget", "SetLight",
     "StatusChanged",
 };
 static_assert(std::size(kEventNames) == std::variant_size_v<Payload>, "kEventNames out of sync with Payload");

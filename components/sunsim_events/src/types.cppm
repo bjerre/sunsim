@@ -201,6 +201,47 @@ using Selection = std::variant<AllRoles, Group, Role>;
     return std::nullopt;
 }
 
+// Any number of roles, by slot: the weather lights.
+using RoleSet = std::bitset<kRoleCount>;
+
+[[nodiscard]] constexpr RoleSet roleSet(std::initializer_list<Role> roles) noexcept
+{
+    RoleSet set;
+    for (const Role role : roles) {
+        set.set(slot(role));
+    }
+    return set;
+}
+
+[[nodiscard]] constexpr bool contains(const RoleSet &set, Role role) noexcept { return set.test(slot(role)); }
+
+// "none", or a comma list of what parseSelection() takes: "WallB,WallD",
+// "wall", "WallA,Work".
+[[nodiscard]] constexpr std::optional<RoleSet> parseRoleSet(std::string_view text) noexcept
+{
+    RoleSet set;
+    if (detail::equalsIgnoringCase(text, "none")) {
+        return set;
+    }
+    // (Not views::split: GCC 15 trips over its subrange across modules.)
+    for (;;) {
+        const auto comma     = text.find(',');
+        const auto selection = parseSelection(text.substr(0, comma));
+        if (!selection) {
+            return std::nullopt;
+        }
+        for (const Role role : kRoles) {
+            if (selects(*selection, role)) {
+                set.set(slot(role));
+            }
+        }
+        if (comma == std::string_view::npos) {
+            return set;
+        }
+        text.remove_prefix(comma + 1);
+    }
+}
+
 // A paired device's addresses. short_addr is network-assigned and refreshed
 // on every announce; endpoint is 0 until discovery finds it.
 struct DeviceRecord {
@@ -327,6 +368,14 @@ struct ProgramConfig {
     bool    clouds_enabled     = true;
     uint8_t cloud_dim_percent  = 40;
     uint8_t cloud_cool_percent = 50;
+
+    // Weather lights (core::Overlays): precip_lights pulse a colour while
+    // rain or snow falls, alert_lights yellow/orange/red for an NWS
+    // advisory/watch/warning (an alert wins where they overlap). Off: every
+    // light shows its program alone.
+    bool    weather_enabled = true;
+    RoleSet precip_lights   = roleSet({Role{Group::Wall, 2}});                      // WallC
+    RoleSet alert_lights    = roleSet({Role{Group::Wall, 1}, Role{Group::Wall, 3}}); // WallB, WallD
 };
 
 inline constexpr uint8_t kMaxAmberSweepDeg = 30;
@@ -370,6 +419,90 @@ struct CloudCover {
     }();
 };
 
+// What's falling now, from the WMO weather code, and how hard.
+enum class Precip : uint8_t { None, Drizzle, Rain, FreezingRain, Snow, Thunderstorm };
+enum class Intensity : uint8_t { Light, Moderate, Heavy };
+
+[[nodiscard]] constexpr const char *precipName(Precip precip) noexcept
+{
+    switch (precip) {
+    case Precip::None:
+        return "none";
+    case Precip::Drizzle:
+        return "drizzle";
+    case Precip::Rain:
+        return "rain";
+    case Precip::FreezingRain:
+        return "freezing rain";
+    case Precip::Snow:
+        return "snow";
+    case Precip::Thunderstorm:
+        return "thunderstorm";
+    }
+    return "?";
+}
+
+[[nodiscard]] constexpr const char *intensityName(Intensity intensity) noexcept
+{
+    switch (intensity) {
+    case Intensity::Light:
+        return "light";
+    case Intensity::Moderate:
+        return "moderate";
+    case Intensity::Heavy:
+        return "heavy";
+    }
+    return "?";
+}
+
+// The weather now (Open-Meteo's `current`: 15-minute model data, the best
+// estimate of now rather than an observation).
+struct Conditions {
+    uint8_t   cloud_percent = 0;
+    Precip    precip        = Precip::None;
+    Intensity intensity     = Intensity::Light;
+
+    friend constexpr bool operator==(const Conditions &, const Conditions &) noexcept = default;
+};
+
+// NWS's alert tiers, as its event names give them: "Winter Storm Warning".
+enum class AlertLevel : uint8_t { None, Advisory, Watch, Warning };
+
+[[nodiscard]] constexpr const char *alertLevelName(AlertLevel level) noexcept
+{
+    switch (level) {
+    case AlertLevel::None:
+        return "none";
+    case AlertLevel::Advisory:
+        return "advisory";
+    case AlertLevel::Watch:
+        return "watch";
+    case AlertLevel::Warning:
+        return "warning";
+    }
+    return "?";
+}
+
+struct Alert {
+    AlertLevel           level = AlertLevel::None;
+    std::array<char, 32> event{}; // "Winter Storm Warning", NUL-terminated, cut to fit
+    Instant              until{}; // when it ends
+};
+
+// The NWS alerts for the location, highest level first.
+struct Alerts {
+    static constexpr std::size_t kMax = 4;
+
+    std::array<Alert, kMax> items{};
+    uint8_t                 count = 0;
+
+    [[nodiscard]] std::span<const Alert> list() const noexcept { return {items.data(), count}; }
+};
+
+// Live weather older than this (three missed 15-minute fetches) is ignored:
+// cloud cover falls back to the forecast, the weather lights to their program.
+inline constexpr std::chrono::minutes kWeatherFreshFor{45};
+
 // ---- Time -----------------------------------------------------------------
 
 // What time the program runs on: the real clock, or the debug fast-day clock.
@@ -406,7 +539,10 @@ struct StatusSnapshot {
     ProgramConfig                         config{};
     Peaks                                 peaks      = kDefaultPeaks;
     MinLevels                             min_levels = kDefaultMinLevels;
-    std::optional<uint8_t>                cloud_percent; // now, from the forecast (none: no data)
+    std::optional<uint8_t>                cloud_percent; // now (none: no data)
+    bool                                  cloud_live = false; // cloud_percent is live, not the forecast's
+    std::optional<Conditions>             conditions; // live, while fresh
+    Alerts                                alerts{};   // in force now
 };
 
 } // namespace sunsim::ev

@@ -14,25 +14,32 @@ export module sunsim.platform:internet_sync;
 
 import std.compat;
 import sunsim.ev;
+import sunsim.weather;
 import :wifi;
 
 export namespace sunsim::platform {
 
-// Everything that needs the internet, done in one short Wi-Fi session (Wi-Fi
-// shares the 2.4 GHz radio with Zigbee), in order: the clock over SNTP, then
-// the hourly cloud cover for today and tomorrow (Open-Meteo, posted as
-// CloudCoverUpdated; over HTTPS, which needs the clock).
+// Everything that needs the internet, batched into short Wi-Fi sessions
+// (Wi-Fi shares the 2.4 GHz radio with Zigbee). Each job has a cadence:
 //
-// When: at boot (start() waits for it, before the Zigbee radio starts); then
-// once a day in the sync window (ProgramConfig, `config syncwindow`, default
-// 04:00-05:00), retrying every 10 minutes within it on failure; and when
-// asked (SyncRequested: console `sync`, switching fast-day mode). While the
-// clock has never been set it retries every 10 minutes regardless: the
-// lights stay off without it. Everything runs on its own task (TLS needs
-// the stack).
+//   clock        SNTP                                      daily
+//   forecast     Open-Meteo hourly cloud cover, today and  daily
+//                tomorrow -> CloudCoverUpdated
+//   conditions   Open-Meteo's weather now -> ConditionsUpdated   every 15 min
+//   alerts       NWS's active alerts for the location -> AlertsUpdated   every 15 min
+//
+// Daily: once a day in the sync window (ProgramConfig, `config syncwindow`,
+// default 04:00-05:00), retrying every 10 minutes within it on failure.
+// Every job also runs at boot (start() waits for it, before the Zigbee radio
+// starts) and when asked (SyncRequested: console `sync`, switching fast-day
+// mode). A session runs whichever jobs are due, in the order above (HTTPS
+// needs the clock); while the clock has never been set, every 10 minutes
+// regardless: the lights stay off without it. Everything runs on its own
+// task (TLS needs the stack); the replies are read as they stream in
+// (sunsim.weather), whatever their size.
 class InternetSync {
 public:
-    // The location is menuconfig's: the forecast is for it.
+    // The location is menuconfig's: the weather is for it.
     InternetSync(ev::Post post, double latitude_deg, double longitude_deg);
 
     InternetSync(const InternetSync &)            = delete;
@@ -45,10 +52,30 @@ public:
     void onSyncRequested(const ev::SyncRequested &e);
 
 private:
-    void run();
+    struct Daily {};
+    struct Every {
+        std::chrono::minutes period;
+    };
+    using Cadence = std::variant<Daily, Every>;
+
+    struct Job {
+        const char *name;
+        bool (InternetSync::*run)();
+        Cadence when;
+    };
+    struct JobState {
+        std::optional<std::chrono::sys_seconds> last_try;
+        std::optional<std::chrono::sys_seconds> last_ok;
+    };
+    static constexpr std::size_t kJobCount = 4;
+    static const std::array<Job, kJobCount> kJobs;
+
+    void run(bool everything);
     bool syncClock();
     bool fetchCloudCover();
-    [[nodiscard]] bool due(std::chrono::sys_seconds now) const;
+    bool fetchConditions();
+    bool fetchAlerts();
+    [[nodiscard]] bool due(const Job &job, const JobState &state, std::chrono::sys_seconds now) const;
     static void taskTrampoline(void *arg);
 
     ev::Post          post_;
@@ -61,9 +88,7 @@ private:
     std::atomic<uint16_t> window_start_{4 * 60};
     std::atomic<uint16_t> window_end_{5 * 60};
 
-    // The sync task's own.
-    std::optional<std::chrono::sys_seconds> last_try_;
-    std::optional<std::chrono::sys_seconds> last_ok_; // every job succeeded
+    std::array<JobState, kJobCount> state_{}; // the sync task's own, by kJobs index
 };
 
 } // namespace sunsim::platform
@@ -102,61 +127,63 @@ std::chrono::sys_days dateOf(const std::tm &t) noexcept
     return std::chrono::sys_days{std::chrono::year{t.tm_year + 1900} / 1 / 1} + std::chrono::days{t.tm_yday};
 }
 
-// The numbers in a JSON array `"key":[...]`, null as nullopt. Enough for
-// Open-Meteo's flat reply; not a general parser.
-std::vector<std::optional<long long>> jsonNumbers(std::string_view json, std::string_view key)
+// A coordinate as the services like it: at most four decimals, no
+// trailing zeros (NWS redirects "44.9800" to "44.98").
+std::string coordinate(double degrees)
 {
-    std::vector<std::optional<long long>> out;
-    const std::string needle = "\"" + std::string{key} + "\":[";
-    const auto        start  = json.find(needle);
-    if (start == std::string_view::npos) {
-        return out;
+    char text[16];
+    std::snprintf(text, sizeof(text), "%.4f", degrees);
+    std::string_view s{text};
+    while (s.ends_with('0')) {
+        s.remove_suffix(1);
     }
-    std::string_view rest = json.substr(start + needle.size());
-    rest                  = rest.substr(0, rest.find(']'));
-    while (!rest.empty()) {
-        const auto       comma = rest.find(',');
-        std::string_view item  = rest.substr(0, comma);
-        long long        value = 0;
-        const auto [end, err]  = std::from_chars(item.data(), item.data() + item.size(), value);
-        out.push_back(err == std::errc{} ? std::optional{value} : std::nullopt); // "null"
-        rest = comma == std::string_view::npos ? std::string_view{} : rest.substr(comma + 1);
+    if (s.ends_with('.')) {
+        s.remove_suffix(1);
     }
-    return out;
+    return std::string{s};
 }
 
-// GET over HTTPS (checked against the certificate bundle): the body, or
-// nullopt.
-std::optional<std::string> httpsGet(const char *url)
+struct Header {
+    const char *name;
+    const char *value;
+};
+
+// GET over HTTPS (checked against the certificate bundle), handing the body
+// to `sink` a chunk at a time as it arrives. False on any failure (the sink
+// may have seen part of the body).
+bool httpsGet(const std::string &url, const std::function<void(std::string_view)> &sink,
+              std::initializer_list<Header> headers = {})
 {
     esp_http_client_config_t config{};
-    config.url               = url;
+    config.url               = url.c_str();
     config.crt_bundle_attach = esp_crt_bundle_attach;
     config.timeout_ms        = 30'000; // slow while Zigbee shares the radio
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (client == nullptr) {
-        return std::nullopt;
+        return false;
     }
-    std::optional<std::string> body;
+    for (const Header &h : headers) {
+        esp_http_client_set_header(client, h.name, h.value);
+    }
+    bool ok = false;
     if (esp_http_client_open(client, 0) == ESP_OK && esp_http_client_fetch_headers(client) >= 0) {
-        const int   status = esp_http_client_get_status_code(client);
-        std::string text;
-        char        chunk[512];
-        int         n = 0;
-        while (text.size() < 16 * 1024 && (n = esp_http_client_read(client, chunk, sizeof(chunk))) > 0) {
-            text.append(chunk, static_cast<std::size_t>(n));
-        }
+        const int status = esp_http_client_get_status_code(client);
         if (status == 200) {
-            body = std::move(text);
+            char chunk[512];
+            int  n = 0;
+            while ((n = esp_http_client_read(client, chunk, sizeof(chunk))) > 0) {
+                sink({chunk, static_cast<std::size_t>(n)});
+            }
+            ok = n == 0;
         } else {
-            ESP_LOGW(kTag, "HTTP %d from %s", status, url);
+            ESP_LOGW(kTag, "HTTP %d from %s", status, url.c_str());
         }
     } else {
-        ESP_LOGW(kTag, "Could not reach %s", url);
+        ESP_LOGW(kTag, "Could not reach %s", url.c_str());
     }
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
-    return body;
+    return ok;
 }
 } // namespace
 
@@ -211,19 +238,11 @@ bool InternetSync::syncClock()
 // covered whatever the time zone, placed by local hour from today's 00:00.
 bool InternetSync::fetchCloudCover()
 {
-    char url[256];
-    std::snprintf(url, sizeof(url),
-                  "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f&hourly=cloud_cover"
-                  "&timeformat=unixtime&timezone=GMT&past_days=1&forecast_days=3",
-                  latitude_deg_, longitude_deg_);
-    const auto body = httpsGet(url);
-    if (!body) {
-        return false;
-    }
-    const auto times  = jsonNumbers(*body, "time");
-    const auto covers = jsonNumbers(*body, "cloud_cover");
-    if (times.empty() || times.size() != covers.size()) {
-        ESP_LOGW(kTag, "Unexpected forecast reply (%u bytes)", static_cast<unsigned>(body->size()));
+    const std::string url = "https://api.open-meteo.com/v1/forecast?latitude=" + coordinate(latitude_deg_) +
+                            "&longitude=" + coordinate(longitude_deg_) +
+                            "&hourly=cloud_cover&timeformat=unixtime&timezone=GMT&past_days=1&forecast_days=3";
+    weather::ForecastReader reader;
+    if (!httpsGet(url, [&](std::string_view chunk) { reader.feed(chunk); })) {
         return false;
     }
 
@@ -232,19 +251,16 @@ bool InternetSync::fetchCloudCover()
     forecast.year      = static_cast<int16_t>(today.tm_year + 1900);
     forecast.yday      = static_cast<int16_t>(today.tm_yday);
     std::size_t placed = 0;
-    for (std::size_t i = 0; i < times.size(); ++i) {
-        if (!times[i] || !covers[i]) {
-            continue;
-        }
-        const std::tm local = localTime(static_cast<std::time_t>(*times[i]));
+    for (const auto &[start, percent] : reader.hours()) {
+        const std::tm local = localTime(std::chrono::system_clock::to_time_t(start));
         const long    slot  = (dateOf(local) - dateOf(today)).count() * 24 + local.tm_hour;
         if (slot >= 0 && slot < static_cast<long>(ev::CloudCover::kHours)) {
-            forecast.percent[static_cast<std::size_t>(slot)] =
-                static_cast<uint8_t>(std::clamp<long long>(*covers[i], 0, 100));
+            forecast.percent[static_cast<std::size_t>(slot)] = percent;
             ++placed;
         }
     }
     if (placed == 0) {
+        ESP_LOGW(kTag, "Unexpected forecast reply");
         return false;
     }
     ESP_LOGI(kTag, "Cloud cover, %u hours; today 08:00 %u%%, 12:00 %u%%, 16:00 %u%%", static_cast<unsigned>(placed),
@@ -253,46 +269,98 @@ bool InternetSync::fetchCloudCover()
     return true;
 }
 
-// ---- Scheduling ----
-
-void InternetSync::run()
+// Open-Meteo's `current`: 15-minute model data (in the US, HRRR's).
+bool InternetSync::fetchConditions()
 {
-    struct Job {
-        const char *name;
-        bool (InternetSync::*run)();
-    };
-    // In order over one connection: HTTPS needs the clock.
-    constexpr std::array kJobs{
-        Job{"clock", &InternetSync::syncClock},
-        Job{"cloud cover", &InternetSync::fetchCloudCover},
-    };
-
-    ESP_LOGI(kTag, "Syncing");
-    bool ok = false;
-    {
-        const WifiSession wifi;
-        if (wifi.connected()) {
-            ok = true;
-            for (const Job &job : kJobs) {
-                const bool done = (this->*job.run)();
-                ESP_LOGI(kTag, "  %s: %s", job.name, done ? "ok" : "failed");
-                ok = ok && done;
-            }
-        }
-    } // Wi-Fi off before anything else
-    // Read after the jobs: the clock sync itself moves the clock.
-    last_try_ = now();
-    if (ok) {
-        last_ok_ = last_try_;
+    const std::string url = "https://api.open-meteo.com/v1/forecast?latitude=" + coordinate(latitude_deg_) +
+                            "&longitude=" + coordinate(longitude_deg_) +
+                            "&current=cloud_cover,weather_code&timeformat=unixtime";
+    weather::ConditionsReader reader;
+    if (!httpsGet(url, [&](std::string_view chunk) { reader.feed(chunk); })) {
+        return false;
     }
-    ESP_LOGI(kTag, "%s", ok ? "Sync done" : "Sync failed; will retry");
+    const auto now = reader.conditions();
+    if (!now) {
+        ESP_LOGW(kTag, "Unexpected conditions reply");
+        return false;
+    }
+    ESP_LOGI(kTag, "Now: %u%% cloud, %s%s%s", now->cloud_percent,
+             now->precip == ev::Precip::None ? "" : ev::intensityName(now->intensity),
+             now->precip == ev::Precip::None ? "" : " ", ev::precipName(now->precip));
+    post_(ev::ConditionsUpdated{.now = *now, .at = ev::BootClock::now()});
+    return true;
 }
 
-bool InternetSync::due(std::chrono::sys_seconds t) const
+// The National Weather Service's alerts in force for the location (US
+// only; elsewhere the reply is empty). It asks for a User-Agent.
+bool InternetSync::fetchAlerts()
 {
-    const bool retry_ready = !last_try_ || t - *last_try_ >= kRetryDelay;
+    const std::string url = "https://api.weather.gov/alerts/active?status=actual&point=" +
+                            coordinate(latitude_deg_) + "," + coordinate(longitude_deg_);
+    weather::AlertsReader reader;
+    if (!httpsGet(url, [&](std::string_view chunk) { reader.feed(chunk); },
+                  {{"User-Agent", "sunsim (ESP32 daylight simulator)"}, {"Accept", "application/geo+json"}})) {
+        return false;
+    }
+    const ev::Alerts alerts = reader.inForce(now(), ev::BootClock::now());
+    if (alerts.count == 0) {
+        ESP_LOGI(kTag, "No weather alerts");
+    }
+    for (const ev::Alert &alert : alerts.list()) {
+        ESP_LOGI(kTag, "Alert: %s (%s)", alert.event.data(), ev::alertLevelName(alert.level));
+    }
+    post_(ev::AlertsUpdated{.alerts = alerts, .at = ev::BootClock::now()});
+    return true;
+}
+
+// ---- Scheduling ----
+
+// In order over one connection: HTTPS needs the clock.
+const std::array<InternetSync::Job, InternetSync::kJobCount> InternetSync::kJobs{{
+    {"clock", &InternetSync::syncClock, Daily{}},
+    {"forecast", &InternetSync::fetchCloudCover, Daily{}},
+    {"conditions", &InternetSync::fetchConditions, Every{15min}},
+    {"alerts", &InternetSync::fetchAlerts, Every{15min}},
+}};
+
+// Runs the jobs that are due (every one if `everything`), in one Wi-Fi
+// session; none due, no session.
+void InternetSync::run(bool everything)
+{
+    std::array<bool, kJobCount> chosen{};
+    for (std::size_t i = 0; i < kJobCount; ++i) {
+        chosen[i] = everything || due(kJobs[i], state_[i], now());
+    }
+    if (std::ranges::none_of(chosen, std::identity{})) {
+        return;
+    }
+
+    ESP_LOGI(kTag, "Syncing");
+    const WifiSession wifi;
+    for (std::size_t i = 0; i < kJobCount; ++i) {
+        if (!chosen[i]) {
+            continue;
+        }
+        // Without a clock HTTPS can't check certificates: don't try.
+        const bool clock = kJobs[i].run == &InternetSync::syncClock;
+        const bool done  = wifi.connected() && (clock || now() >= kClockSetAfter) && (this->*kJobs[i].run)();
+        ESP_LOGI(kTag, "  %s: %s", kJobs[i].name, done ? "ok" : "failed");
+        // Read after the job: the clock sync itself moves the clock.
+        state_[i].last_try = now();
+        if (done) {
+            state_[i].last_ok = state_[i].last_try;
+        }
+    }
+} // Wi-Fi off
+
+bool InternetSync::due(const Job &job, const JobState &state, std::chrono::sys_seconds t) const
+{
+    const bool retry_ready = !state.last_try || t - *state.last_try >= kRetryDelay;
     if (t < kClockSetAfter) {
         return retry_ready; // never set: keep trying, window or not
+    }
+    if (const auto *every = std::get_if<Every>(&job.when)) {
+        return !state.last_try || t - *state.last_try >= every->period;
     }
 
     const std::tm local  = localTime(std::chrono::system_clock::to_time_t(t));
@@ -304,24 +372,22 @@ bool InternetSync::due(std::chrono::sys_seconds t) const
     // When today's window opened: done since then, nothing to do; else the
     // first try in it, or a retry.
     const auto opened = t - (minute - start) - std::chrono::seconds{local.tm_sec};
-    if (last_ok_ && *last_ok_ >= opened) {
+    if (state.last_ok && *state.last_ok >= opened) {
         return false;
     }
-    return !last_try_ || *last_try_ < opened || retry_ready;
+    return !state.last_try || *state.last_try < opened || retry_ready;
 }
 
 void InternetSync::taskTrampoline(void *arg)
 {
     auto &self = *static_cast<InternetSync *>(arg);
-    self.run(); // the boot sync
+    self.run(true); // the boot sync
     xSemaphoreGive(self.boot_done_);
     for (;;) {
         // A minute at a time (a day in ticks would overflow pdMS_TO_TICKS),
         // or at once when asked.
         const bool asked = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(60'000)) > 0;
-        if (asked || self.due(now())) {
-            self.run();
-        }
+        self.run(asked);
     }
 }
 

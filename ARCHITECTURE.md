@@ -42,9 +42,13 @@ flowchart TB
         DR[DeviceRegistry]
         MC[ModeController]
         PH["ProgramHost<br/>Daylight / Off / RedAlert / Tuning"]
+        OV["Overlays<br/>(weather lights)"]
         LO[LightOutput]
         SM[StatusModel]
         MA["math: daylight, solar, sky, day_info"]
+    end
+    subgraph weather["components/sunsim_weather — module sunsim.weather (pure C++, host-tested)"]
+        WR["JsonScanner, readers for<br/>Open-Meteo and NWS replies"]
     end
     subgraph events["components/sunsim_events — module sunsim.ev"]
         EV["events + value types<br/>EventBus, Flow / Timer / Inbox"]
@@ -52,6 +56,7 @@ flowchart TB
     IDF[("ESP-IDF: esp-zigbee, NVS, esp_timer,<br/>console, esp_lvgl_port, Wi-Fi/SNTP")]
 
     app --> platform & core
+    platform --> weather --> events
     platform --> events
     core --> events
     platform --> IDF
@@ -60,8 +65,9 @@ flowchart TB
 | Namespace / module | Holds | Imports |
 |---|---|---|
 | `sunsim::ev` (`sunsim.ev`) | every event, the `Event` variant, `Post`, `EventBus`; coroutine flows (`Flow`, `Timer`, `Inbox`); value types (`Role` and the layout, `LightState`, `ProgramConfig`, `StatusSnapshot`, ...) | `std` |
-| `sunsim::core` (`sunsim.core`) | `DeviceRegistry`, `ModeController`, `ProgramHost` and the programs, `LightOutput`, `StatusModel`, the daylight/solar math; `CoreModules` and `wireCore()` | `ev` |
-| `sunsim::platform` (`sunsim.platform`) | `ZigbeeAdapter`, `Clock`, `InternetSync`, `SettingsStore`, the console, the status display, `StatusSlot` | `ev`, ESP-IDF |
+| `sunsim::core` (`sunsim.core`) | `DeviceRegistry`, `ModeController`, `ProgramHost` and the programs, `Overlays`, `LightOutput`, `StatusModel`, the daylight/solar/sky math and `Weather`; `CoreModules` and `wireCore()` | `ev` |
+| `sunsim::weather` (`sunsim.weather`) | `JsonScanner` (streaming), the Open-Meteo and NWS reply readers, WMO codes and NWS alert tiers | `ev` |
+| `sunsim::platform` (`sunsim.platform`) | `ZigbeeAdapter`, `Clock`, `InternetSync`, `SettingsStore`, the console, the status display, `StatusSlot` | `ev`, `weather`, ESP-IDF |
 | `sunsim` (`main/main.cpp`) | `App`, `app_main` | all |
 
 `core` and `platform` never import each other; anything both need lives in
@@ -273,6 +279,7 @@ classDiagram
         +onProgramTick(ProgramTick)
         +onRefresh(RefreshLights)
         +onCloudCover(CloudCoverUpdated)
+        +onConditions(ConditionsUpdated)
         +onTune(TuneLights)
         +onTuneSave(TuneSave)
     }
@@ -284,13 +291,15 @@ classDiagram
         +onProgramTick(ProgramTick)
         +onConfig(ConfigChanged)
         +onCloudCover(CloudCoverUpdated)
+        +onConditions(ConditionsUpdated)
         #target(role, LightState, transitions)
     }
     class DaylightProgram {
         -DaylightSchedule schedule_
         -Peaks peaks_
         -MinLevels min_levels_
-        -CloudCover forecast_
+        -Weather weather_
+        -Instant now_
         -outputLevel(role, level) uint8
     }
     class TuningProgram {
@@ -316,11 +325,26 @@ classDiagram
         computeDayInfo()
         cloudCover(forecast, time)
     }
+    class Weather {
+        -CloudCover forecast_
+        -optional~ConditionsUpdated~ conditions_
+        -optional~AlertsUpdated~ alerts_
+        +conditions(now) optional~Conditions~
+        +alerts(now) Alerts
+        +cloud(time, now) optional~CloudReading~
+    }
+    class Overlays {
+        -Weather weather_
+        -PerRole~Light~ lights_ : base target, pulse
+        +onTarget(LightTarget)
+        +onTick(Tick)
+        +onConditions / onAlerts / onConfig / onModeChanged()
+    }
     class LightOutput {
         -PerRole~Bulb~ bulbs_
         +onRoleAssigned / onRoleCleared()
         +onReachability(ReachabilityChanged)
-        +onTarget(LightTarget)
+        +onTarget(OutputTarget)
     }
     class StatusModel {
         -StatusSnapshot snap_
@@ -330,6 +354,7 @@ classDiagram
     CoreModules *-- DeviceRegistry
     CoreModules *-- ModeController
     CoreModules *-- ProgramHost
+    CoreModules *-- Overlays
     CoreModules *-- LightOutput
     CoreModules *-- StatusModel
     ProgramHost *-- DaylightProgram
@@ -342,8 +367,10 @@ classDiagram
     Program <|-- TuningProgram
     DaylightProgram *-- DaylightSchedule
     DaylightSchedule ..> solar
-    StatusModel ..> solar : day info, cloud now
-    DaylightProgram ..> solar : cloud now
+    StatusModel ..> solar : day info
+    StatusModel *-- Weather
+    DaylightProgram *-- Weather : cloud now
+    Overlays *-- Weather : precipitation, alerts
 ```
 
 The modules share nothing: each only knows the events it handles and what
@@ -393,15 +420,18 @@ classDiagram
         -read() TimeReading
     }
     class InternetSync {
+        -kJobs: name, fetch, Daily | Every
         -atomic sync window
-        -last_try_, last_ok_
+        -per-job last_try, last_ok
         +start() waits for the boot sync
         +onConfig(ConfigChanged)
         +onSyncRequested(SyncRequested)
-        -run()
+        -run(everything) the due jobs, one session
         -syncClock() bool
         -fetchCloudCover() bool
-        -due(now) bool
+        -fetchConditions() bool
+        -fetchAlerts() bool
+        -due(job, state, now) bool
     }
     class WifiSession {
         <<scoped>>
@@ -510,20 +540,23 @@ type.
 
 ```mermaid
 flowchart LR
-    CK[Clock] -->|"Tick (1 Hz)"| MC & DR & PH & SM
+    CK[Clock] -->|"Tick (1 Hz)"| MC & DR & PH & OV & SM
     CK -->|"ProgramTick (60 s)"| PH
     CK -->|"SyncRequested<br/>(fast-day switched)"| IS[InternetSync]
     CO -->|SyncRequested| IS
     CO -->|SetFastDay| CK
     ST -->|ConfigChanged| IS
     IS -->|CloudCoverUpdated| PH & SM
+    IS -->|"ConditionsUpdated<br/>(15 min)"| PH & OV & SM
+    IS -->|"AlertsUpdated<br/>(15 min)"| OV & SM
+    CO -->|"ConditionsUpdated, AlertsUpdated<br/>(weather simulate)"| OV
     CO -->|ModeRequested| MC
     CO -->|"TuneLights, TuneSave"| PH
     CO -->|SetMinLevel| ST
     PH -->|"SetMinLevel (tune save)"| ST
     TMR(["esp_timer"]) -->|Heartbeat| CK
 
-    ST[SettingsStore] -->|ConfigChanged| PH & SM & CK
+    ST[SettingsStore] -->|ConfigChanged| PH & OV & SM & CK
     ST -->|RolesLoaded| DR
 
     ZA[ZigbeeAdapter] -->|"DeviceAnnounced, EndpointFound,<br/>BindResult, PingResult, AckReceived"| DR
@@ -542,9 +575,10 @@ flowchart LR
     DR -->|RefreshLights| PH
     DR -->|DevicesUpdated| SM
 
-    MC -->|ModeChanged| PH & SM
+    MC -->|ModeChanged| PH & OV & SM
 
-    PH -->|LightTarget| LO
+    PH -->|LightTarget| OV[Overlays]
+    OV -->|OutputTarget| LO
     LO -->|SetLight| ZA
 
     SM -->|StatusChanged| SLOT[("StatusSlot")]
@@ -556,11 +590,12 @@ flowchart LR
 | **ZigbeeAdapter** | `SetLight`, `Discover`, `Bind`, `Ping`, `OpenNetwork`, `FactoryReset`, `RoleAssigned`, `RoleCleared` | `NetworkUp`, `DeviceAnnounced`, `EndpointFound`, `BindResult`, `PingResult`, `AckReceived`, `ButtonPressed` |
 | **DeviceRegistry** | `RolesLoaded`, `NetworkUp`, `DeviceAnnounced`, `EndpointFound`, `BindResult`, `PingResult`, `AckReceived`, `ButtonPressed`, `PairRequested`, `PairCancelled`, `UnpairRequested`, `Tick` | `RoleAssigned`, `RoleCleared`, `Discover`, `Bind`, `Ping`, `OpenNetwork`, `PersistRoles`, `RefreshLights`, `ReachabilityChanged`, `DevicesUpdated` |
 | **ModeController** | `ButtonPressed`, `ModeRequested`, `Tick` | `ModeChanged` |
-| **ProgramHost** (runs one `Program`) | `ModeChanged`, `ConfigChanged`, `CloudCoverUpdated`, `Tick`, `ProgramTick`, `RefreshLights`, `NetworkUp`, `TuneLights`, `TuneSave` | `LightTarget`, `SetMinLevel` (on `TuneSave`) |
-| **LightOutput** | `LightTarget`, `RoleAssigned`, `RoleCleared`, `ReachabilityChanged` | `SetLight` |
-| **StatusModel** | `ConfigChanged`, `ModeChanged`, `DevicesUpdated`, `CloudCoverUpdated`, `Tick` | `StatusChanged` |
+| **ProgramHost** (runs one `Program`) | `ModeChanged`, `ConfigChanged`, `CloudCoverUpdated`, `ConditionsUpdated`, `Tick`, `ProgramTick`, `RefreshLights`, `NetworkUp`, `TuneLights`, `TuneSave` | `LightTarget`, `SetMinLevel` (on `TuneSave`) |
+| **Overlays** | `LightTarget`, `Tick`, `ModeChanged`, `ConfigChanged`, `ConditionsUpdated`, `AlertsUpdated` | `OutputTarget` |
+| **LightOutput** | `OutputTarget`, `RoleAssigned`, `RoleCleared`, `ReachabilityChanged` | `SetLight` |
+| **StatusModel** | `ConfigChanged`, `ModeChanged`, `DevicesUpdated`, `CloudCoverUpdated`, `ConditionsUpdated`, `AlertsUpdated`, `Tick` | `StatusChanged` |
 | **Clock** | `Heartbeat`, `ConfigChanged`, `SetFastDay` | `Heartbeat` (from its timer), `Tick`, `ProgramTick`; on a fast-day switch also `RefreshLights`, `SyncRequested` |
-| **InternetSync** | `ConfigChanged` (the sync window), `SyncRequested` | `CloudCoverUpdated` (and sets the system clock; runs on its own task) |
+| **InternetSync** | `ConfigChanged` (the sync window), `SyncRequested` | `CloudCoverUpdated` (daily), `ConditionsUpdated` and `AlertsUpdated` (every 15 min); sets the system clock; runs on its own task |
 | **SettingsStore** | `SetConfig`, `SetIntensity`, `SetMinLevel`, `PersistRoles`, `FactoryReset` | `RolesLoaded`, `ConfigChanged` |
 | **Console** | — (REPL task; reads `StatusSlot`) | the requests above |
 | **StatusDisplay** | — (display task; reads `StatusSlot`) | — |
@@ -579,13 +614,35 @@ one the `Mode` selects.
 | `onProgramTick` | `ProgramTick` | sun curve, ramped over the interval | — | — | — |
 | `onConfig` | `ConfigChanged` (every program, running or not) | schedule, peaks, minimums | — | — | minimums, amber colour |
 | `onCloudCover` | `CloudCoverUpdated` (every program) | the forecast | — | — | — |
+| `onConditions` | `ConditionsUpdated` (every program) | the live cloud cover | — | — | — |
 
 The tuning program also takes `TuneLights` (through `ProgramHost`); on
 `TuneSave`, `ProgramHost` takes its tuned levels and posts them as
 `SetMinLevel`, so programs still post only `LightTarget`s.
 
 Only the running program gets ticks and refreshes, so no program checks
-the mode. `LightOutput` doesn't know programs exist: it diffs each target
+the mode.
+
+### Overlays: the weather lights
+
+`Overlays` sits between the programs and `LightOutput`. Each
+`LightTarget` passes straight through as an `OutputTarget`, except on a
+light the weather has taken over. It checks that once a `Tick` with
+`weatherPulse()`, a pure function of the light, whether its program has it
+on, the mode, the settings and the live weather:
+
+| On | When | Shows |
+|---|---|---|
+| `alert_lights` (default WallB, WallD) | an NWS warning, in daylight or off mode, lit or not | red, a 1 s fade |
+| | an advisory / watch, in daylight mode, on a lit light | yellow 3 s / orange 2 s |
+| `precip_lights` (default WallC) | rain, snow, ... falling, in daylight mode | a blue to violet per type; dimmer (35%) on an unlit light |
+
+An alert wins where the two sets overlap. While a light pulses, its
+program's targets are kept but not sent. When the weather lets it go, the
+latest one goes out with a 2 s transition. Live weather counts for
+`kWeatherFreshFor` (45 min), so a dead connection lets the lights go
+(`core::Weather`, which `DaylightProgram` and `StatusModel` also keep for
+the live cloud cover). `LightOutput` doesn't know programs exist: it diffs each target
 against what it last sent that bulb, so switching programs sends only what
 differs (daylight -> red alert: hue/sat + level; each pulse after that:
 level only), and it holds back bulbs marked unreachable.
@@ -738,7 +795,9 @@ Pairing a device (console `pair` or the role manifest) is in DESIGN.md §2.
 | `SetFastDay` | on, real seconds per simulated day | Console (`fastday`) |
 | `SyncRequested` | — | Console (`sync`), Clock (fast-day switched) |
 | `ConfigChanged` | `ProgramConfig`, per-light `Peaks` and `MinLevels` | SettingsStore (at boot, then on change) |
-| `CloudCoverUpdated` | `CloudCover` (48 local hours) | InternetSync, each sync |
+| `CloudCoverUpdated` | `CloudCover` (48 local hours) | InternetSync, daily |
+| `ConditionsUpdated` | `Conditions` (cloud %, `Precip`, `Intensity`), `at` | InternetSync, every 15 min; Console (`weather simulate`) |
+| `AlertsUpdated` | `Alerts` (up to 4: tier, event name, `until`), `at` | InternetSync, every 15 min; Console (`weather simulate`) |
 | `SetConfig` | `ProgramConfig` | Console (`config`) |
 | `SetIntensity` | `Selection` (all, a group or a role), percent | Console (`intensity`) |
 | `SetMinLevel` | `Selection`, level 1-254 | Console (`minlevel`), ProgramHost (`tune save`) |
@@ -762,6 +821,7 @@ Pairing a device (console `pair` or the role manifest) is in DESIGN.md §2.
 | `ModeChanged` | `Mode` (`Daylight` / `Off` / `RedAlert`) | ModeController |
 | `RefreshLights` | role, or every light | DeviceRegistry |
 | `LightTarget` | role, `LightState`, level and colour transitions | the running program |
+| `OutputTarget` | the same: what the bulb does show | Overlays |
 | `SetLight` | short addr, endpoint, optional power / level / mireds / xy / hue-sat, transitions | LightOutput |
 | `StatusChanged` | `shared_ptr<const StatusSnapshot>` | StatusModel, 1 Hz |
 
@@ -773,7 +833,8 @@ void wireCore(ev::EventBus &bus, CoreModules &m)
 {
     bus.on<Tick>([&](const Tick &e) { m.mode.onTick(e); m.registry.onTick(e); m.programs.onTick(e); m.status.onTick(e); });
     bus.on<ButtonPressed>([&](const ButtonPressed &e) { m.registry.onButtonPressed(e); m.mode.onPress(e); });
-    bus.on<LightTarget>([&](const LightTarget &e) { m.output.onTarget(e); });
+    bus.on<LightTarget>([&](const LightTarget &e) { m.overlays.onTarget(e); });
+    bus.on<OutputTarget>([&](const OutputTarget &e) { m.output.onTarget(e); });
     // ...
 }
 
@@ -792,7 +853,7 @@ the order they were added.
 
 ## 9. Testing
 
-`test/host/` builds `sunsim.ev` and `sunsim.core` with plain CMake on the
+`test/host/` builds `sunsim.ev`, `sunsim.core` and `sunsim.weather` with plain CMake on the
 PC (no ESP-IDF; exceptions and RTTI off like the firmware), wires them with
 the same `wireCore()`, and asserts on everything posted in response to the
 events each test posts:
@@ -809,7 +870,12 @@ silent, pings, an unanswered ping counts as failed); discovery retry and
 unpairing stopping it; button pairing binds; `unpair all` and unpairing a
 group; the role layout; the wall dimming in order away from the sun; the
 name-keyed role manifest; the amber sweep across the wall at sunset; the
-cloud forecast lookup and its overlay (dimmer, cooler, diffuse); minimum
+cloud forecast lookup and its overlay (dimmer, cooler, diffuse); live
+cloud cover winning while fresh; the streaming JSON scanner and the
+Open-Meteo / NWS readers (fed a few bytes at a time); the weather lights
+(snow pulses and lets go, dimmer when unlit, none in off mode; a warning
+wakes lights in off mode, a watch doesn't; alerts outrank precipitation;
+stale weather releases them); minimum
 levels keeping the wall lit to sunset; tuning mode and `tune save`; the
 bus delivering 40k events from two threads in each poster's order.
 

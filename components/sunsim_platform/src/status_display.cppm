@@ -26,7 +26,8 @@ export namespace sunsim::platform {
 
 // Drives the on-board ST7789 LCD (Waveshare ESP32-C6-GEEK by default, see
 // the "Status display" menuconfig): current time, day length, countdown to
-// the next sunrise/sunset, mode, cloud cover, and one dot per device for its link state,
+// the next sunrise/sunset, mode, the sky (an alert, else rain or snow, else
+// cloud cover), and one dot per device for its link state,
 // grouped: "D ●●●●●  W ●  B ●" (the daylight wall east to west, the work
 // light, the button).
 // Redraws once a second from the latest StatusSnapshot - the same data as
@@ -140,7 +141,6 @@ void buildUi(Ui &ui)
     ui.day_length = makeLabel(scr, &lv_font_montserrat_20, LV_ALIGN_TOP_LEFT, 6, 54);
     ui.next_event = makeLabel(scr, &lv_font_montserrat_20, LV_ALIGN_TOP_LEFT, 6, 80);
     ui.cloud      = makeLabel(scr, &lv_font_montserrat_14, LV_ALIGN_TOP_RIGHT, -6, 58);
-    lv_obj_set_style_text_color(ui.cloud, lv_color_hex(0x9ab8d8), 0); // sky grey-blue
 
     int x = kDotsLeft;
     for (const ev::GroupSpec &g : ev::kLayout) {
@@ -206,11 +206,21 @@ void render(Ui &ui, const ev::StatusSnapshot &st)
         break;
     }
 
-    if (st.cloud_percent) {
+    // The sky: the worst alert in its colour, else what's falling, else cloud.
+    constexpr uint32_t kSkyColor = 0x9ab8d8; // grey-blue
+    uint32_t           sky_color = kSkyColor;
+    if (st.alerts.count > 0) {
+        const ev::AlertLevel level = st.alerts.items[0].level;
+        sky_color = level == ev::AlertLevel::Warning ? 0xff3030 : level == ev::AlertLevel::Watch ? 0xff9a30 : 0xffe040;
+        lv_label_set_text(ui.cloud, ev::alertLevelName(level));
+    } else if (st.conditions && st.conditions->precip != ev::Precip::None) {
+        lv_label_set_text(ui.cloud, ev::precipName(st.conditions->precip));
+    } else if (st.cloud_percent) {
         lv_label_set_text_fmt(ui.cloud, "cloud %u%%", *st.cloud_percent);
     } else {
         lv_label_set_text(ui.cloud, "");
     }
+    lv_obj_set_style_text_color(ui.cloud, lv_color_hex(sky_color), 0);
 
     for (const ev::Role role : ev::kRoles) {
         lv_obj_set_style_bg_color(ui.dots[role], linkColor(st.devices[role].link), 0);

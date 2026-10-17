@@ -12,7 +12,7 @@ export namespace sunsim::core {
 
 // Owns the lighting programs and runs the one the Mode selects: it starts
 // it on ModeChanged and forwards ticks and refreshes to it alone. Settings
-// and the cloud forecast go to every program. Keeps the latest time, for
+// and the weather go to every program. Keeps the latest time, for
 // programs that need it when they start or refresh. The console's tuning
 // requests go to the tuning program; `tune save` posts its levels as the
 // lights' minimums.
@@ -30,6 +30,7 @@ public:
     void onProgramTick(const ev::ProgramTick &e);
     void onRefresh(const ev::RefreshLights &e);
     void onCloudCover(const ev::CloudCoverUpdated &e);
+    void onConditions(const ev::ConditionsUpdated &e);
     void onTune(const ev::TuneLights &e);
     void onTuneSave(const ev::TuneSave &e);
 
@@ -106,6 +107,13 @@ void ProgramHost::onCloudCover(const ev::CloudCoverUpdated &e)
 {
     for (const ev::Mode mode : ev::kModes) {
         program(mode).onCloudCover(e);
+    }
+}
+
+void ProgramHost::onConditions(const ev::ConditionsUpdated &e)
+{
+    for (const ev::Mode mode : ev::kModes) {
+        program(mode).onConditions(e);
     }
 }
 

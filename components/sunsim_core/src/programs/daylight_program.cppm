@@ -13,7 +13,7 @@ import :sky;
 export namespace sunsim::core {
 
 // The normal program: the wall bulbs' sun curve (with sun direction along
-// the wall, the amber glow and the forecast's cloud cover), the work
+// the wall, the amber glow and the cloud cover: live, else forecast), the work
 // light's cool -> warm day, the active window, and each light's range from
 // its minimum level to its peak intensity. Every ProgramTick ramps over the
 // update interval; refreshes and setting changes re-apply at once with a
@@ -24,9 +24,11 @@ public:
     using Program::Program;
 
     void refresh(std::optional<ev::Role> role, const std::optional<ev::TimeReading> &now) override;
+    void onTick(const ev::Tick &e) override { now_ = e.at; }
     void onProgramTick(const ev::ProgramTick &e) override;
     void onConfig(const ev::ConfigChanged &e) override;
-    void onCloudCover(const ev::CloudCoverUpdated &e) override;
+    void onCloudCover(const ev::CloudCoverUpdated &e) override { weather_.onForecast(e); }
+    void onConditions(const ev::ConditionsUpdated &e) override { weather_.onConditions(e); }
 
 private:
     void emit(ev::Role role, const ev::TimeReading &time, ev::Transition transition);
@@ -35,7 +37,8 @@ private:
     DaylightSchedule schedule_;
     ev::Peaks        peaks_        = ev::kDefaultPeaks;
     ev::MinLevels    min_levels_   = ev::kDefaultMinLevels;
-    ev::CloudCover   forecast_{};
+    Weather          weather_;
+    ev::Instant      now_{}; // the latest Tick's: whether the live weather is fresh
     bool             clock_warned_ = false;
 };
 
@@ -79,11 +82,6 @@ void DaylightProgram::onConfig(const ev::ConfigChanged &e)
     min_levels_ = e.min_levels;
 }
 
-void DaylightProgram::onCloudCover(const ev::CloudCoverUpdated &e)
-{
-    forecast_ = e.forecast;
-}
-
 // The schedule's level (min_level..max_level) mapped onto the light's own
 // range: its minimum level (the lowest it visibly shows) up to its peak. So
 // a light stays lit, dimly, until the curve really ends at sunset.
@@ -105,7 +103,7 @@ void DaylightProgram::emit(ev::Role role, const ev::TimeReading &time, ev::Trans
         state         = role.group == ev::Group::Work
                             ? schedule_.workState(time.local)
                             : schedule_.wallState(time.local, time.utc_offset_hours, wallPosition(role),
-                                                  cloudCover(forecast_, time).value_or(0.0));
+                                                  weather_.cloud(time, now_).value_or(CloudReading{}).cover);
     } else if (!clock_warned_) {
         clock_warned_ = true;
         SUNSIM_LOGW(kTag, "Clock not set yet (no time sync) - holding lights off");

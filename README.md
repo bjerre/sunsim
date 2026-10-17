@@ -12,9 +12,17 @@ simulation and responds to one physical button controller:
   west): the one nearest the real sun's direction is brightest (`config sunshift`),
   and near sunrise/sunset they glow amber, deepest at the end nearest the
   sun (`config amber`, `config ambersweep`).
-- The **real sky** shapes the wall: the hourly cloud-cover forecast,
-  fetched each morning, makes cloudy hours dimmer, cooler and diffuse
-  (no sun direction, no golden glow) - `config clouds`.
+- The **real sky** shapes the wall: the cloud cover now (Open-Meteo,
+  every 15 minutes; the hourly forecast if that's missing) makes cloudy
+  hours dimmer, cooler and diffuse (no sun direction, no golden glow) -
+  `config clouds`.
+- **Weather lights**: one wall light (WallC) pulses while rain or snow
+  falls, blue for rain, pale ice blue for snow, violet for freezing rain,
+  purple for thunder, glowing dimly even outside active hours. Two more
+  (WallB, WallD) pulse yellow, orange or red for a National Weather Service
+  advisory, watch or warning; a warning turns them on whatever the hour,
+  in daylight or off mode. `config weather`, `config precip`, `config alerts`,
+  and the `weather` command.
 - All bulbs only run inside an **active window** (default Mon-Fri,
   08:00-19:00, 10 min fade at each edge) and are off outside it.
 - **1 button controller** (any simple single-button Zigbee switch):
@@ -102,6 +110,9 @@ sunsim> config syncwindow 04:00-05:00   # daily clock sync and cloud forecast
 sunsim> config clouds on            # cloud cover shapes the wall (off: always clear sky)
 sunsim> config clouddim 40          # full overcast: up to 40% dimmer
 sunsim> config cloudcool 50         # ... and 50% of the way to the cool end
+sunsim> config weather on           # the weather lights (off: every light follows its program)
+sunsim> config precip WallC         # which lights show rain and snow (or none)
+sunsim> config alerts WallB,WallD   # which show NWS advisories/watches/warnings (or none)
 ```
 
 Settings are stored on the device and survive reflashing; changes apply
@@ -158,17 +169,31 @@ display"; "Rotate the picture 180 degrees" flips it if it's upside down.
 
 ## Wi-Fi (internet sync)
 
-sunsim connects to Wi-Fi briefly to set its clock over SNTP and fetch the
-hourly cloud-cover forecast for today and tomorrow (Open-Meteo, free, no
-key; for the menuconfig latitude/longitude), using the strongest saved
-network in range, then turns Wi-Fi off again. It does this:
+sunsim connects to Wi-Fi briefly, using the strongest saved network in
+range, then turns Wi-Fi off again. All for the menuconfig
+latitude/longitude, free and without keys:
 
-- at boot, before the Zigbee radio starts;
-- once a day in the sync window (default 04:00-05:00, before the lights'
-  day), retrying every 10 minutes within it if it fails;
-- whenever asked: `sync`, or switching fast-day mode on or off;
+- **once a day** in the sync window (default 04:00-05:00, before the
+  lights' day), retrying every 10 minutes within it if it fails: the clock
+  over SNTP and the hourly cloud-cover forecast for today and tomorrow
+  (Open-Meteo);
+- **every 15 minutes**, around the clock: the weather now (Open-Meteo's
+  15-minute model data: cloud cover and what's falling) and the active
+  alerts (api.weather.gov, US only);
+- everything at boot, before the Zigbee radio starts, and whenever asked:
+  `sync`, or switching fast-day mode on or off;
 - every 10 minutes while the clock has never been set (the lights stay off
   until it is).
+
+Live weather older than 45 minutes is ignored: the wall goes back to the
+forecast's clouds and the weather lights to their program.
+
+```
+sunsim> weather                       # cloud, what's falling, alerts, the weather lights
+sunsim> weather simulate snow heavy   # pretend, to see the lights (until the next fetch)
+sunsim> weather simulate warning
+sunsim> weather simulate clear
+```
 
 ```
 sunsim> wifi add "My Network" mypassword
@@ -330,21 +355,28 @@ generated `role_manifest.h`.
       shift, amber, cloud cover, per-light minimum-to-peak range, clock guard.
     - `red_alert_program.cppm`, `off_program.cppm`, `tuning_program.cppm` -
       the other modes.
+  - `overlays.cppm` - the weather lights: between the programs and the
+    output, pulses chosen lights for rain, snow and NWS alerts.
   - `light_output.cppm` - turns any program's targets into ZCL commands, diffed
     against what was last sent.
   - `status_model.cppm` - the snapshot shown by `status` and the display.
-  - `math/` - `daylight.cppm`, `solar.cppm`, `sky.cppm` (the cloud forecast
-    by hour), `day_info.cppm`: the pure math.
+  - `math/` - `daylight.cppm`, `solar.cppm`, `sky.cppm` (the cloud cover,
+    live or forecast; `Weather`, what's known and still fresh),
+    `day_info.cppm`: the pure math.
   - `core.cppm` - `CoreModules` and `wireCore()`, every core-to-core edge.
+- `components/sunsim_weather/` (`sunsim::weather`, module `sunsim.weather`)
+  - reading the weather services' replies as they stream in, pure C++
+  (host-tested): `json.cppm` (`JsonScanner`), `readers.cppm` (Open-Meteo's
+  forecast and conditions, NWS's alerts; WMO codes, alert tiers).
 - `components/sunsim_platform/` (`sunsim::platform`, module
   `sunsim.platform`) - everything ESP-IDF; `bulb_endpoint`,
   `fast_day_clock`, `format` and `wifi` are internal partitions, not exported:
   - `zigbee_adapter.cppm` - the only code using esp-zigbee-lib (stack,
     commissioning, discovery/bind/ping, button frames, bulb commands).
   - `clock.cppm`, `fast_day_clock.cppm` - heartbeat, program time, fast-day mode.
-  - `internet_sync.cppm`, `wifi.cppm` - the daily / on-request internet jobs
-    (SNTP, the cloud forecast over HTTPS) over a short Wi-Fi session; the
-    saved networks.
+  - `internet_sync.cppm`, `wifi.cppm` - the internet jobs, daily (SNTP, the
+    cloud forecast) and every 15 minutes (conditions, NWS alerts), over
+    short Wi-Fi sessions; the saved networks.
   - `settings_store.cppm` - all NVS persistence (roles, settings, intensities,
     minimum levels).
   - `console.cppm` - the serial REPL; `status_display.cppm` - the LCD.

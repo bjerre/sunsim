@@ -24,7 +24,7 @@ export namespace sunsim::platform {
 //   pair cancel           disarm a pending `pair`
 //   unpair <role|group|all>   forget role assignment(s)
 //   open [seconds]        open the network for joining (default 180)
-//   config                show active/work/sync hours, fade, sun shift, amber, amber sweep, clouds, work days
+//   config                show active/work/sync hours, fade, sun shift, amber, amber sweep, clouds, weather lights, work days
 //   config <key> <value>  change one (see `help config`)
 //   intensity [<light|group|all> <1-100>]   per-light peak brightness, saved
 //   minlevel [<light|group|all> <1-254>]    per-light minimum level while on, saved
@@ -32,6 +32,8 @@ export namespace sunsim::platform {
 //   press single|double|hold          simulate the button
 //   fastday [on [seconds] | off]      the debug fast-day clock (a whole day in seconds)
 //   sync                  sync the clock (and fetch internet data) now
+//   weather               the weather now: cloud, rain or snow, alerts, and the weather lights
+//   weather simulate <what>   pretend: rain|snow|... [heavy], advisory|watch|warning, or clear
 //   wifi                  list saved Wi-Fi networks (the strongest in range is used)
 //   wifi add <ssid> [pw]  add a network (up to 5), or change its password
 //   wifi remove <ssid>    forget one; `wifi clear` forgets all
@@ -185,6 +187,21 @@ int cmdOpen(int argc, char **argv)
 
 constexpr std::string_view kDayNames[] = {"sun", "mon", "tue", "wed", "thu", "fri", "sat"};
 
+void printLights(const ev::RoleSet &lights)
+{
+    if (lights.none()) {
+        std::printf("none");
+        return;
+    }
+    const char *separator = "";
+    for (const ev::Role role : ev::bulbs()) {
+        if (ev::contains(lights, role)) {
+            std::printf("%s%s", separator, ev::roleName(role).data());
+            separator = ",";
+        }
+    }
+}
+
 void printSchedule(const ev::ProgramConfig &c)
 {
     std::printf("hours ");
@@ -198,8 +215,13 @@ void printSchedule(const ev::ProgramConfig &c)
     std::printf("  (work light cool -> warm)\nsun   %u%% (wall dimming away from the sun)\n"
                 "amber %s (sunrise/sunset glow below %.0f deg sun elevation; far end lags %u deg)\n",
                 c.sun_shift_percent, c.amber_enabled ? "on" : "off", c.golden_elevation_deg, c.amber_sweep_deg);
-    std::printf("clouds %s (overcast: up to %u%% dimmer, %u%% of the way to cool)\ndays ",
+    std::printf("clouds %s (overcast: up to %u%% dimmer, %u%% of the way to cool)\n",
                 c.clouds_enabled ? "on" : "off", c.cloud_dim_percent, c.cloud_cool_percent);
+    std::printf("weather %s (precipitation: ", c.weather_enabled ? "on" : "off");
+    printLights(c.precip_lights);
+    std::printf("; alerts: ");
+    printLights(c.alert_lights);
+    std::printf(")\ndays ");
     for (int d = 0; d < 7; ++d) {
         const int day = (d + 1) % 7; // list Monday first
         if ((c.active_days >> day) & 1U) {
@@ -256,6 +278,7 @@ int cmdConfig(int argc, char **argv)
     if (argc != 3) {
         std::printf("usage: config [hours | workhours | syncwindow HH:MM-HH:MM | fade <minutes> |\n"
                     "               clouds on|off | clouddim <0-100> | cloudcool <0-100> |\n"
+                    "               weather on|off | precip|alerts <lights|none> |\n"
                     "               sunshift <0-100> | amber on|off | ambersweep <0-%u> |\n"
                     "               days mon-fri|all|mon,tue,...]\n",
                     ev::kMaxAmberSweepDeg);
@@ -313,6 +336,20 @@ int cmdConfig(int argc, char **argv)
             return 1;
         }
         (key == "clouddim" ? c.cloud_dim_percent : c.cloud_cool_percent) = static_cast<uint8_t>(percent);
+    } else if (key == "weather") {
+        const std::string_view value{argv[2]};
+        if (value != "on" && value != "off") {
+            std::printf("weather must be on or off\n");
+            return 1;
+        }
+        c.weather_enabled = value == "on";
+    } else if (key == "precip" || key == "alerts") {
+        const auto lights = ev::parseRoleSet(argv[2]);
+        if (!lights || std::ranges::any_of(ev::kRoles, [&](ev::Role r) { return !ev::isBulb(r) && ev::contains(*lights, r); })) {
+            std::printf("expected lights: none, or a list like WallC or WallB,WallD\n");
+            return 1;
+        }
+        (key == "precip" ? c.precip_lights : c.alert_lights) = *lights;
     } else if (key == "amber") {
         const std::string_view value{argv[2]};
         if (value != "on" && value != "off") {
@@ -336,7 +373,7 @@ int cmdConfig(int argc, char **argv)
         }
         c.active_days = *days;
     } else {
-        std::printf("unknown setting '%s' (hours, workhours, syncwindow, fade, sunshift, amber, ambersweep, clouds, clouddim, cloudcool, days)\n", argv[1]);
+        std::printf("unknown setting '%s' (hours, workhours, syncwindow, fade, sunshift, amber, ambersweep, clouds, clouddim, cloudcool, weather, precip, alerts, days)\n", argv[1]);
         return 1;
     }
 
@@ -536,6 +573,102 @@ int cmdSync(int, char **)
     return 0;
 }
 
+// ---- weather -------------------------------------------------------------------
+
+void printWeather(const ev::StatusSnapshot &st)
+{
+    if (st.conditions) {
+        std::printf("now      %u%% cloud, ", st.conditions->cloud_percent);
+        if (st.conditions->precip == ev::Precip::None) {
+            std::printf("nothing falling\n");
+        } else {
+            std::printf("%s %s\n", ev::intensityName(st.conditions->intensity), ev::precipName(st.conditions->precip));
+        }
+    } else {
+        std::printf("now      no live conditions (none fetched in the last %lld min)\n",
+                    static_cast<long long>(ev::kWeatherFreshFor.count()));
+    }
+    if (st.alerts.count == 0) {
+        std::printf("alerts   none\n");
+    }
+    for (const ev::Alert &alert : st.alerts.list()) {
+        const auto left = std::chrono::duration_cast<std::chrono::minutes>(alert.until - st.at);
+        std::printf("alert    %s (%s), %lld min left\n", alert.event.data(), ev::alertLevelName(alert.level),
+                    static_cast<long long>(left.count()));
+    }
+    std::printf("lights   %s; precipitation ", st.config.weather_enabled ? "on" : "off (config weather on)");
+    printLights(st.config.precip_lights);
+    std::printf(", alerts ");
+    printLights(st.config.alert_lights);
+    std::printf("\n");
+}
+
+// What `weather simulate` takes for rain and snow.
+constexpr std::pair<std::string_view, ev::Precip> kPrecipNames[] = {
+    {"drizzle", ev::Precip::Drizzle}, {"rain", ev::Precip::Rain},       {"freezing", ev::Precip::FreezingRain},
+    {"snow", ev::Precip::Snow},       {"thunder", ev::Precip::Thunderstorm},
+};
+constexpr std::pair<std::string_view, ev::AlertLevel> kAlertNames[] = {
+    {"advisory", ev::AlertLevel::Advisory}, {"watch", ev::AlertLevel::Watch}, {"warning", ev::AlertLevel::Warning}};
+
+template <class T, std::size_t N>
+std::optional<T> lookup(const std::pair<std::string_view, T> (&names)[N], std::string_view name)
+{
+    const auto *found = std::ranges::find(names, name, &std::pair<std::string_view, T>::first);
+    return found == std::end(names) ? std::nullopt : std::optional<T>{found->second};
+}
+
+// Posts what InternetSync would: it lasts until the next real fetch (within
+// 15 minutes), or `weather simulate clear`.
+int simulateWeather(const ev::StatusSnapshot &st, std::string_view what, std::string_view how)
+{
+    const ev::Instant now   = ev::BootClock::now();
+    const uint8_t     cloud = st.conditions ? st.conditions->cloud_percent : st.cloud_percent.value_or(0);
+    if (what == "clear") {
+        g_ctx.post(ev::ConditionsUpdated{.now = {.cloud_percent = cloud}, .at = now});
+        g_ctx.post(ev::AlertsUpdated{.at = now});
+        return 0;
+    }
+    if (const auto precip = lookup(kPrecipNames, what)) {
+        const auto intensity = how == "light" ? ev::Intensity::Light
+                               : how == "heavy" ? ev::Intensity::Heavy
+                                                : ev::Intensity::Moderate;
+        g_ctx.post(ev::ConditionsUpdated{
+            .now = {.cloud_percent = std::max<uint8_t>(cloud, 90), .precip = *precip, .intensity = intensity}, .at = now});
+        return 0;
+    }
+    if (const auto level = lookup(kAlertNames, what)) {
+        ev::AlertsUpdated alerts{.at = now};
+        ev::Alert        &alert = alerts.alerts.items[alerts.alerts.count++];
+        alert.level             = *level;
+        alert.until             = now + std::chrono::hours{1};
+        std::snprintf(alert.event.data(), alert.event.size(), "Simulated %s", ev::alertLevelName(*level));
+        g_ctx.post(alerts);
+        return 0;
+    }
+    std::printf("usage: weather simulate drizzle|rain|freezing|snow|thunder [light|moderate|heavy]\n"
+                "       weather simulate advisory|watch|warning | clear\n"
+                "(until the next real fetch, within 15 min)\n");
+    return 1;
+}
+
+int cmdWeather(int argc, char **argv)
+{
+    const auto st = snapshot();
+    if (!st) {
+        return 1;
+    }
+    if (argc == 1) {
+        printWeather(*st);
+        return 0;
+    }
+    if (std::string_view{argv[1]} == "simulate" && (argc == 3 || argc == 4)) {
+        return simulateWeather(*st, argv[2], argc == 4 ? argv[3] : "");
+    }
+    std::printf("usage: weather [simulate <what>]\n");
+    return 1;
+}
+
 int cmdStatus(int, char **)
 {
     const auto st = snapshot();
@@ -563,9 +696,16 @@ int cmdStatus(int, char **)
     std::printf(")\n");
 
     if (st->cloud_percent) {
-        std::printf("sky     %u%% cloud%s\n", *st->cloud_percent, st->config.clouds_enabled ? "" : " (clouds off)");
+        std::printf("sky     %u%% cloud (%s)%s\n", *st->cloud_percent, st->cloud_live ? "now" : "forecast",
+                    st->config.clouds_enabled ? "" : " (clouds off)");
     } else {
         std::printf("sky     no forecast yet (clear assumed)\n");
+    }
+    if (st->conditions && st->conditions->precip != ev::Precip::None) {
+        std::printf("falling %s %s\n", ev::intensityName(st->conditions->intensity), ev::precipName(st->conditions->precip));
+    }
+    for (const ev::Alert &alert : st->alerts.list()) {
+        std::printf("alert   %s\n", alert.event.data());
     }
 
     std::printf("mode    %s", ev::modeName(st->mode));
@@ -733,9 +873,10 @@ void startConsole(const ev::Post &post, const StatusSlot &status)
     registerCommand("unpair", "Forget a role's device, or a group's (they can then be re-paired)",
                     "<role|group|all>", &cmdUnpair);
     registerCommand("open", "Open the network for joining", "[seconds]", &cmdOpen);
-    registerCommand("config", "Show or change active/work/sync hours, fade, sun shift, amber glow, clouds, work days",
+    registerCommand("config", "Show or change active/work/sync hours, fade, sun shift, amber glow, clouds, weather lights, work days",
                     "[hours|workhours|syncwindow HH:MM-HH:MM | fade <min> | sunshift <0-100> |"
-                    " amber on|off | ambersweep <0-30> | clouds on|off | clouddim|cloudcool <0-100> | days ...]",
+                    " amber on|off | ambersweep <0-30> | clouds on|off | clouddim|cloudcool <0-100> |"
+                    " weather on|off | precip|alerts <lights|none> | days ...]",
                     &cmdConfig);
     registerCommand("intensity", "Show or set each light's peak brightness, 1-100%", "[<light|group|all> <1-100>]",
                     &cmdIntensity);
@@ -748,6 +889,9 @@ void startConsole(const ev::Post &post, const StatusSlot &status)
     registerCommand("fastday", "Debug: run a whole active window every few seconds, or back to real time",
                     "[on [seconds] | off]", &cmdFastDay);
     registerCommand("sync", "Sync the clock (and fetch internet data) now, over Wi-Fi", nullptr, &cmdSync);
+    registerCommand("weather", "The weather now and the weather lights; or pretend, to see the lights",
+                    "[simulate drizzle|rain|freezing|snow|thunder [light|heavy] | advisory|watch|warning | clear]",
+                    &cmdWeather);
     registerCommand("wifi", "List, add or remove the Wi-Fi networks used for the internet sync (e.g. home and work)",
                     "[add <ssid> [password] | remove <ssid> | clear]", &cmdWifi);
     registerCommand("restart", "Reboot (keeps roles, network and Wi-Fi settings)", nullptr, &cmdRestart);

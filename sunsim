@@ -33,13 +33,15 @@ Console commands (also in `monitor`); `./sunsim cmd help` lists them all:
   pair <role|cancel>                     the next device to join takes this role
   unpair <role|group|all>                forget a device, so it can be re-paired
   config [<setting> <value>]             hours, workhours, syncwindow, fade, sunshift,
-                                         amber, ambersweep, clouds, clouddim, cloudcool, days
+                                         amber, ambersweep, clouds, clouddim, cloudcool,
+                                         weather, precip, alerts, days
   intensity [<light|group|all> <1-100>]  each light's peak brightness, %
   minlevel [<light|group|all> <1-254>]   each light's minimum level while on
   tune [<light|group|all> <level> [K] | save | off]   find each bulb's lowest visible level
   press single|double|hold               the button: daylight, red alert, all off
   fastday [on [seconds] | off]           a whole day in seconds, for testing
-  sync                                   clock + cloud forecast now
+  sync                                   clock, forecast, weather and alerts now
+  weather [simulate <what>]              the weather lights' view; or pretend (snow, warning, clear)
   wifi [add <ssid> [pw] | remove <ssid>]
 
 <light> is WallA-WallE (east to west) or Work; <role> is a light or Button;

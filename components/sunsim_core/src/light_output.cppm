@@ -5,8 +5,8 @@ import sunsim.ev;
 
 export namespace sunsim::core {
 
-// Turns what the bulbs *should* show (LightTarget, from whichever program is
-// running) into the ZCL commands that get them there (SetLight). Only what
+// Turns what the bulbs *should* show (OutputTarget: the running program's,
+// or the weather's, see Overlays) into the ZCL commands that get them there (SetLight). Only what
 // changed since the last command is sent: On/Off on a change, level and
 // colour when they move. Bulbs marked unreachable get nothing until they
 // answer again (the registry then posts RefreshLights). Bulb addresses come
@@ -18,7 +18,7 @@ public:
     void onRoleAssigned(const ev::RoleAssigned &e);
     void onRoleCleared(const ev::RoleCleared &e);
     void onReachability(const ev::ReachabilityChanged &e);
-    void onTarget(const ev::LightTarget &e);
+    void onTarget(const ev::OutputTarget &e);
 
 private:
     struct Bulb {
@@ -106,7 +106,7 @@ void LightOutput::onReachability(const ev::ReachabilityChanged &e)
     }
 }
 
-void LightOutput::onTarget(const ev::LightTarget &e)
+void LightOutput::onTarget(const ev::OutputTarget &e)
 {
     if (!ev::isBulb(e.role)) {
         return;

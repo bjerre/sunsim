@@ -327,12 +327,15 @@ Defaults: `work_cool_mireds=167` (~6000K), `work_warm_mireds=333`
 off. Interpolating in mireds rather than kelvin
 keeps the steps perceptually closer to even.
 
-### Cloud cover (`core::cloudCover`, `sky.cppm`)
+### Cloud cover (`core::Weather`, `sky.cppm`)
 
-Each internet sync (§5) fetches Open-Meteo's hourly cloud cover for the
-configured location and posts it as a `CloudCover`: 48 local hours from
-00:00 of the day it was fetched. `cloudCover()` interpolates it linearly
-between hours to `c`, 0 (clear) to 1 (overcast); no data means clear. The
+Every 15 minutes the internet sync (§5) fetches Open-Meteo's `current`
+cloud cover for the configured location (15-minute model data: in the US,
+HRRR's) and posts it as `ConditionsUpdated`; that's `c` while it's under
+45 minutes old (`kWeatherFreshFor`). Failing that, the daily sync's hourly
+forecast: a `CloudCover`, 48 local hours from 00:00 of the day it was
+fetched, which `cloudCover()` interpolates linearly between hours. Either
+way `c` runs 0 (clear) to 1 (overcast); no data means clear. The
 wall then gets what an overcast sky gives a room - less light, cooler,
 from everywhere at once:
 
@@ -344,8 +347,36 @@ golden    *= 1 - c                                 no golden glow under a grey s
 ```
 
 The work light is task lighting and ignores the sky. In fast-day mode the
-simulated day reads the forecast's first day, so the sped-up loop shows
-today's sky. `config clouds off` ignores the forecast.
+simulated day reads the forecast's first day, never the live reading, so
+the sped-up loop shows today's sky. `config clouds off` ignores both.
+
+### Weather lights (`core::Overlays`, `overlays.cppm`)
+
+The same 15-minute fetch reads the WMO weather code (what's falling, and
+how hard) and NWS's active alerts for the location. `Overlays`, between the
+programs and `LightOutput`, re-checks them every Tick and has chosen lights
+pulse, like red alert: a fade each `fade_seconds`, between
+
+```
+top    = 254 · peak / 100 · strength       (at least the light's minimum)
+bottom = top · 0.2                         (likewise)
+```
+
+| What | Colour (hue°, sat/254) | Fade | strength |
+|---|---|---|---|
+| NWS warning | red (0, 254) | 1 s | 1 |
+| NWS watch | orange (28, 254) | 2 s | 1 |
+| NWS advisory | yellow (50, 254) | 3 s | 1 |
+| rain | deep blue (228, 254) | 2 s | 0.6 / 0.8 / 1 by intensity |
+| drizzle | pale blue (205, 170) | 3 s | 〃 |
+| snow | ice blue (195, 150) | 3 s | 〃 |
+| freezing rain | violet (280, 230) | 2 s | 〃 |
+| thunderstorm | purple (270, 254) | 1 s | 〃 |
+
+An alert's tier is its event name's last word (Warning / Emergency, Watch,
+Advisory); other statements count only if NWS marks them Extreme (warning)
+or Severe (watch). Which lights, and when, is in ARCHITECTURE.md §5; rain
+or snow on a light that's otherwise off shows at 0.35 of the strength.
 
 ### Per-light range: minimum level to peak (`core::DaylightProgram`)
 

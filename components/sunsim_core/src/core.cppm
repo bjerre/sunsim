@@ -12,6 +12,7 @@ export import :device_registry;
 export import :light_output;
 export import :mode_controller;
 export import :off_program;
+export import :overlays;
 export import :program;
 export import :program_host;
 export import :red_alert_program;
@@ -26,13 +27,14 @@ export namespace sunsim::core {
 // console, display) talks to it only through events on the bus.
 struct CoreModules {
     CoreModules(const ev::Post &post, DeviceRegistry::Manifest manifest)
-        : mode(post), registry(post, manifest), programs(post), output(post), status(post)
+        : mode(post), registry(post, manifest), programs(post), overlays(post), output(post), status(post)
     {
     }
 
     ModeController  mode;
     DeviceRegistry  registry;
     ProgramHost     programs;
+    Overlays        overlays;
     LightOutput     output;
     StatusModel     status;
 };
@@ -54,6 +56,7 @@ void wireCore(ev::EventBus &bus, CoreModules &m)
         m.mode.onTick(e);
         m.registry.onTick(e);
         m.programs.onTick(e);
+        m.overlays.onTick(e);
         m.status.onTick(e);
     });
     bus.on<ProgramTick>([&](const ProgramTick &e) { m.programs.onProgramTick(e); });
@@ -61,12 +64,25 @@ void wireCore(ev::EventBus &bus, CoreModules &m)
     // Settings
     bus.on<ConfigChanged>([&](const ConfigChanged &e) {
         m.programs.onConfig(e);
+        m.overlays.onConfig(e);
         m.status.onConfig(e);
     });
+
+    // Weather
     bus.on<CloudCoverUpdated>([&](const CloudCoverUpdated &e) {
         m.programs.onCloudCover(e);
         m.status.onCloudCover(e);
     });
+    bus.on<ConditionsUpdated>([&](const ConditionsUpdated &e) {
+        m.programs.onConditions(e);
+        m.overlays.onConditions(e);
+        m.status.onConditions(e);
+    });
+    bus.on<AlertsUpdated>([&](const AlertsUpdated &e) {
+        m.overlays.onAlerts(e);
+        m.status.onAlerts(e);
+    });
+
     bus.on<RolesLoaded>([&](const RolesLoaded &e) { m.registry.onRolesLoaded(e); });
 
     // From the radio
@@ -100,13 +116,15 @@ void wireCore(ev::EventBus &bus, CoreModules &m)
 
     // Mode -> programs
     bus.on<ModeChanged>([&](const ModeChanged &e) {
+        m.overlays.onModeChanged(e); // first: the new program's targets meet the new mode
         m.programs.onModeChanged(e);
         m.status.onModeChanged(e);
     });
     bus.on<RefreshLights>([&](const RefreshLights &e) { m.programs.onRefresh(e); });
 
-    // Programs -> output
-    bus.on<LightTarget>([&](const LightTarget &e) { m.output.onTarget(e); });
+    // Programs -> overlays -> output
+    bus.on<LightTarget>([&](const LightTarget &e) { m.overlays.onTarget(e); });
+    bus.on<OutputTarget>([&](const OutputTarget &e) { m.output.onTarget(e); });
 }
 
 } // namespace sunsim::core
