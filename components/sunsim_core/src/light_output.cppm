@@ -5,22 +5,16 @@ import sunsim.ev;
 
 export namespace sunsim::core {
 
-// What a light with `caps` can show of `state`: a plug or a dimmable bulb
-// at full level (its level isn't sent), a white bulb an xy color as its
-// nearest color temperature. A color it can't show at all (a saturated one
-// on a white bulb) stays in the state, so it diffs as a change, but
-// commandsFor never sends it: the light keeps its color.
-[[nodiscard]] ev::LightState fitted(ev::LightState state, ev::Caps caps) noexcept;
-
 // The commands that take a light with `caps` from `sent` (nullopt: unknown,
-// send everything) to `to`: only what changed and the light takes; nullopt
-// if that's nothing. Its address is left for the caller.
+// send everything) to `to`: only what changed and the light takes (a plug:
+// On/Off alone); nullopt if that's nothing. Its address is left for the
+// caller.
 [[nodiscard]] std::optional<ev::SetLight> commandsFor(const std::optional<ev::LightState> &sent,
                                                       const ev::LightChange &to, ev::Caps caps) noexcept;
 
 // Turns what the lights *should* show (OutputTarget: the running program's,
 // or the weather's, see Overlays) into the ZCL commands that get them there
-// (SetLight), fitted to each light's kind (ev::caps). Only what changed
+// (SetLight), as much as each light's kind takes (ev::caps). Only what changed
 // since the last command is sent: On/Off on a change, level and color when
 // they move. Lights marked unreachable get nothing until they answer again
 // (the registry then posts RefreshLights). Their addresses come from
@@ -52,37 +46,6 @@ private:
 
 namespace sunsim::core {
 
-namespace {
-
-// The color temperature nearest an xy chromaticity (McCamy's cubic: within
-// a few kelvin from ~2000 to 12500K, close enough below for a white bulb,
-// which clamps to its own range anyway).
-ev::Mireds nearestMireds(ev::Xy xy) noexcept
-{
-    const double n      = (xy.x - 0.3320) / (0.1858 - xy.y);
-    const double kelvin = std::max(1000.0, ((449.0 * n + 3525.0) * n + 6823.3) * n + 5520.33);
-    return {static_cast<uint16_t>(std::lround(1e6 / kelvin))};
-}
-
-// Whether a light with `caps` can be sent `color`.
-bool takes(const ev::Color &color, ev::Caps caps) noexcept
-{
-    return std::holds_alternative<ev::Mireds>(color) ? caps.mireds : caps.color;
-}
-
-} // namespace
-
-ev::LightState fitted(ev::LightState state, ev::Caps caps) noexcept
-{
-    if (!caps.level) {
-        state.level = ev::kMaxLevel;
-    }
-    if (const auto *xy = std::get_if<ev::Xy>(&state.color); xy && !caps.color && caps.mireds) {
-        state.color = nearestMireds(*xy);
-    }
-    return state;
-}
-
 std::optional<ev::SetLight> commandsFor(const std::optional<ev::LightState> &sent, const ev::LightChange &to,
                                         ev::Caps caps) noexcept
 {
@@ -96,7 +59,7 @@ std::optional<ev::SetLight> commandsFor(const std::optional<ev::LightState> &sen
             s.level            = to.state.level;
             s.level_transition = to.level_transition;
         }
-        if (takes(to.state.color, caps) && (!was_on || sent->color != to.state.color)) {
+        if (caps.color && (!was_on || sent->color != to.state.color)) {
             s.color            = to.state.color;
             s.color_transition = to.color_transition;
         }
@@ -151,15 +114,12 @@ void LightOutput::on(const ev::OutputTarget &e)
     if (!usable(l)) {
         return;
     }
-    const ev::Caps  caps = ev::caps(e.role);
-    ev::LightChange to   = e;
-    to.state             = fitted(e.state, caps);
-    if (auto s = commandsFor(l.sent, to, caps)) {
+    if (auto s = commandsFor(l.sent, e, ev::caps(e.role))) {
         s->short_addr = l.short_addr;
         s->endpoint   = l.endpoint;
         post_(*s);
     }
-    l.sent = to.state;
+    l.sent = e.state;
 }
 
 } // namespace sunsim::core

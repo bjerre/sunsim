@@ -61,9 +61,9 @@ flowchart LR
 ```
 
 The roles come from one table, `ev::kLayout` (`types.cppm`): five color
-bulbs on the wall, one at work, one button. Each group's kind (color, white
-or dimmable bulb, plug, button) decides what discovery looks for and what
-the light is sent. A wall light's letter is its place: light `i` of `n` sits at
+bulbs on the wall, one at work, one button. Each group's kind (color bulb,
+plug, button) decides what discovery looks for and what the light is
+sent. A wall light's letter is its place: light `i` of `n` sits at
 `x = 1 - 2i/(n-1)`. Changing the count there is all it takes for a
 different wall: the role names, positions, the display's dots and the
 address checks follow at compile time.
