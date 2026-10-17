@@ -12,6 +12,14 @@ export namespace sunsim::ev {
 
 // ---- Building blocks --------------------------------------------------------
 
+// A check of the room failed. Not constexpr, so reaching it in a constant
+// expression stops the compile, and GCC shows the call, message and all:
+// `fail("a light is in no zone")`. (Reached at run time, it aborts.)
+[[noreturn]] inline void fail(const char * /*why*/) noexcept
+{
+    std::abort();
+}
+
 // A value fixed in the installation, or a ProgramConfig field: a setting,
 // which `config <name>` changes and NVS keeps. `value(config)` reads it.
 template <class T> class Tunable {
@@ -37,7 +45,7 @@ public:
     constexpr List(std::initializer_list<T> items) noexcept : size_(items.size())
     {
         if (items.size() > N) {
-            tooManyItems();
+            fail("more items than the list holds");
         }
         std::ranges::copy(items, items_.begin());
     }
@@ -48,9 +56,6 @@ public:
     [[nodiscard]] constexpr bool empty() const noexcept { return size_ == 0; }
 
 private:
-    // Not constexpr: reached in a constant table, it stops the compile.
-    static void tooManyItems() noexcept { std::abort(); }
-
     std::array<T, N> items_{};
     std::size_t      size_ = 0;
 };
@@ -67,14 +72,6 @@ struct Address {
 // Each role's address; 0: none given.
 using Addresses = PerRole<uint64_t>;
 
-namespace detail {
-// Not constexpr: reached while building kAddressOf, they stop the compile,
-// and the error names them.
-inline void anAddressNamesNoRole() noexcept {}
-inline void aRoleHasTwoAddresses() noexcept {}
-inline void anAddressIsGivenTwice() noexcept {}
-} // namespace detail
-
 // `entries` per role: a name that isn't one role, a role listed twice, or
 // one address given to two roles doesn't compile.
 template <std::ranges::input_range Entries> [[nodiscard]] consteval Addresses addressesOf(const Entries &entries)
@@ -84,13 +81,13 @@ template <std::ranges::input_range Entries> [[nodiscard]] consteval Addresses ad
     for (const Address &entry : entries) {
         const auto role = parseRole(entry.role);
         if (!role) {
-            detail::anAddressNamesNoRole();
+            fail("an address names no role");
         }
         if (listed[*role]) {
-            detail::aRoleHasTwoAddresses();
+            fail("a role has two addresses");
         }
         if (entry.ext_addr != 0 && std::ranges::contains(addresses.items, entry.ext_addr)) {
-            detail::anAddressIsGivenTwice();
+            fail("an address is given to two roles");
         }
         listed[*role]    = true;
         addresses[*role] = entry.ext_addr;
@@ -209,23 +206,6 @@ struct Topology {
     PerRole<std::optional<Controls>> controls_of{}; // buttons that control a zone
 };
 
-namespace detail {
-// Not constexpr: reached while building a Topology, they stop the compile,
-// and the error names them.
-inline void twoZonesShareAName() noexcept {}
-inline void aZoneHasNoLights() noexcept {}
-inline void aZoneHasNoGate() noexcept {}
-inline void aZoneCantRunDaylight() noexcept {}
-inline void showsNamesNoLight() noexcept {}
-inline void showsGivesALookToAButton() noexcept {}
-inline void aLightIsShownTwice() noexcept {}
-inline void aLightIsInNoZone() noexcept {}
-inline void controlsNamesNoButton() noexcept {}
-inline void aButtonControlsTwice() noexcept {}
-inline void aButtonPicksAModeItsZoneCantRun() noexcept {}
-inline void aGateRuleCanNeverAnswer() noexcept {}
-} // namespace detail
-
 // `zones` per role. Doesn't compile if two zones share a name; a zone has no
 // lights, no gate, a gate rule after one that always answers
 // (answersAlways), or can't run daylight; a name in it isn't in the layout,
@@ -240,37 +220,37 @@ template <std::ranges::input_range Zones> [[nodiscard]] consteval Topology topol
         const ZoneId id{index++};
         for (const ZoneSpec &other : zones) {
             if (&other != &zone && other.name == zone.name) {
-                detail::twoZonesShareAName();
+                fail("two zones share a name");
             }
         }
         if (zone.lights.empty()) {
-            detail::aZoneHasNoLights();
+            fail("a zone has no lights");
         }
         if (zone.gate.empty()) {
-            detail::aZoneHasNoGate();
+            fail("a zone has no gate");
         }
         for (const Rule *rule = zone.gate.begin(); rule + 1 < zone.gate.end(); ++rule) {
             if (answersAlways(*rule)) {
-                detail::aGateRuleCanNeverAnswer(); // the rules after it never get asked
+                fail("a gate rule follows one that always answers: it's never asked");
             }
         }
         if (!zone.allows(Mode::Daylight)) {
-            detail::aZoneCantRunDaylight();
+            fail("a zone can't run daylight (every zone starts in it)");
         }
         for (const Shows &s : zone.lights) {
             const auto selection = parseSelection(s.lights);
             if (!selection) {
-                detail::showsNamesNoLight();
+                fail("a zone's lights name something the layout doesn't have");
             }
             for (const Role role : kRoles) {
                 if (!selects(*selection, role)) {
                     continue;
                 }
                 if (!isLight(role)) {
-                    detail::showsGivesALookToAButton();
+                    fail("a zone gives a button a look");
                 }
                 if (shown[role]) {
-                    detail::aLightIsShownTwice();
+                    fail("a light is in two zones, or shown twice");
                 }
                 shown[role]     = true;
                 t.look_of[role] = s.look;
@@ -280,14 +260,14 @@ template <std::ranges::input_range Zones> [[nodiscard]] consteval Topology topol
         for (const Controls &c : zone.controls) {
             const auto button = parseRole(c.by);
             if (!button || !isButton(*button)) {
-                detail::controlsNamesNoButton();
+                fail("a zone's controls name something that isn't a button");
             }
             if (t.controls_of[*button]) {
-                detail::aButtonControlsTwice();
+                fail("a button controls two zones, or one twice");
             }
             for (const std::optional<Mode> &mode : {c.single, c.twice, c.hold}) {
                 if (mode && !zone.allows(*mode)) {
-                    detail::aButtonPicksAModeItsZoneCantRun();
+                    fail("a button picks a mode its zone can't run");
                 }
             }
             t.controls_of[*button] = c;
@@ -296,7 +276,7 @@ template <std::ranges::input_range Zones> [[nodiscard]] consteval Topology topol
     }
     for (const Role role : lights()) {
         if (!shown[role]) {
-            detail::aLightIsInNoZone();
+            fail("a light is in no zone");
         }
     }
     return t;
