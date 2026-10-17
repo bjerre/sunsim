@@ -6,4 +6,5 @@ export module sunsim.ev;
 export import :bus;
 export import :events;
 export import :flow;
+export import :settings;
 export import :types;

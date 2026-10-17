@@ -1016,6 +1016,51 @@ int main()
         }));
     });
 
+    test("settings: typed, shown and stored from one table", [] {
+        ProgramConfig c;
+        const auto    is = [&](std::string_view name, std::string_view text) {
+            return show(*findSetting(name), c) == text;
+        };
+        const auto takes = [&](std::string_view name, std::string_view text) {
+            return set(*findSetting(name), c, text).has_value();
+        };
+        CHECK(is("hours", "08:00-19:00") && is("days", "mon-fri") && is("fade", "10 min"));
+        CHECK(is("sunshift", "25%") && is("ambersweep", "3 deg") && is("amber", "on"));
+        CHECK(is("precip", "WallC") && is("alerts", "WallB,WallD"));
+
+        CHECK(takes("hours", "07:30-24:00") && c.active_start_hour == 7.5 && c.active_end_hour == 24.0);
+        CHECK(takes("days", "sat,mon") && is("days", "mon,sat"));
+        CHECK(takes("clouds", "off") && !c.clouds_enabled);
+        CHECK(takes("alerts", "none") && is("alerts", "none"));
+        CHECK(takes("precip", "wall") && is("precip", "WallA,WallB,WallC,WallD,WallE"));
+
+        const ProgramConfig before = c;
+        CHECK(!takes("hours", "19:00-08:00"));    // backwards
+        CHECK(!takes("hours", "8-19"));
+        CHECK(!takes("sunshift", "101"));
+        CHECK(!takes("sunshift", ""));
+        CHECK(!takes("ambersweep", "31"));
+        CHECK(!takes("fade", "-1"));
+        CHECK(!takes("amber", "yes"));
+        CHECK(!takes("days", "mon,funday"));
+        CHECK(!takes("precip", "Button"));        // not a light
+        CHECK(before.active_start_hour == c.active_start_hour && before.sun_shift_percent == c.sun_shift_percent &&
+              before.precip_lights == c.precip_lights); // nothing changed
+
+        const auto error = set(*findSetting("sunshift"), c, "lots");
+        CHECK(!error && error.error() == "sunshift takes 0-100");
+        CHECK(!findSetting("colour"));
+
+        // The keys the device already has values under.
+        const auto keys = settingKeys();
+        for (const std::string_view key : {"act.start", "act.end", "act.fade", "act.days", "work.start", "work.end",
+                                           "sun.shift", "sun.amber", "sun.sweep", "sky.on", "sky.dim", "sky.cool",
+                                           "sync.start", "sync.end", "wx.on", "wx.precip", "wx.alert"}) {
+            CHECK(std::ranges::contains(keys, key));
+        }
+        CHECK(keys.size() == 17);
+    });
+
     std::printf("\n%s (%d failure%s)\n", g_failures ? "FAILED" : "ALL PASSED", g_failures, g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;
 }

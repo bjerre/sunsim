@@ -64,7 +64,7 @@ flowchart TB
 
 | Namespace / module | Holds | Imports |
 |---|---|---|
-| `sunsim::ev` (`sunsim.ev`) | every event, the `Event` variant, `Post`, `EventBus`; coroutine flows (`Flow`, `Timer`, `Inbox`); value types (`Role` and the layout, `LightState`, `ProgramConfig`, `StatusSnapshot`, ...) | `std` |
+| `sunsim::ev` (`sunsim.ev`) | every event, the `Event` variant, `Post`, `EventBus`; coroutine flows (`Flow`, `Timer`, `Inbox`); value types (`Role` and the layout, `LightState`, `ProgramConfig`, `StatusSnapshot`, ...); the settings table (`kSettings`: each setting's name, kind, NVS key and help, with `set()` / `show()`) | `std` |
 | `sunsim::core` (`sunsim.core`) | `DeviceRegistry`, `ModeController`, `SkyModel`, `ProgramHost` and the programs, `Overlays`, `LightOutput`, `StatusModel`, the daylight/solar/sky math; `CoreModules` and `wireCore()` | `ev` |
 | `sunsim::weather` (`sunsim.weather`) | `JsonScanner` (streaming), the Open-Meteo and NWS reply readers, WMO codes and NWS alert tiers | `ev` |
 | `sunsim::platform` (`sunsim.platform`) | `ZigbeeAdapter`, `Clock`, `InternetSync`, `SettingsStore`, the console, the status display, `StatusSlot` | `ev`, `weather`, ESP-IDF |

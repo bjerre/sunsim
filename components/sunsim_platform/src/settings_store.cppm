@@ -14,10 +14,8 @@ export namespace sunsim::platform {
 // so the format survives firmware changes (a new field just reads as its
 // default):
 //   roles     "<role>.ext" / ".short" / ".ep"   (a role is assigned iff .ext exists)
-//   program   "act.start" "act.end" "act.fade" "act.days" "work.start"
-//             "work.end" "sun.shift" "sun.amber" "sun.sweep" "sync.start"
-//             "sync.end" "sky.on" "sky.dim" "sky.cool"  (hours stored as minutes)
-//             "wx.on" "wx.precip" "wx.alert"  (light sets as role bits by slot)
+//   program   ev::kSettings' keys: "act.start", "sun.shift", ... (see
+//             ev::setting for how each kind is stored)
 //   intensity "<role>.peak" (percent), "<role>.min" (minimum level)
 //   "layout"  which role layout the keys follow (see migrateLayout())
 // Wi-Fi credentials are kept separately (:wifi).
@@ -56,31 +54,6 @@ constexpr const char *kNamespace = "sunsim";
 // Pre-versioning format: the whole roles array as one raw-struct blob. Only
 // erased now, never read.
 constexpr const char *kLegacyBlobKey = "roles";
-
-// Program settings; hours/fade are stored as whole minutes.
-constexpr const char *kStartKey     = "act.start";
-constexpr const char *kEndKey       = "act.end";
-constexpr const char *kFadeKey      = "act.fade";
-constexpr const char *kDaysKey      = "act.days";
-constexpr const char *kWorkStartKey = "work.start";
-constexpr const char *kWorkEndKey   = "work.end";
-constexpr const char *kSunShiftKey  = "sun.shift";
-constexpr const char *kAmberKey     = "sun.amber";
-constexpr const char *kSweepKey     = "sun.sweep";
-constexpr const char *kCloudsKey    = "sky.on";
-constexpr const char *kCloudDimKey  = "sky.dim";
-constexpr const char *kCloudCoolKey = "sky.cool";
-constexpr const char *kSyncStartKey = "sync.start";
-constexpr const char *kSyncEndKey   = "sync.end";
-constexpr const char *kWeatherKey   = "wx.on";
-constexpr const char *kPrecipKey    = "wx.precip";
-constexpr const char *kAlertKey     = "wx.alert";
-static_assert(ev::kRoleCount <= 16, "light sets are stored as 16 bits");
-
-uint16_t toMinutes(double hours) noexcept
-{
-    return static_cast<uint16_t>(std::lround(hours * 60.0));
-}
 
 // "<role>.<field>", at most 15 chars (NVS key limit).
 struct Key {
@@ -176,6 +149,90 @@ private:
     esp_err_t    err_;
 };
 
+// The program settings, as ev::kSettings lists them, each kind at the width
+// it has always been stored at.
+static_assert(ev::kRoleCount <= 16, "light sets are stored as 16 bits");
+
+template <class T> std::optional<T> get(nvs_handle_t h, const char *key)
+{
+    T value{};
+    esp_err_t err = ESP_FAIL;
+    if constexpr (std::same_as<T, uint8_t>) {
+        err = nvs_get_u8(h, key, &value);
+    } else {
+        err = nvs_get_u16(h, key, &value);
+    }
+    return err == ESP_OK ? std::optional{value} : std::nullopt;
+}
+
+uint16_t toMinutes(double hours) noexcept
+{
+    return static_cast<uint16_t>(std::lround(hours * 60.0));
+}
+
+// Reads a setting into the config, if stored and valid.
+struct LoadSetting {
+    nvs_handle_t       h;
+    ev::ProgramConfig &c;
+
+    void operator()(const ev::setting::OnOff &k) const
+    {
+        if (const auto v = get<uint8_t>(h, k.key)) {
+            c.*k.field = *v != 0;
+        }
+    }
+    void operator()(const ev::setting::Number &k) const
+    {
+        if (const auto v = get<uint8_t>(h, k.key); v && k.accepts(*v)) {
+            c.*k.field = *v;
+        }
+    }
+    void operator()(const ev::setting::Minutes &k) const
+    {
+        if (const auto v = get<uint16_t>(h, k.key); v && k.accepts(*v)) {
+            c.*k.field = *v;
+        }
+    }
+    void operator()(const ev::setting::Span &k) const
+    {
+        const auto start = get<uint16_t>(h, k.start_key);
+        const auto end   = get<uint16_t>(h, k.end_key);
+        if (start && end && ev::setting::Span::accepts(*start, *end)) {
+            c.*k.start = *start / 60.0;
+            c.*k.end   = *end / 60.0;
+        }
+    }
+    void operator()(const ev::setting::Days &k) const
+    {
+        if (const auto v = get<uint8_t>(h, k.key); v && *v != 0) {
+            c.*k.field = *v;
+        }
+    }
+    void operator()(const ev::setting::Lights &k) const
+    {
+        if (const auto v = get<uint16_t>(h, k.key)) {
+            c.*k.field = ev::RoleSet{*v};
+        }
+    }
+};
+
+// Writes a setting from the config.
+struct SaveSetting {
+    NvsWriter               &w;
+    const ev::ProgramConfig &c;
+
+    void operator()(const ev::setting::OnOff &k) const { w.u8(k.key, c.*k.field ? 1 : 0); }
+    void operator()(const ev::setting::Number &k) const { w.u8(k.key, c.*k.field); }
+    void operator()(const ev::setting::Minutes &k) const { w.u16(k.key, static_cast<uint16_t>(std::lround(c.*k.field))); }
+    void operator()(const ev::setting::Span &k) const
+    {
+        w.u16(k.start_key, toMinutes(c.*k.start));
+        w.u16(k.end_key, toMinutes(c.*k.end));
+    }
+    void operator()(const ev::setting::Days &k) const { w.u8(k.key, c.*k.field); }
+    void operator()(const ev::setting::Lights &k) const { w.u16(k.key, static_cast<uint16_t>((c.*k.field).to_ulong())); }
+};
+
 // Moves one key's value to another key; false if there was none.
 template <class T, auto get, auto set> bool moveKey(nvs_handle_t h, const Key &from, const Key &to)
 {
@@ -254,60 +311,10 @@ void SettingsStore::loadAll()
                      static_cast<unsigned long long>(d.ext_addr), d.short_addr, d.endpoint);
         }
 
-        uint16_t minutes = 0;
-        if (nvs_get_u16(h, kStartKey, &minutes) == ESP_OK) {
-            config_.active_start_hour = minutes / 60.0;
-        }
-        if (nvs_get_u16(h, kEndKey, &minutes) == ESP_OK) {
-            config_.active_end_hour = minutes / 60.0;
-        }
-        if (nvs_get_u16(h, kFadeKey, &minutes) == ESP_OK) {
-            config_.fade_minutes = minutes;
-        }
-        if (nvs_get_u16(h, kWorkStartKey, &minutes) == ESP_OK) {
-            config_.work_start_hour = minutes / 60.0;
-        }
-        if (nvs_get_u16(h, kWorkEndKey, &minutes) == ESP_OK) {
-            config_.work_end_hour = minutes / 60.0;
-        }
-        if (nvs_get_u16(h, kSyncStartKey, &minutes) == ESP_OK) {
-            config_.sync_start_hour = minutes / 60.0;
-        }
-        if (nvs_get_u16(h, kSyncEndKey, &minutes) == ESP_OK) {
-            config_.sync_end_hour = minutes / 60.0;
+        for (const ev::Setting &setting : ev::kSettings) {
+            std::visit(LoadSetting{h, config_}, setting.kind);
         }
         uint8_t byte = 0;
-        if (nvs_get_u8(h, kDaysKey, &byte) == ESP_OK) {
-            config_.active_days = byte;
-        }
-        if (nvs_get_u8(h, kSunShiftKey, &byte) == ESP_OK && byte <= 100) {
-            config_.sun_shift_percent = byte;
-        }
-        if (nvs_get_u8(h, kAmberKey, &byte) == ESP_OK) {
-            config_.amber_enabled = byte != 0;
-        }
-        if (nvs_get_u8(h, kSweepKey, &byte) == ESP_OK && byte <= ev::kMaxAmberSweepDeg) {
-            config_.amber_sweep_deg = byte;
-        }
-        if (nvs_get_u8(h, kCloudsKey, &byte) == ESP_OK) {
-            config_.clouds_enabled = byte != 0;
-        }
-        if (nvs_get_u8(h, kCloudDimKey, &byte) == ESP_OK && byte <= 100) {
-            config_.cloud_dim_percent = byte;
-        }
-        if (nvs_get_u8(h, kCloudCoolKey, &byte) == ESP_OK && byte <= 100) {
-            config_.cloud_cool_percent = byte;
-        }
-        if (nvs_get_u8(h, kWeatherKey, &byte) == ESP_OK) {
-            config_.weather_enabled = byte != 0;
-        }
-        uint16_t bits = 0;
-        if (nvs_get_u16(h, kPrecipKey, &bits) == ESP_OK) {
-            config_.precip_lights = ev::RoleSet{bits};
-        }
-        if (nvs_get_u16(h, kAlertKey, &bits) == ESP_OK) {
-            config_.alert_lights = ev::RoleSet{bits};
-        }
         for (const ev::Role role : ev::kRoles) {
             if (nvs_get_u8(h, Key(role, "peak").text, &byte) == ESP_OK && byte >= 1 && byte <= 100) {
                 peaks_[role] = byte;
@@ -328,23 +335,9 @@ void SettingsStore::on(const ev::SetConfig &e)
 
     Nvs       nvs{NVS_READWRITE};
     NvsWriter w{nvs, "settings"};
-    w.u16(kStartKey, toMinutes(config_.active_start_hour));
-    w.u16(kEndKey, toMinutes(config_.active_end_hour));
-    w.u16(kFadeKey, static_cast<uint16_t>(std::lround(config_.fade_minutes)));
-    w.u8(kDaysKey, config_.active_days);
-    w.u16(kWorkStartKey, toMinutes(config_.work_start_hour));
-    w.u16(kWorkEndKey, toMinutes(config_.work_end_hour));
-    w.u16(kSyncStartKey, toMinutes(config_.sync_start_hour));
-    w.u16(kSyncEndKey, toMinutes(config_.sync_end_hour));
-    w.u8(kSunShiftKey, config_.sun_shift_percent);
-    w.u8(kAmberKey, config_.amber_enabled ? 1 : 0);
-    w.u8(kSweepKey, config_.amber_sweep_deg);
-    w.u8(kCloudsKey, config_.clouds_enabled ? 1 : 0);
-    w.u8(kCloudDimKey, config_.cloud_dim_percent);
-    w.u8(kCloudCoolKey, config_.cloud_cool_percent);
-    w.u8(kWeatherKey, config_.weather_enabled ? 1 : 0);
-    w.u16(kPrecipKey, static_cast<uint16_t>(config_.precip_lights.to_ulong()));
-    w.u16(kAlertKey, static_cast<uint16_t>(config_.alert_lights.to_ulong()));
+    for (const ev::Setting &setting : ev::kSettings) {
+        std::visit(SaveSetting{w, config_}, setting.kind);
+    }
     w.commit();
     publish();
 }

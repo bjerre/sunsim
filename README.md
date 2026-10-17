@@ -98,7 +98,8 @@ re-applied as soon as it's back. `status` shows it as `silent`.
 ## Active hours
 
 ```
-sunsim> config                       # show current settings
+sunsim> config                       # every setting: its value and what it does
+sunsim> config x                     # what each one takes
 sunsim> config hours 08:00-19:00
 sunsim> config workhours 08:30-17:30   # work light's cool -> warm span
 sunsim> config sunshift 25          # wall dimming away from the sun, % (0 = off)
@@ -342,7 +343,8 @@ generated `role_manifest.h`.
 
 - `components/sunsim_events/` (`sunsim::ev`, module `sunsim.ev`) - the
   shared vocabulary: value types (`types.cppm`), every event
-  (`events.cppm`), the `EventBus` (`bus.cppm`), coroutine flows
+  (`events.cppm`), the settings table (`settings.cppm`: what `config`
+  shows and takes, and the NVS key of each), the `EventBus` (`bus.cppm`), coroutine flows
   (`flow.cppm`: `Flow`, `Timer`, `Inbox`), and `BootClock::now()`.
 - `components/sunsim_core/` (`sunsim::core`, module `sunsim.core`) - all
   application logic, pure C++ (builds on the host):

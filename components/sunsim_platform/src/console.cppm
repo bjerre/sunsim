@@ -24,8 +24,8 @@ export namespace sunsim::platform {
 //   pair cancel           disarm a pending `pair`
 //   unpair <role|group|all>   forget role assignment(s)
 //   open [seconds]        open the network for joining (default 180)
-//   config                show active/work/sync hours, fade, sun shift, amber, amber sweep, clouds, weather lights, work days
-//   config <key> <value>  change one (see `help config`)
+//   config                show the settings (ev::kSettings)
+//   config <key> <value>  change one (`config x` lists what each takes)
 //   intensity [<light|group|all> <1-100>]   per-light peak brightness, saved
 //   minlevel [<light|group|all> <1-254>]    per-light minimum level while on, saved
 //   tune [<light|group|all> <1-254> [kelvin] | save | off]   find each bulb's lowest visible level
@@ -185,82 +185,22 @@ int cmdOpen(int argc, char **argv)
 
 // ---- config ---------------------------------------------------------------------
 
-constexpr std::string_view kDayNames[] = {"sun", "mon", "tue", "wed", "thu", "fri", "sat"};
+// Every setting is in ev::kSettings: what it's called, takes and means.
 
-void printLights(const ev::RoleSet &lights)
+void printSetting(const ev::Setting &setting, const ev::ProgramConfig &c)
 {
-    if (lights.none()) {
-        std::printf("none");
-        return;
-    }
-    const char *separator = "";
-    for (const ev::Role role : ev::bulbs()) {
-        if (ev::contains(lights, role)) {
-            std::printf("%s%s", separator, ev::roleName(role).data());
-            separator = ",";
-        }
-    }
+    const std::string value = ev::show(setting, c);
+    std::printf("  %-11.*s %-14s %.*s\n", static_cast<int>(setting.name.size()), setting.name.data(), value.c_str(),
+                static_cast<int>(setting.help.size()), setting.help.data());
 }
 
-void printSchedule(const ev::ProgramConfig &c)
+void printConfigUsage()
 {
-    std::printf("hours ");
-    printClock(c.active_start_hour);
-    std::printf("-");
-    printClock(c.active_end_hour);
-    std::printf("\nfade  %.0f min\nwork  ", c.fade_minutes);
-    printClock(c.work_start_hour);
-    std::printf("-");
-    printClock(c.work_end_hour);
-    std::printf("  (work light cool -> warm)\nsun   %u%% (wall dimming away from the sun)\n"
-                "amber %s (sunrise/sunset glow below %.0f deg sun elevation; far end lags %u deg)\n",
-                c.sun_shift_percent, c.amber_enabled ? "on" : "off", c.golden_elevation_deg, c.amber_sweep_deg);
-    std::printf("clouds %s (overcast: up to %u%% dimmer, %u%% of the way to cool)\n",
-                c.clouds_enabled ? "on" : "off", c.cloud_dim_percent, c.cloud_cool_percent);
-    std::printf("weather %s (precipitation: ", c.weather_enabled ? "on" : "off");
-    printLights(c.precip_lights);
-    std::printf("; alerts: ");
-    printLights(c.alert_lights);
-    std::printf(")\ndays ");
-    for (int d = 0; d < 7; ++d) {
-        const int day = (d + 1) % 7; // list Monday first
-        if ((c.active_days >> day) & 1U) {
-            std::printf(" %s", kDayNames[day].data());
-        }
+    std::printf("usage: config [<setting> <value>]\n");
+    for (const ev::Setting &setting : ev::kSettings) {
+        const std::string takes = ev::syntax(setting);
+        std::printf("  %-11.*s %s\n", static_cast<int>(setting.name.size()), setting.name.data(), takes.c_str());
     }
-    std::printf("\nsync  ");
-    printClock(c.sync_start_hour);
-    std::printf("-");
-    printClock(c.sync_end_hour);
-    std::printf("  (daily: clock and internet data)\n");
-}
-
-// "mon-fri", "all", or a comma list like "mon,wed,sat".
-std::optional<uint8_t> parseDays(std::string_view arg)
-{
-    if (arg == "mon-fri") {
-        return ev::kMondayToFriday;
-    }
-    if (arg == "all") {
-        return ev::kEveryDay;
-    }
-    uint8_t mask = 0;
-    while (!arg.empty()) {
-        const auto comma = arg.find(',');
-        const auto name  = arg.substr(0, comma);
-        bool       found = false;
-        for (int day = 0; day < 7; ++day) {
-            if (kDayNames[day] == name) {
-                mask |= 1U << day;
-                found = true;
-            }
-        }
-        if (!found) {
-            return std::nullopt;
-        }
-        arg = comma == std::string_view::npos ? std::string_view{} : arg.substr(comma + 1);
-    }
-    return mask ? std::optional<uint8_t>{mask} : std::nullopt;
 }
 
 int cmdConfig(int argc, char **argv)
@@ -271,114 +211,22 @@ int cmdConfig(int argc, char **argv)
     }
     ev::ProgramConfig c = st->config;
     if (argc == 1) {
-        printSchedule(c);
+        for (const ev::Setting &setting : ev::kSettings) {
+            printSetting(setting, c);
+        }
         return 0;
     }
-    const std::string_view key{argv[1]};
-    if (argc != 3) {
-        std::printf("usage: config [hours | workhours | syncwindow HH:MM-HH:MM | fade <minutes> |\n"
-                    "               clouds on|off | clouddim <0-100> | cloudcool <0-100> |\n"
-                    "               weather on|off | precip|alerts <lights|none> |\n"
-                    "               sunshift <0-100> | amber on|off | ambersweep <0-%u> |\n"
-                    "               days mon-fri|all|mon,tue,...]\n",
-                    ev::kMaxAmberSweepDeg);
+    const ev::Setting *setting = argc == 3 ? ev::findSetting(argv[1]) : nullptr;
+    if (setting == nullptr) {
+        printConfigUsage();
         return 1;
     }
-
-    if (key == "hours" || key == "workhours" || key == "syncwindow") {
-        int sh = 0, sm = 0, eh = 0, em = 0;
-        if (std::sscanf(argv[2], "%d:%d-%d:%d", &sh, &sm, &eh, &em) != 4 || sm < 0 || sm > 59 || em < 0 ||
-            em > 59) {
-            std::printf("expected HH:MM-HH:MM, e.g. 08:00-19:00\n");
-            return 1;
-        }
-        const double start = sh + sm / 60.0;
-        const double end   = eh + em / 60.0;
-        if (start < 0.0 || end > 24.0 || start >= end) {
-            std::printf("start must be before end, within 00:00-24:00\n");
-            return 1;
-        }
-        if (key == "hours") {
-            c.active_start_hour = start;
-            c.active_end_hour   = end;
-        } else if (key == "workhours") {
-            c.work_start_hour = start;
-            c.work_end_hour   = end;
-        } else {
-            c.sync_start_hour = start;
-            c.sync_end_hour   = end;
-        }
-    } else if (key == "fade") {
-        const int minutes = std::atoi(argv[2]);
-        if (minutes < 0 || minutes > 180) {
-            std::printf("fade must be 0-180 minutes\n");
-            return 1;
-        }
-        c.fade_minutes = minutes;
-    } else if (key == "sunshift") {
-        const int percent = std::atoi(argv[2]);
-        if (percent < 0 || percent > 100 || (percent == 0 && argv[2][0] != '0')) {
-            std::printf("sunshift must be 0-100 (%%; 0 = off)\n");
-            return 1;
-        }
-        c.sun_shift_percent = static_cast<uint8_t>(percent);
-    } else if (key == "clouds") {
-        const std::string_view value{argv[2]};
-        if (value != "on" && value != "off") {
-            std::printf("clouds must be on or off\n");
-            return 1;
-        }
-        c.clouds_enabled = value == "on";
-    } else if (key == "clouddim" || key == "cloudcool") {
-        const int percent = std::atoi(argv[2]);
-        if (percent < 0 || percent > 100 || (percent == 0 && argv[2][0] != '0')) {
-            std::printf("%s must be 0-100 (%%, under full overcast)\n", argv[1]);
-            return 1;
-        }
-        (key == "clouddim" ? c.cloud_dim_percent : c.cloud_cool_percent) = static_cast<uint8_t>(percent);
-    } else if (key == "weather") {
-        const std::string_view value{argv[2]};
-        if (value != "on" && value != "off") {
-            std::printf("weather must be on or off\n");
-            return 1;
-        }
-        c.weather_enabled = value == "on";
-    } else if (key == "precip" || key == "alerts") {
-        const auto lights = ev::parseRoleSet(argv[2]);
-        if (!lights || std::ranges::any_of(ev::kRoles, [&](ev::Role r) { return !ev::isBulb(r) && ev::contains(*lights, r); })) {
-            std::printf("expected lights: none, or a list like WallC or WallB,WallD\n");
-            return 1;
-        }
-        (key == "precip" ? c.precip_lights : c.alert_lights) = *lights;
-    } else if (key == "amber") {
-        const std::string_view value{argv[2]};
-        if (value != "on" && value != "off") {
-            std::printf("amber must be on or off\n");
-            return 1;
-        }
-        c.amber_enabled = value == "on";
-    } else if (key == "ambersweep") {
-        const int degrees = std::atoi(argv[2]);
-        if (degrees < 0 || degrees > ev::kMaxAmberSweepDeg || (degrees == 0 && argv[2][0] != '0')) {
-            std::printf("ambersweep must be 0-%u (deg of sun elevation; 0 = the whole wall alike)\n",
-                        ev::kMaxAmberSweepDeg);
-            return 1;
-        }
-        c.amber_sweep_deg = static_cast<uint8_t>(degrees);
-    } else if (key == "days") {
-        const auto days = parseDays(argv[2]);
-        if (!days) {
-            std::printf("expected mon-fri, all, or a list like mon,tue,wed\n");
-            return 1;
-        }
-        c.active_days = *days;
-    } else {
-        std::printf("unknown setting '%s' (hours, workhours, syncwindow, fade, sunshift, amber, ambersweep, clouds, clouddim, cloudcool, weather, precip, alerts, days)\n", argv[1]);
+    if (const auto done = ev::set(*setting, c, argv[2]); !done) {
+        std::printf("%s\n", done.error().c_str());
         return 1;
     }
-
     g_ctx.post(ev::SetConfig{c});
-    printSchedule(c);
+    printSetting(*setting, c);
     return 0;
 }
 
@@ -596,11 +444,9 @@ void printWeather(const ev::StatusSnapshot &st)
         std::printf("alert    %s (%s), %lld min left\n", alert.event.data(), ev::alertLevelName(alert.level),
                     static_cast<long long>(left.count()));
     }
-    std::printf("lights   %s; precipitation ", st.config.weather_enabled ? "on" : "off (config weather on)");
-    printLights(st.config.precip_lights);
-    std::printf(", alerts ");
-    printLights(st.config.alert_lights);
-    std::printf("\n");
+    for (const std::string_view name : {"weather", "precip", "alerts"}) {
+        printSetting(*ev::findSetting(name), st.config);
+    }
 }
 
 // What `weather simulate` takes for rain and snow.
@@ -873,11 +719,8 @@ void startConsole(const ev::Post &post, const StatusSlot &status)
     registerCommand("unpair", "Forget a role's device, or a group's (they can then be re-paired)",
                     "<role|group|all>", &cmdUnpair);
     registerCommand("open", "Open the network for joining", "[seconds]", &cmdOpen);
-    registerCommand("config", "Show or change active/work/sync hours, fade, sun shift, amber glow, clouds, weather lights, work days",
-                    "[hours|workhours|syncwindow HH:MM-HH:MM | fade <min> | sunshift <0-100> |"
-                    " amber on|off | ambersweep <0-30> | clouds on|off | clouddim|cloudcool <0-100> |"
-                    " weather on|off | precip|alerts <lights|none> | days ...]",
-                    &cmdConfig);
+    registerCommand("config", "Show the settings, or change one (`config x` lists what each takes)",
+                    "[<setting> <value>]", &cmdConfig);
     registerCommand("intensity", "Show or set each light's peak brightness, 1-100%", "[<light|group|all> <1-100>]",
                     &cmdIntensity);
     registerCommand("minlevel", "Show or set each light's minimum level while on, 1-254 (find them with tune)",
