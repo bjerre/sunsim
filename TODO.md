@@ -75,6 +75,19 @@ Per zone, either presence or the hours can take precedence.
 
 Needs the board: the Zigbee reporting can't be tested on the host.
 
+## Gate model: first answer wins, or All / Any?
+
+Decide before presence is built (GitHub #13). Now a gate is a list where
+the first rule with an answer decides, with `opensOnly()` / `closesOnly()`
+for precedence: it can say anything, but has to be worked out to be read.
+The alternative, `All{...}` / `Any{...}` (fades by min and max, an unknown
+sensor neutral), reads as what you mean and can't have unreachable rules,
+but can't say "presence decides, the hours only while the sensor is dead".
+
+- [ ] Choose the model.
+- [ ] If `All` / `Any`: what a lone `Presence` gate does while its sensor is
+      unknown.
+
 ## More than one button
 
 `kLayout` allows one button at most, because ZigbeeAdapter tells presses
