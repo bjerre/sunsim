@@ -81,8 +81,7 @@ in `detail`.
 The installation is data: `kLayout` says what each group is (its `Kind`)
 and how many devices it has, and the roles, their names (`WallA`-`WallE`,
 `Work`, `Button`), their slots and `PerRole<T>` are all derived from it at
-compile time. A kind's `Caps` say what it takes (On/Off, level, color
-temperature, color): `isLight()` is anything that takes On/Off (a bulb or a
+compile time. A kind's `Caps` say what it takes (On/Off, level, color): `isLight()` is anything that takes On/Off (a bulb or a
 plug), and `LightOutput` sends each light only what it takes.
 
 ```mermaid
@@ -311,8 +310,7 @@ classDiagram
         -MinLevels min_levels_
         -uint8 cloud_percent_
         +on(SkyChanged)
-        -gated(state, open) LightState
-        -outputLevel(role, level) uint8
+        -levelFor(role, brightness) uint8
     }
     class TuningProgram {
         -MinLevels min_levels_
@@ -327,9 +325,9 @@ classDiagram
     }
     class looks {
         <<functions>>
-        show(SunCurve, LookContext) LightState
-        show(WorkCurve, LookContext) LightState
-        show(Look, LookContext) LightState
+        show(SunCurve, LookContext) optional~Glow~
+        show(WorkCurve, LookContext) optional~Glow~
+        show(Look, LookContext) optional~Glow~
     }
     class gate {
         <<functions>>
@@ -647,10 +645,8 @@ Only the running program gets ticks and refreshes, so no program checks
 the mode. `LightOutput` doesn't know programs exist: it diffs each target
 against what it last sent that light, so switching programs sends only what
 differs (daylight -> red alert: hue/sat + level; each pulse after that:
-level only), and it holds back lights marked unreachable. It also fits
-each target to the light's kind (`fitted`, `commandsFor`): a plug gets only
-On/Off, a dimmable bulb no color, a white bulb an xy color as its nearest
-color temperature and a saturated one not at all.
+level only), and it holds back lights marked unreachable. It sends each
+light only what its kind takes (`commandsFor`): a plug gets On/Off alone.
 
 ### SkyModel: what the sky is now
 

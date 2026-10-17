@@ -577,7 +577,6 @@ void ZigbeeAdapter::on(const ev::Discover &e)
     // Its endpoint with any of these: a light's server clusters (what it
     // takes), a button's On/Off client (what it sends).
     static uint16_t color_bulb[] = {EZB_ZCL_CLUSTER_ID_ON_OFF, EZB_ZCL_CLUSTER_ID_LEVEL, EZB_ZCL_CLUSTER_ID_COLOR_CONTROL};
-    static uint16_t dimmable[]   = {EZB_ZCL_CLUSTER_ID_ON_OFF, EZB_ZCL_CLUSTER_ID_LEVEL};
     static uint16_t on_off[]     = {EZB_ZCL_CLUSTER_ID_ON_OFF};
     const auto      in = [&](std::span<uint16_t> clusters) {
         req.field.num_in_clusters = static_cast<uint8_t>(clusters.size());
@@ -585,11 +584,7 @@ void ZigbeeAdapter::on(const ev::Discover &e)
     };
     switch (ev::kindOf(e.role)) {
     case ev::Kind::ColorBulb:
-    case ev::Kind::WhiteBulb:
         in(color_bulb);
-        break;
-    case ev::Kind::DimmableBulb:
-        in(dimmable);
         break;
     case ev::Kind::Plug:
         in(on_off);

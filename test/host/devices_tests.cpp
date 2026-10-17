@@ -249,20 +249,11 @@ void devicesTests()
                                               caps(Kind::ColorBulb));
         CHECK(dimmer && !dimmer->power && dimmer->level == 60 && !dimmer->color);
 
-        // A white bulb: xy as its nearest color temperature; a saturated color not at all.
-        const LightState white = core::fitted(amber, caps(Kind::WhiteBulb));
-        CHECK(colorOf<Mireds>(white) && colorOf<Mireds>(white)->value > 450 && colorOf<Mireds>(white)->value < 600);
-        const auto alert = core::commandsFor(white, to(core::fitted(red, caps(Kind::WhiteBulb))), caps(Kind::WhiteBulb));
-        CHECK(alert && alert->level == 200 && !alert->color);
-
-        // A dimmable bulb: no color. A plug: only on and off.
-        const auto dim = core::commandsFor(std::nullopt, to(amber), caps(Kind::DimmableBulb));
-        CHECK(dim && dim->level == 80 && !dim->color);
-        const LightState plugged = core::fitted(amber, caps(Kind::Plug));
-        const auto       on      = core::commandsFor(std::nullopt, to(plugged), caps(Kind::Plug));
+        // A plug: only on and off.
+        const auto on = core::commandsFor(std::nullopt, to(amber), caps(Kind::Plug));
         CHECK(on && on->power == true && !on->level && !on->color);
-        CHECK(!core::commandsFor(plugged, to(core::fitted(red, caps(Kind::Plug))), caps(Kind::Plug))); // still on
-        const auto off = core::commandsFor(plugged, to(LightState{}), caps(Kind::Plug));
+        CHECK(!core::commandsFor(amber, to(red), caps(Kind::Plug))); // still on: nothing to send
+        const auto off = core::commandsFor(amber, to(LightState{}), caps(Kind::Plug));
         CHECK(off && off->power == false);
     });
 

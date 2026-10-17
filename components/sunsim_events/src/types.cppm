@@ -77,31 +77,24 @@ enum class Group : uint8_t { Wall, Work, Button };
 
 // What a device is, and so what it can do (caps()).
 enum class Kind : uint8_t {
-    ColorBulb,    // on/off, level, color temperature, xy and hue/saturation
-    WhiteBulb,    // on/off, level, color temperature
-    DimmableBulb, // on/off, level
-    Plug,         // on/off, for whatever's plugged into it
-    Button,       // presses: its On/Off client, bound to us
+    ColorBulb, // on/off, level, color (temperature, xy and hue/saturation)
+    Plug,      // on/off, for whatever's plugged into it
+    Button,    // presses: its On/Off client, bound to us
 };
 
 // What a device takes from us. A light takes at least On/Off; a button
 // takes nothing (it sends).
 struct Caps {
-    bool power  = false; // On/Off
-    bool level  = false; // Level Control
-    bool mireds = false; // Color Control's color temperature
-    bool color  = false; // Color Control's xy and hue/saturation
+    bool power = false; // On/Off
+    bool level = false; // Level Control
+    bool color = false; // Color Control
 };
 
 [[nodiscard]] constexpr Caps caps(Kind kind) noexcept
 {
     switch (kind) {
     case Kind::ColorBulb:
-        return {.power = true, .level = true, .mireds = true, .color = true};
-    case Kind::WhiteBulb:
-        return {.power = true, .level = true, .mireds = true};
-    case Kind::DimmableBulb:
-        return {.power = true, .level = true};
+        return {.power = true, .level = true, .color = true};
     case Kind::Plug:
         return {.power = true};
     case Kind::Button:
@@ -420,8 +413,6 @@ struct ProgramConfig {
     double   longitude_deg = 0.0; // degrees East (negative = West); 0 = Greenwich
     uint16_t warm_mireds   = 370; // ~2700K
     uint16_t cool_mireds   = 153; // ~6500K
-    uint8_t  min_level     = 1;
-    uint8_t  max_level     = 254;
 
     // Sun direction along the wall: the wall bulbs sit east-to-west on a
     // south wall; the one nearest the sun's east-west position gets the full

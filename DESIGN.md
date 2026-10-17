@@ -61,9 +61,9 @@ flowchart LR
 ```
 
 The roles come from one table, `ev::kLayout` (`types.cppm`): five color
-bulbs on the wall, one at work, one button. Each group's kind (color, white
-or dimmable bulb, plug, button) decides what discovery looks for and what
-the light is sent. A wall light's letter is its place: light `i` of `n` sits at
+bulbs on the wall, one at work, one button. Each group's kind (color bulb,
+plug, button) decides what discovery looks for and what the light is
+sent. A wall light's letter is its place: light `i` of `n` sits at
 `x = 1 - 2i/(n-1)`. Changing the count there is all it takes for a
 different wall: the role names, positions, the display's dots and the
 address checks follow at compile time.
@@ -206,7 +206,7 @@ flowchart TB
     SP --> AW["away = abs(x - sin(azimuth)) / 2"]
     X --> AW
 
-    BR --> LV["level = gate * direction * sky * b * max_level<br/>direction = 1 - shift * away * (1 - c)<br/>sky = 1 - clouddim * c"]
+    BR --> LV["brightness = gate * direction * sky * b<br/>direction = 1 - shift * away * (1 - c)<br/>sky = 1 - clouddim * c"]
     G --> LV
     AW --> LV
     CC --> LV
@@ -223,7 +223,7 @@ flowchart TB
     PK --> LT(["LightTarget(role, LightState, 60 s)"])
 ```
 
-The work light skips the sun: its level is `gate * max_level` and its
+The work light skips the sun: its brightness is `gate` and its
 color follows the work hours (below).
 
 ### Wall bulbs (`show(SunCurve)`)
@@ -240,8 +240,8 @@ Off outside `[sunrise, sunset]`; inside it:
 p = (h - sunrise) / (sunset - sunrise)      # 0..1 progress through today's daylight window
 b = sin(π · p)                              # 0 at sunrise/sunset, 1 at solar noon
 
-level  = round(gate · direction · b · max_level), floored to min_level
-mireds = round(warm_mireds - b · (warm_mireds - cool_mireds))
+brightness = gate · direction · b           # 0..1 of the light's own range
+mireds     = round(warm_mireds - b · (warm_mireds - cool_mireds))
 ```
 
 (`gate` is how open the gate is, below: `DaylightProgram` applies it to
@@ -249,15 +249,14 @@ what the look shows; `direction` is the sun's side of the wall, next.)
 
 `b` is a half-sine: it starts and ends at 0 (sunrise/sunset) and peaks at 1
 exactly at the window's midpoint ("solar noon" for that day's actual window
-length). Brightness (`level`) scales directly with `b`; color temperature
+length). Brightness scales directly with `b`; color temperature
 (`mireds`) is a linear interpolation between `warm_mireds` at the edges
 (`b=0`) and `cool_mireds` at the peak (`b=1`) — lower mireds is
 cooler/bluer, so the light goes warm-and-dim at the edges to
 cool-and-bright at midday, and the whole curve stretches or compresses
 with the real day length through the year.
 
-Defaults: `warm_mireds=370` (~2700K), `cool_mireds=153` (~6500K),
-`min_level=1`, `max_level=254`.
+Defaults: `warm_mireds=370` (~2700K), `cool_mireds=153` (~6500K).
 
 ### Sun direction along the wall
 
@@ -317,9 +316,9 @@ al., PLOS Biology 2022). With `p` the progress through the work hours (so it hol
 them and warm after):
 
 ```
-p      = clamp((h - work_start) / (work_end - work_start), 0, 1)
-level  = gate · max_level
-mireds = work_cool_mireds + p² · (work_warm_mireds - work_cool_mireds)
+p          = clamp((h - work_start) / (work_end - work_start), 0, 1)
+brightness = gate
+mireds     = work_cool_mireds + p² · (work_warm_mireds - work_cool_mireds)
 ```
 
 Defaults: `work_cool_mireds=167` (~6000K), `work_warm_mireds=333`
@@ -384,16 +383,15 @@ or snow on a light that's otherwise off shows at 0.35 of the strength.
 
 ### Per-light range: minimum level to peak (`core::DaylightProgram`)
 
-After the schedule computes a bulb's level (`min_level` ... `max_level`,
-1 ... 254), `DaylightProgram` maps it onto that light's own range: from its
+A look gives a brightness from 0 to 1 (`Glow`), and `DaylightProgram`
+maps it, through the gate, onto that light's own range: from its
 **minimum level** (`minlevel`, raw 1-254, NVS `<role>.min`, default 1) up to
 its **peak** (`intensity`, % of full, NVS `<role>.peak`, defaults walls 100
 / work 90):
 
 ```
-top       = 254 · peak / 100
-f         = (level - min_level) / (max_level - min_level)
-level_out = round(minimum + (top - minimum) · f)
+top   = 254 · peak / 100
+level = round(minimum + (top - minimum) · brightness)
 ```
 
 So `peak` is the brightness at the curve's maximum (solar noon for wall
@@ -425,7 +423,7 @@ ramps over `fade` (default 10 min) at each edge:
 ```
 gate = 0                                               outside days/hours
 gate = min(1, (h - start)/fade, (end - h)/fade)        inside
-level_out = round(gate · level), floored to min_level while gate > 0
+brightness_out = gate · brightness                     the light is off while gate = 0
 ```
 
 Only brightness is scaled; color temperature still follows the sun. The
