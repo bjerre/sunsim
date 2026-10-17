@@ -18,9 +18,11 @@ set(modules "src/platform.cppm"
             "src/zigbee_adapter.cppm"
             "src/zone.cppm")
 
-idf_component_register(SRCS ${modules}
+# InternetSync's definitions live in a module implementation unit (see
+# internet_sync.cppm for why).
+idf_component_register(SRCS ${modules} "src/internet_sync.cpp"
                        REQUIRES sunsim_events esp_timer esp_event espressif__esp-zigbee-lib
-                       PRIV_REQUIRES sunsim_weather console driver esp_coex esp_http_client esp_lcd mbedtls nvs_flash esp_wifi esp_netif lwip
+                       PRIV_REQUIRES sunsim_weather console driver pthread esp_coex esp_http_client esp_lcd mbedtls nvs_flash esp_wifi esp_netif lwip
                                      espressif__esp_lvgl_port)
 
 target_sources(${COMPONENT_LIB} PUBLIC FILE_SET CXX_MODULES BASE_DIRS src FILES ${modules})

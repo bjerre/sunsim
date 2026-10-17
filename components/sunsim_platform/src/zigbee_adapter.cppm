@@ -28,8 +28,8 @@ export namespace sunsim::platform {
 //   stack -> events : NetworkUp, DeviceAnnounced, EndpointFound, BindResult,
 //                     PingResult, AckReceived, ButtonPressed
 //   events -> stack : SetLight, Discover, Bind, Ping, OpenNetwork, FactoryReset
-// The on*() handlers run on the app task, which holds the Zigbee lock while
-// processing events (see lock()/unlock()); the stack callbacks only post.
+// The on() handlers run on the app task, which holds the stack's lock
+// (StackLock) while processing events; the stack callbacks only post.
 class ZigbeeAdapter {
 public:
     explicit ZigbeeAdapter(ev::Post post);
@@ -42,9 +42,12 @@ public:
     void start();
     void waitUntilReady();
 
-    // The stack's API lock, held by the app task around event processing.
-    static void lock();
-    static void unlock();
+    // The stack's API lock, for std::scoped_lock: the app task holds it
+    // around event processing.
+    struct StackLock {
+        void lock();
+        void unlock();
+    };
 
     void on(const ev::SetLight &e);
     void on(const ev::Discover &e);
@@ -92,6 +95,8 @@ private:
     ezb_err_t   last_send_error_ = EZB_ERR_NONE;
     ev::Instant report_start_{};
 
+    // For the stack's signal, ZCL and APS handlers, which take no context
+    // pointer (its ZDO requests do: user_ctx carries the role).
     static ZigbeeAdapter *s_self;
 };
 
@@ -171,12 +176,12 @@ void ZigbeeAdapter::waitUntilReady()
     xEventGroupWaitBits(ready_, kReadyBit, pdFALSE, pdTRUE, portMAX_DELAY);
 }
 
-void ZigbeeAdapter::lock()
+void ZigbeeAdapter::StackLock::lock()
 {
     esp_zigbee_lock_acquire(portMAX_DELAY);
 }
 
-void ZigbeeAdapter::unlock()
+void ZigbeeAdapter::StackLock::unlock()
 {
     esp_zigbee_lock_release();
 }
@@ -267,9 +272,9 @@ void ZigbeeAdapter::scheduleCommissioningRetry(ezb_bdb_comm_mode_mask_t mode, st
 
 void ZigbeeAdapter::retryCommissioning()
 {
-    lock();
+    StackLock               stack;
+    const std::scoped_lock lock{stack};
     ezb_bdb_start_top_level_commissioning(pending_retry_mode_);
-    unlock();
 }
 
 // ---- Stack -> events (Zigbee task; the stack holds the lock) -------------------

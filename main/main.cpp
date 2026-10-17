@@ -57,6 +57,7 @@ private:
     platform::InternetSync  internet_;
     platform::ZigbeeAdapter zigbee_;
     platform::StatusSlot    status_;
+    platform::Console       console_{bus_.post(), status_};
     core::CoreModules       core_;
 };
 
@@ -86,7 +87,7 @@ void App::run()
     xTaskCreate(&App::appTask, "app", 8192, this, 5, nullptr);
 
     platform::startStatusDisplay(status_);
-    platform::startConsole(bus_.post(), status_);
+    console_.start();
 }
 
 void App::appTask(void *arg)
@@ -98,11 +99,11 @@ void App::appTask(void *arg)
     app.zigbee_.waitUntilReady();
     ESP_LOGI(kTag, "Processing events");
 
+    platform::ZigbeeAdapter::StackLock stack;
     for (;;) {
         app.bus_.wait();
-        platform::ZigbeeAdapter::lock();
+        const std::scoped_lock lock{stack};
         app.bus_.process();
-        platform::ZigbeeAdapter::unlock();
     }
 }
 

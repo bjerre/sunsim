@@ -385,7 +385,7 @@ classDiagram
     class ZigbeeAdapter {
         -atomic~uint16~ button_short_
         +start() / waitUntilReady()
-        +lock() / unlock()$
+        StackLock : lock() / unlock(), for std::scoped_lock
         +on(SetLight / Discover / Bind / Ping)
         +on(OpenNetwork / FactoryReset)
         +on(RoleAssigned / RoleCleared)
@@ -440,12 +440,14 @@ classDiagram
     class StatusSlot {
         -mutex
         -optional~StatusSnapshot~ snapshot_
-        +set(StatusSnapshot)
+        +on(StatusChanged)
         +get() optional~StatusSnapshot~
     }
     class Console {
-        <<functions>>
-        startConsole(Post, StatusSlot)
+        -Post post_
+        -StatusSlot& status_
+        +start() registers the commands
+        +post(Event) / snapshot()
     }
     class StatusDisplay {
         <<functions>>

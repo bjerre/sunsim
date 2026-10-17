@@ -42,28 +42,40 @@ export namespace sunsim::platform {
 //
 // <role> is a device's name (WallA-WallE east to west, Work, Button); a
 // <group> is all of one kind (wall). Case doesn't matter.
-void startConsole(const ev::Post &post, const StatusSlot &status);
+class Console {
+public:
+    Console(ev::Post post, const StatusSlot &status) : post_(std::move(post)), status_(status) {}
+
+    Console(const Console &)            = delete;
+    Console &operator=(const Console &) = delete;
+
+    // Registers the commands and starts the REPL on its own task.
+    void start();
+
+    // For the commands.
+    void post(ev::Event e) const { post_(std::move(e)); }
+    // The latest status, or nullopt after saying it's still starting up.
+    [[nodiscard]] std::optional<ev::StatusSnapshot> snapshot() const;
+
+private:
+    ev::Post          post_;
+    const StatusSlot &status_;
+};
 
 } // namespace sunsim::platform
 
 namespace sunsim::platform {
 
-namespace {
-// esp_console callbacks are plain functions; this is what they reach.
-struct Context {
-    ev::Post          post;
-    const StatusSlot *status = nullptr;
-};
-Context g_ctx;
-
-std::optional<ev::StatusSnapshot> snapshot()
+std::optional<ev::StatusSnapshot> Console::snapshot() const
 {
-    auto s = g_ctx.status->get();
+    auto s = status_.get();
     if (!s) {
         std::printf("still starting up; try again in a moment\n");
     }
     return s;
 }
+
+namespace {
 
 void printRoleNames()
 {
@@ -103,9 +115,9 @@ std::optional<ev::Selection> parseSelectionArg(const char *arg)
 
 // ---- roles / pair / unpair / open ---------------------------------------------
 
-int cmdRoles(int, char **)
+int cmdRoles(Console &console, int, char **)
 {
-    const auto st = snapshot();
+    const auto st = console.snapshot();
     if (!st) {
         return 1;
     }
@@ -124,7 +136,7 @@ int cmdRoles(int, char **)
     return 0;
 }
 
-int cmdPair(int argc, char **argv)
+int cmdPair(Console &console, int argc, char **argv)
 {
     if (argc != 2) {
         std::printf("usage: pair <role>|cancel\n");
@@ -132,18 +144,18 @@ int cmdPair(int argc, char **argv)
         return 1;
     }
     if (std::string_view{argv[1]} == "cancel") {
-        g_ctx.post(ev::PairCancelled{});
+        console.post(ev::PairCancelled{});
         return 0;
     }
     const auto role = parseRoleArg(argv[1]);
     if (!role) {
         return 1;
     }
-    g_ctx.post(ev::PairRequested{*role});
+    console.post(ev::PairRequested{*role});
     return 0;
 }
 
-int cmdUnpair(int argc, char **argv)
+int cmdUnpair(Console &console, int argc, char **argv)
 {
     if (argc != 2) {
         std::printf("usage: unpair <role|group|all>\n");
@@ -154,18 +166,18 @@ int cmdUnpair(int argc, char **argv)
     if (!roles) {
         return 1;
     }
-    g_ctx.post(ev::UnpairRequested{*roles});
+    console.post(ev::UnpairRequested{*roles});
     return 0;
 }
 
-int cmdOpen(int argc, char **argv)
+int cmdOpen(Console &console, int argc, char **argv)
 {
     const int seconds = argc == 2 ? std::atoi(argv[1]) : ev::kDefaultOpenTime.count();
     if (seconds < 1 || seconds > 254) {
         std::printf("seconds must be 1-254\n");
         return 1;
     }
-    g_ctx.post(ev::OpenNetwork{ev::OpenTime{seconds}});
+    console.post(ev::OpenNetwork{ev::OpenTime{seconds}});
     return 0;
 }
 
@@ -189,9 +201,9 @@ void printConfigUsage()
     }
 }
 
-int cmdConfig(int argc, char **argv)
+int cmdConfig(Console &console, int argc, char **argv)
 {
-    const auto st = snapshot();
+    const auto st = console.snapshot();
     if (!st) {
         return 1;
     }
@@ -211,7 +223,7 @@ int cmdConfig(int argc, char **argv)
         std::printf("%s\n", done.error().c_str());
         return 1;
     }
-    g_ctx.post(ev::SetConfig{c});
+    console.post(ev::SetConfig{c});
     printSetting(*setting, c);
     return 0;
 }
@@ -232,9 +244,9 @@ void printMinLevels(const ev::MinLevels &levels)
     }
 }
 
-int cmdIntensity(int argc, char **argv)
+int cmdIntensity(Console &console, int argc, char **argv)
 {
-    const auto st = snapshot();
+    const auto st = console.snapshot();
     if (!st) {
         return 1;
     }
@@ -256,7 +268,7 @@ int cmdIntensity(int argc, char **argv)
         return 1;
     }
 
-    g_ctx.post(ev::SetIntensity{*lights, static_cast<uint8_t>(percent)});
+    console.post(ev::SetIntensity{*lights, static_cast<uint8_t>(percent)});
     ev::Peaks peaks = st->peaks;
     for (const ev::Role role : ev::bulbs()) {
         if (ev::selects(*lights, role)) {
@@ -267,9 +279,9 @@ int cmdIntensity(int argc, char **argv)
     return 0;
 }
 
-int cmdMinLevel(int argc, char **argv)
+int cmdMinLevel(Console &console, int argc, char **argv)
 {
-    const auto st = snapshot();
+    const auto st = console.snapshot();
     if (!st) {
         return 1;
     }
@@ -286,7 +298,7 @@ int cmdMinLevel(int argc, char **argv)
     if (!lights) {
         return 1;
     }
-    g_ctx.post(ev::SetMinLevel{*lights, static_cast<uint8_t>(level)});
+    console.post(ev::SetMinLevel{*lights, static_cast<uint8_t>(level)});
     ev::MinLevels levels = st->min_levels;
     for (const ev::Role role : ev::bulbs()) {
         if (ev::selects(*lights, role)) {
@@ -297,9 +309,9 @@ int cmdMinLevel(int argc, char **argv)
     return 0;
 }
 
-int cmdTune(int argc, char **argv)
+int cmdTune(Console &console, int argc, char **argv)
 {
-    const auto st = snapshot();
+    const auto st = console.snapshot();
     if (!st) {
         return 1;
     }
@@ -307,7 +319,7 @@ int cmdTune(int argc, char **argv)
     const std::string_view what   = argc >= 2 ? argv[1] : "";
     if (argc == 1) {
         if (!tuning) {
-            g_ctx.post(ev::ModeRequested{ev::Mode::Tuning});
+            console.post(ev::ModeRequested{ev::Mode::Tuning});
         }
         std::printf("tuning: every bulb steady at its minimum level, in sunset amber. Raise a bulb until it\n"
                     "shows, then `tune save`; `tune off` (or a button press) returns to daylight.\n"
@@ -316,7 +328,7 @@ int cmdTune(int argc, char **argv)
         return 0;
     }
     if (what == "off" && argc == 2) {
-        g_ctx.post(ev::ModeRequested{ev::Mode::Daylight});
+        console.post(ev::ModeRequested{ev::Mode::Daylight});
         return 0;
     }
     if (what == "save" && argc == 2) {
@@ -324,7 +336,7 @@ int cmdTune(int argc, char **argv)
             std::printf("not tuning: nothing to save (start with `tune`)\n");
             return 1;
         }
-        g_ctx.post(ev::TuneSave{});
+        console.post(ev::TuneSave{});
         std::printf("saved as the minimum levels (see `minlevel`)\n");
         return 0;
     }
@@ -339,9 +351,9 @@ int cmdTune(int argc, char **argv)
         return 1;
     }
     if (!tuning) {
-        g_ctx.post(ev::ModeRequested{ev::Mode::Tuning});
+        console.post(ev::ModeRequested{ev::Mode::Tuning});
     }
-    g_ctx.post(ev::TuneLights{.lights = *lights,
+    console.post(ev::TuneLights{.lights = *lights,
                               .level  = static_cast<uint8_t>(level),
                               .kelvin = argc == 4 ? std::optional<uint16_t>{static_cast<uint16_t>(kelvin)} : std::nullopt});
     return 0;
@@ -351,7 +363,7 @@ int cmdTune(int argc, char **argv)
 
 // Posts the same event the real button does, so this exercises the whole
 // press -> mode -> lights path.
-int cmdPress(int argc, char **argv)
+int cmdPress(Console &console, int argc, char **argv)
 {
     const std::string_view kind = argc == 2 ? argv[1] : "";
     ev::Press              press{};
@@ -365,17 +377,17 @@ int cmdPress(int argc, char **argv)
         std::printf("usage: press single|double|hold\n");
         return 1;
     }
-    g_ctx.post(ev::ButtonPressed{.press = press, .source = ev::Source::Console, .at = ev::BootClock::now()});
+    console.post(ev::ButtonPressed{.press = press, .source = ev::Source::Console, .at = ev::BootClock::now()});
     return 0;
 }
 
 // ---- fastday / sync -------------------------------------------------------------
 
-int cmdFastDay(int argc, char **argv)
+int cmdFastDay(Console &console, int argc, char **argv)
 {
     const std::string_view what = argc >= 2 ? argv[1] : "";
     if (argc == 1) {
-        const auto st = snapshot();
+        const auto st = console.snapshot();
         if (!st) {
             return 1;
         }
@@ -383,7 +395,7 @@ int cmdFastDay(int argc, char **argv)
         return 0;
     }
     if (what == "off" && argc == 2) {
-        g_ctx.post(ev::SetFastDay{.on = false});
+        console.post(ev::SetFastDay{.on = false});
         return 0;
     }
     if (what == "on" && argc <= 3) {
@@ -392,7 +404,7 @@ int cmdFastDay(int argc, char **argv)
             std::printf("seconds per day must be 10-3600\n");
             return 1;
         }
-        g_ctx.post(ev::SetFastDay{.on = true, .day_length = std::chrono::seconds{seconds}});
+        console.post(ev::SetFastDay{.on = true, .day_length = std::chrono::seconds{seconds}});
         return 0;
     }
     std::printf("usage: fastday [on [seconds] | off]   (on: one active window every %d s by default)\n",
@@ -400,9 +412,9 @@ int cmdFastDay(int argc, char **argv)
     return 1;
 }
 
-int cmdSync(int, char **)
+int cmdSync(Console &console, int, char **)
 {
-    g_ctx.post(ev::SyncRequested{});
+    console.post(ev::SyncRequested{});
     std::printf("syncing in the background (see the INTERNET log lines)\n");
     return 0;
 }
@@ -452,20 +464,20 @@ std::optional<T> lookup(const std::pair<std::string_view, T> (&names)[N], std::s
 
 // Posts what InternetSync would: it lasts until the next real fetch (within
 // 15 minutes), or `weather simulate clear`.
-int simulateWeather(const ev::StatusSnapshot &st, std::string_view what, std::string_view how)
+int simulateWeather(Console &console, const ev::StatusSnapshot &st, std::string_view what, std::string_view how)
 {
     const ev::Instant now   = ev::BootClock::now();
     const uint8_t     cloud = st.sky.conditions ? st.sky.conditions->cloud_percent : st.sky.cloud_percent.value_or(0);
     if (what == "clear") {
-        g_ctx.post(ev::ConditionsUpdated{.now = {.cloud_percent = cloud}, .at = now});
-        g_ctx.post(ev::AlertsUpdated{.at = now});
+        console.post(ev::ConditionsUpdated{.now = {.cloud_percent = cloud}, .at = now});
+        console.post(ev::AlertsUpdated{.at = now});
         return 0;
     }
     if (const auto precip = lookup(kPrecipNames, what)) {
         const auto intensity = how == "light" ? ev::Intensity::Light
                                : how == "heavy" ? ev::Intensity::Heavy
                                                 : ev::Intensity::Moderate;
-        g_ctx.post(ev::ConditionsUpdated{
+        console.post(ev::ConditionsUpdated{
             .now = {.cloud_percent = std::max<uint8_t>(cloud, 90), .precip = *precip, .intensity = intensity}, .at = now});
         return 0;
     }
@@ -475,7 +487,7 @@ int simulateWeather(const ev::StatusSnapshot &st, std::string_view what, std::st
         alert.level             = *level;
         alert.until             = now + std::chrono::hours{1};
         std::snprintf(alert.event.data(), alert.event.size(), "Simulated %s", ev::alertLevelName(*level));
-        g_ctx.post(alerts);
+        console.post(alerts);
         return 0;
     }
     std::printf("usage: weather simulate drizzle|rain|freezing|snow|thunder [light|moderate|heavy]\n"
@@ -484,9 +496,9 @@ int simulateWeather(const ev::StatusSnapshot &st, std::string_view what, std::st
     return 1;
 }
 
-int cmdWeather(int argc, char **argv)
+int cmdWeather(Console &console, int argc, char **argv)
 {
-    const auto st = snapshot();
+    const auto st = console.snapshot();
     if (!st) {
         return 1;
     }
@@ -495,15 +507,15 @@ int cmdWeather(int argc, char **argv)
         return 0;
     }
     if (std::string_view{argv[1]} == "simulate" && (argc == 3 || argc == 4)) {
-        return simulateWeather(*st, argv[2], argc == 4 ? argv[3] : "");
+        return simulateWeather(console, *st, argv[2], argc == 4 ? argv[3] : "");
     }
     std::printf("usage: weather [simulate <what>]\n");
     return 1;
 }
 
-int cmdStatus(int, char **)
+int cmdStatus(Console &console, int, char **)
 {
-    const auto st = snapshot();
+    const auto st = console.snapshot();
     if (!st) {
         return 1;
     }
@@ -606,7 +618,7 @@ int addWifi(const char *ssid, const char *password)
     return 1;
 }
 
-int cmdWifi(int argc, char **argv)
+int cmdWifi(Console &, int argc, char **argv)
 {
     const std::string_view sub = argc >= 2 ? argv[1] : "";
     if (argc == 1) {
@@ -646,36 +658,41 @@ int cmdWifi(int argc, char **argv)
     return 1;
 }
 
-int cmdRestart(int, char **)
+int cmdRestart(Console &, int, char **)
 {
     esp_restart();
 }
 
-int cmdFactoryReset(int, char **)
+int cmdFactoryReset(Console &console, int, char **)
 {
-    g_ctx.post(ev::FactoryReset{});
+    console.post(ev::FactoryReset{});
     return 0;
 }
 
-void registerCommand(const char *name, const char *help, const char *hint, esp_console_cmd_func_t func)
+// A command: what it's given, and esp_console's exit status.
+using Command = int (*)(Console &, int, char **);
+
+// Registers `command` under `name`, reaching it through esp_console's
+// context pointer: no globals.
+template <Command command> void add(Console &console, const char *name, const char *help, const char *hint)
 {
     const esp_console_cmd_t cmd{
         .command        = name,
         .help           = help,
         .hint           = hint,
-        .func           = func,
+        .func           = nullptr,
         .argtable       = nullptr,
-        .func_w_context = nullptr,
-        .context        = nullptr,
+        .func_w_context = [](void *context, int argc, char **argv) {
+            return command(*static_cast<Console *>(context), argc, argv);
+        },
+        .context = &console,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
 }
 } // namespace
 
-void startConsole(const ev::Post &post, const StatusSlot &status)
+void Console::start()
 {
-    g_ctx = {.post = post, .status = &status};
-
     esp_console_repl_t       *repl        = nullptr;
     esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
     repl_config.prompt                    = "sunsim>";
@@ -692,34 +709,32 @@ void startConsole(const ev::Post &post, const StatusSlot &status)
 #endif
 
     ESP_ERROR_CHECK(esp_console_register_help_command());
-    registerCommand("status", "Time, day length, next sunrise/sunset, mode and device links", nullptr, &cmdStatus);
-    registerCommand("roles", "List role assignments", nullptr, &cmdRoles);
-    registerCommand("pair", "Give the next unassigned device to join this role, and open the network",
-                    "<role|cancel>", &cmdPair);
-    registerCommand("unpair", "Forget a role's device, or a group's (they can then be re-paired)",
-                    "<role|group|all>", &cmdUnpair);
-    registerCommand("open", "Open the network for joining", "[seconds]", &cmdOpen);
-    registerCommand("config", "Show the settings, or change one (`config x` lists what each takes)",
-                    "[<setting> <value>]", &cmdConfig);
-    registerCommand("intensity", "Show or set each light's peak brightness, 1-100%", "[<light|group|all> <1-100>]",
-                    &cmdIntensity);
-    registerCommand("minlevel", "Show or set each light's minimum level while on, 1-254 (find them with tune)",
-                    "[<light|group|all> <1-254>]", &cmdMinLevel);
-    registerCommand("tune", "Tuning mode: hold bulbs steady to find each one's lowest visible level",
-                    "[<light|group|all> <1-254> [kelvin] | save | off]", &cmdTune);
-    registerCommand("press", "Simulate the button: single = resume daylight, double = red alert, hold = all off",
-                    "single|double|hold", &cmdPress);
-    registerCommand("fastday", "Debug: run a whole active window every few seconds, or back to real time",
-                    "[on [seconds] | off]", &cmdFastDay);
-    registerCommand("sync", "Sync the clock (and fetch internet data) now, over Wi-Fi", nullptr, &cmdSync);
-    registerCommand("weather", "The weather now and the weather lights; or pretend, to see the lights",
-                    "[simulate drizzle|rain|freezing|snow|thunder [light|heavy] | advisory|watch|warning | clear]",
-                    &cmdWeather);
-    registerCommand("wifi", "List, add or remove the Wi-Fi networks used for the internet sync (e.g. home and work)",
-                    "[add <ssid> [password] | remove <ssid> | clear]", &cmdWifi);
-    registerCommand("restart", "Reboot (keeps roles, network and Wi-Fi settings)", nullptr, &cmdRestart);
-    registerCommand("factory_reset", "Forget all roles AND the Zigbee network, then restart", nullptr,
-                    &cmdFactoryReset);
+    add<&cmdStatus>(*this, "status", "Time, day length, next sunrise/sunset, mode and device links", nullptr);
+    add<&cmdRoles>(*this, "roles", "List role assignments", nullptr);
+    add<&cmdPair>(*this, "pair", "Give the next unassigned device to join this role, and open the network",
+                  "<role|cancel>");
+    add<&cmdUnpair>(*this, "unpair", "Forget a role's device, or a group's (they can then be re-paired)",
+                    "<role|group|all>");
+    add<&cmdOpen>(*this, "open", "Open the network for joining", "[seconds]");
+    add<&cmdConfig>(*this, "config", "Show the settings, or change one (`config x` lists what each takes)",
+                    "[<setting> <value>]");
+    add<&cmdIntensity>(*this, "intensity", "Show or set each light's peak brightness, 1-100%",
+                       "[<light|group|all> <1-100>]");
+    add<&cmdMinLevel>(*this, "minlevel", "Show or set each light's minimum level while on, 1-254 (find them with tune)",
+                      "[<light|group|all> <1-254>]");
+    add<&cmdTune>(*this, "tune", "Tuning mode: hold bulbs steady to find each one's lowest visible level",
+                  "[<light|group|all> <1-254> [kelvin] | save | off]");
+    add<&cmdPress>(*this, "press", "Simulate the button: single = resume daylight, double = red alert, hold = all off",
+                   "single|double|hold");
+    add<&cmdFastDay>(*this, "fastday", "Debug: run a whole active window every few seconds, or back to real time",
+                     "[on [seconds] | off]");
+    add<&cmdSync>(*this, "sync", "Sync the clock (and fetch internet data) now, over Wi-Fi", nullptr);
+    add<&cmdWeather>(*this, "weather", "The weather now and the weather lights; or pretend, to see the lights",
+                     "[simulate drizzle|rain|freezing|snow|thunder [light|heavy] | advisory|watch|warning | clear]");
+    add<&cmdWifi>(*this, "wifi", "List, add or remove the Wi-Fi networks used for the internet sync (e.g. home and work)",
+                  "[add <ssid> [password] | remove <ssid> | clear]");
+    add<&cmdRestart>(*this, "restart", "Reboot (keeps roles, network and Wi-Fi settings)", nullptr);
+    add<&cmdFactoryReset>(*this, "factory_reset", "Forget all roles AND the Zigbee network, then restart", nullptr);
 
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
 }
