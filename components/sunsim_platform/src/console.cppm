@@ -69,7 +69,7 @@ std::optional<ev::StatusSnapshot> Console::snapshot() const
 {
     auto s = status_.get();
     if (!s) {
-        std::printf("still starting up; try again in a moment\n");
+        std::println("still starting up; try again in a moment");
     }
     return s;
 }
@@ -78,11 +78,11 @@ namespace {
 
 void printRoleNames()
 {
-    std::printf("roles:");
+    std::print("roles:");
     for (const ev::Role role : ev::kRoles) {
-        std::printf(" %s", ev::roleName(role).data());
+        std::print(" {}", ev::roleName(role));
     }
-    std::printf("\n");
+    std::println();
 }
 
 // The role named by `arg`, or nullopt after saying why not.
@@ -90,7 +90,7 @@ std::optional<ev::Role> parseRoleArg(const char *arg)
 {
     const auto role = ev::parseRole(arg);
     if (!role) {
-        std::printf("unknown role '%s'\n", arg);
+        std::println("unknown role '{}'", arg);
         printRoleNames();
     }
     return role;
@@ -101,13 +101,13 @@ std::optional<ev::Selection> parseSelectionArg(const char *arg)
 {
     const auto selection = ev::parseSelection(arg);
     if (!selection) {
-        std::printf("unknown role or group '%s'\n", arg);
+        std::println("unknown role or group '{}'", arg);
         printRoleNames();
-        std::printf("groups:");
+        std::print("groups:");
         for (const ev::GroupSpec &g : ev::kLayout) {
-            std::printf(" %.*s", static_cast<int>(g.name.size()), g.name.data());
+            std::print(" {}", g.name);
         }
-        std::printf(" (or all)\n");
+        std::println(" (or all)");
     }
     return selection;
 }
@@ -123,14 +123,14 @@ int cmdRoles(Console &console, int, char **)
     for (const ev::Role role : ev::kRoles) {
         const ev::DeviceRecord &d = st->records[role];
         if (d.valid) {
-            std::printf("%-6s ext=0x%016llx short=0x%04x ep=%d\n", ev::roleName(role).data(),
-                        static_cast<unsigned long long>(d.ext_addr), d.short_addr, d.endpoint);
+            std::println("{:<6} ext=0x{:016x} short=0x{:04x} ep={}", ev::roleName(role),
+                         d.ext_addr, d.short_addr, d.endpoint);
         } else {
-            std::printf("%-6s (unassigned)\n", ev::roleName(role).data());
+            std::println("{:<6} (unassigned)", ev::roleName(role));
         }
     }
     if (st->armed) {
-        std::printf("Armed: next joining device becomes %s\n", ev::roleName(*st->armed).data());
+        std::println("Armed: next joining device becomes {}", ev::roleName(*st->armed));
     }
     return 0;
 }
@@ -138,7 +138,7 @@ int cmdRoles(Console &console, int, char **)
 int cmdPair(Console &console, int argc, char **argv)
 {
     if (argc != 2) {
-        std::printf("usage: pair <role>|cancel\n");
+        std::println("usage: pair <role>|cancel");
         printRoleNames();
         return 1;
     }
@@ -157,7 +157,7 @@ int cmdPair(Console &console, int argc, char **argv)
 int cmdUnpair(Console &console, int argc, char **argv)
 {
     if (argc != 2) {
-        std::printf("usage: unpair <role|group|all>\n");
+        std::println("usage: unpair <role|group|all>");
         printRoleNames();
         return 1;
     }
@@ -173,7 +173,7 @@ int cmdOpen(Console &console, int argc, char **argv)
 {
     const int seconds = argc == 2 ? std::atoi(argv[1]) : ev::kDefaultOpenTime.count();
     if (seconds < 1 || seconds > 254) {
-        std::printf("seconds must be 1-254\n");
+        std::println("seconds must be 1-254");
         return 1;
     }
     console.post(ev::OpenNetwork{ev::OpenTime{seconds}});
@@ -187,16 +187,16 @@ int cmdOpen(Console &console, int argc, char **argv)
 void printSetting(const ev::Setting &setting, const ev::ProgramConfig &c)
 {
     const std::string value = ev::show(setting, c);
-    std::printf("  %-11.*s %-14s %.*s\n", static_cast<int>(setting.name.size()), setting.name.data(), value.c_str(),
-                static_cast<int>(setting.help.size()), setting.help.data());
+    std::println("  {:<11} {:<14} {}", setting.name, value,
+                 setting.help);
 }
 
 void printConfigUsage()
 {
-    std::printf("usage: config [<setting> <value>]\n");
+    std::println("usage: config [<setting> <value>]");
     for (const ev::Setting &setting : ev::kSettings) {
         const std::string takes = ev::syntax(setting);
-        std::printf("  %-11.*s %s\n", static_cast<int>(setting.name.size()), setting.name.data(), takes.c_str());
+        std::println("  {:<11} {}", setting.name, takes);
     }
 }
 
@@ -219,7 +219,7 @@ int cmdConfig(Console &console, int argc, char **argv)
         return 1;
     }
     if (const auto done = ev::set(*setting, c, argv[2]); !done) {
-        std::printf("%s\n", done.error().c_str());
+        std::println("{}", done.error());
         return 1;
     }
     console.post(ev::SetConfig{c});
@@ -232,14 +232,14 @@ int cmdConfig(Console &console, int argc, char **argv)
 void printPeaks(const ev::Peaks &peaks)
 {
     for (const ev::Role role : ev::bulbs()) {
-        std::printf("  %-6s %3u%%\n", ev::roleName(role).data(), peaks[role]);
+        std::println("  {:<6} {:3}%", ev::roleName(role), peaks[role]);
     }
 }
 
 void printMinLevels(const ev::MinLevels &levels)
 {
     for (const ev::Role role : ev::bulbs()) {
-        std::printf("  %-6s %3u\n", ev::roleName(role).data(), levels[role]);
+        std::println("  {:<6} {:3}", ev::roleName(role), levels[role]);
     }
 }
 
@@ -255,7 +255,7 @@ int cmdIntensity(Console &console, int argc, char **argv)
     }
     const int percent = argc == 3 ? std::atoi(argv[2]) : 0;
     if (argc != 3 || percent < 1 || percent > 100) {
-        std::printf("usage: intensity [<light|group|all> <1-100>]   e.g. intensity WallC 80, intensity wall 60\n");
+        std::println("usage: intensity [<light|group|all> <1-100>]   e.g. intensity WallC 80, intensity wall 60");
         return 1;
     }
     const auto lights = parseSelectionArg(argv[1]);
@@ -263,7 +263,7 @@ int cmdIntensity(Console &console, int argc, char **argv)
         return 1;
     }
     if (std::ranges::none_of(ev::bulbs(), [&](ev::Role role) { return ev::selects(*lights, role); })) {
-        std::printf("'%s' isn't a light\n", argv[1]);
+        std::println("'{}' isn't a light", argv[1]);
         return 1;
     }
 
@@ -290,7 +290,7 @@ int cmdMinLevel(Console &console, int argc, char **argv)
     }
     const int level = argc == 3 ? std::atoi(argv[2]) : 0;
     if (argc != 3 || level < 1 || level > ev::kMaxLevel) {
-        std::printf("usage: minlevel [<light|group|all> <1-254>]   (find them with `tune`)\n");
+        std::println("usage: minlevel [<light|group|all> <1-254>]   (find them with `tune`)");
         return 1;
     }
     const auto lights = parseSelectionArg(argv[1]);
@@ -320,9 +320,9 @@ int cmdTune(Console &console, int argc, char **argv)
         if (!tuning) {
             console.post(ev::ModeRequested{ev::Mode::Tuning});
         }
-        std::printf("tuning: every bulb steady at its minimum level, in sunset amber. Raise a bulb until it\n"
-                    "shows, then `tune save`; `tune off` (or a button press) returns to daylight.\n"
-                    "  tune <light|group|all> <1-254> [kelvin]\nminimum levels now:\n");
+        std::print("tuning: every bulb steady at its minimum level, in sunset amber. Raise a bulb until it\n"
+                   "shows, then `tune save`; `tune off` (or a button press) returns to daylight.\n"
+                   "  tune <light|group|all> <1-254> [kelvin]\nminimum levels now:\n");
         printMinLevels(st->min_levels);
         return 0;
     }
@@ -332,17 +332,17 @@ int cmdTune(Console &console, int argc, char **argv)
     }
     if (what == "save" && argc == 2) {
         if (!tuning) {
-            std::printf("not tuning: nothing to save (start with `tune`)\n");
+            std::println("not tuning: nothing to save (start with `tune`)");
             return 1;
         }
         console.post(ev::TuneSave{});
-        std::printf("saved as the minimum levels (see `minlevel`)\n");
+        std::println("saved as the minimum levels (see `minlevel`)");
         return 0;
     }
     const int level  = argc >= 3 ? std::atoi(argv[2]) : 0;
     const int kelvin = argc == 4 ? std::atoi(argv[3]) : 0;
     if (argc < 3 || argc > 4 || level < 1 || level > ev::kMaxLevel || (argc == 4 && (kelvin < 1700 || kelvin > 6500))) {
-        std::printf("usage: tune [<light|group|all> <1-254> [1700-6500 kelvin] | save | off]\n");
+        std::println("usage: tune [<light|group|all> <1-254> [1700-6500 kelvin] | save | off]");
         return 1;
     }
     const auto lights = parseSelectionArg(argv[1]);
@@ -373,7 +373,7 @@ int cmdPress(Console &console, int argc, char **argv)
     } else if (kind == "hold") {
         press = ev::Press::Hold;
     } else {
-        std::printf("usage: press single|double|hold\n");
+        std::println("usage: press single|double|hold");
         return 1;
     }
     console.post(ev::ButtonPressed{.press = press, .source = ev::Source::Console, .at = ev::BootClock::now()});
@@ -390,7 +390,7 @@ int cmdFastDay(Console &console, int argc, char **argv)
         if (!st) {
             return 1;
         }
-        std::printf("fast-day %s\n", st->time.simulated ? "on" : "off");
+        std::println("fast-day {}", st->time.simulated ? "on" : "off");
         return 0;
     }
     if (what == "off" && argc == 2) {
@@ -400,21 +400,21 @@ int cmdFastDay(Console &console, int argc, char **argv)
     if (what == "on" && argc <= 3) {
         const int seconds = argc == 3 ? std::atoi(argv[2]) : CONFIG_SUNSIM_DEBUG_DAY_SECONDS;
         if (seconds < 10 || seconds > 3600) {
-            std::printf("seconds per day must be 10-3600\n");
+            std::println("seconds per day must be 10-3600");
             return 1;
         }
         console.post(ev::SetFastDay{.on = true, .day_length = std::chrono::seconds{seconds}});
         return 0;
     }
-    std::printf("usage: fastday [on [seconds] | off]   (on: one active window every %d s by default)\n",
-                CONFIG_SUNSIM_DEBUG_DAY_SECONDS);
+    std::println("usage: fastday [on [seconds] | off]   (on: one active window every {} s by default)",
+                 CONFIG_SUNSIM_DEBUG_DAY_SECONDS);
     return 1;
 }
 
 int cmdSync(Console &console, int, char **)
 {
     console.post(ev::SyncRequested{});
-    std::printf("syncing in the background (see the INTERNET log lines)\n");
+    std::println("syncing in the background (see the INTERNET log lines)");
     return 0;
 }
 
@@ -423,23 +423,23 @@ int cmdSync(Console &console, int, char **)
 void printWeather(const ev::StatusSnapshot &st)
 {
     if (st.sky.conditions) {
-        std::printf("now      %u%% cloud, ", st.sky.conditions->cloud_percent);
+        std::print("now      {}% cloud, ", st.sky.conditions->cloud_percent);
         if (st.sky.conditions->precip == ev::Precip::None) {
-            std::printf("nothing falling\n");
+            std::println("nothing falling");
         } else {
-            std::printf("%s %s\n", ev::intensityName(st.sky.conditions->intensity), ev::precipName(st.sky.conditions->precip));
+            std::println("{} {}", ev::intensityName(st.sky.conditions->intensity), ev::precipName(st.sky.conditions->precip));
         }
     } else {
-        std::printf("now      no live conditions (none fetched in the last %lld min)\n",
-                    static_cast<long long>(ev::kWeatherFreshFor.count()));
+        std::println("now      no live conditions (none fetched in the last {} min)",
+                     ev::kWeatherFreshFor.count());
     }
     if (st.sky.alerts.count == 0) {
-        std::printf("alerts   none\n");
+        std::println("alerts   none");
     }
     for (const ev::Alert &alert : st.sky.alerts.list()) {
         const auto left = std::chrono::duration_cast<std::chrono::minutes>(alert.until - st.at);
-        std::printf("alert    %s (%s), %lld min left\n", alert.event.data(), ev::alertLevelName(alert.level),
-                    static_cast<long long>(left.count()));
+        std::println("alert    {} ({}), {} min left", alert.event.data(), ev::alertLevelName(alert.level),
+                     left.count());
     }
     for (const std::string_view name : {"weather", "precip", "alerts"}) {
         printSetting(*ev::findSetting(name), st.config);
@@ -485,13 +485,13 @@ int simulateWeather(Console &console, const ev::StatusSnapshot &st, std::string_
         ev::Alert        &alert = alerts.alerts.items[alerts.alerts.count++];
         alert.level             = *level;
         alert.until             = now + std::chrono::hours{1};
-        std::snprintf(alert.event.data(), alert.event.size(), "Simulated %s", ev::alertLevelName(*level));
+        std::format_to_n(alert.event.data(), alert.event.size() - 1, "Simulated {}", ev::alertLevelName(*level)); // stays NUL-terminated
         console.post(alerts);
         return 0;
     }
-    std::printf("usage: weather simulate drizzle|rain|freezing|snow|thunder [light|moderate|heavy]\n"
-                "       weather simulate advisory|watch|warning | clear\n"
-                "(until the next real fetch, within 15 min)\n");
+    std::print("usage: weather simulate drizzle|rain|freezing|snow|thunder [light|moderate|heavy]\n"
+               "       weather simulate advisory|watch|warning | clear\n"
+               "(until the next real fetch, within 15 min)\n");
     return 1;
 }
 
@@ -508,7 +508,7 @@ int cmdWeather(Console &console, int argc, char **argv)
     if (std::string_view{argv[1]} == "simulate" && (argc == 3 || argc == 4)) {
         return simulateWeather(console, *st, argv[2], argc == 4 ? argv[3] : "");
     }
-    std::printf("usage: weather [simulate <what>]\n");
+    std::println("usage: weather [simulate <what>]");
     return 1;
 }
 
@@ -521,61 +521,61 @@ int cmdStatus(Console &console, int, char **)
 
     if (st->time.valid) {
         const std::string now = std::format("{:%a %H:%M}", st->time.local);
-        std::printf("time    %s%s\n", now.c_str(), st->time.simulated ? "  (simulated)" : "");
+        std::println("time    {}{}", now, st->time.simulated ? "  (simulated)" : "");
     } else {
-        std::printf("time    NOT SET - waiting for time sync (lights held off)\n");
+        std::println("time    NOT SET - waiting for time sync (lights held off)");
     }
 
     const ev::DayInfo &day = st->day;
-    std::printf("day     %s  (sunrise %s, sunset %s)\n", durationText(day.day_length).c_str(),
-                clockText(day.sunrise).c_str(), clockText(day.sunset).c_str());
-    std::printf("next    %s in %s (%s)\n", day.next_is_sunrise ? "sunrise" : "sunset", durationText(day.until_next).c_str(),
-                clockText(day.next_event).c_str());
+    std::println("day     {}  (sunrise {}, sunset {})", durationText(day.day_length),
+                 clockText(day.sunrise), clockText(day.sunset));
+    std::println("next    {} in {} ({})", day.next_is_sunrise ? "sunrise" : "sunset", durationText(day.until_next),
+                 clockText(day.next_event));
 
     if (st->sky.cloud_percent) {
-        std::printf("sky     %u%% cloud (%s)%s\n", *st->sky.cloud_percent, st->sky.cloud_live ? "now" : "forecast",
-                    st->config.clouds_enabled ? "" : " (clouds off)");
+        std::println("sky     {}% cloud ({}){}", *st->sky.cloud_percent, st->sky.cloud_live ? "now" : "forecast",
+                     st->config.clouds_enabled ? "" : " (clouds off)");
     } else {
-        std::printf("sky     no forecast yet (clear assumed)\n");
+        std::println("sky     no forecast yet (clear assumed)");
     }
     if (st->sky.conditions && st->sky.conditions->precip != ev::Precip::None) {
-        std::printf("falling %s %s\n", ev::intensityName(st->sky.conditions->intensity), ev::precipName(st->sky.conditions->precip));
+        std::println("falling {} {}", ev::intensityName(st->sky.conditions->intensity), ev::precipName(st->sky.conditions->precip));
     }
     for (const ev::Alert &alert : st->sky.alerts.list()) {
-        std::printf("alert   %s\n", alert.event.data());
+        std::println("alert   {}", alert.event.data());
     }
 
-    std::printf("mode    %s", ev::modeName(st->mode));
+    std::print("mode    {}", ev::modeName(st->mode));
     if (st->mode == ev::Mode::Daylight) {
-        std::printf(" - %s", st->in_active_window ? "in active hours" : "outside active hours, lights off");
+        std::print(" - {}", st->in_active_window ? "in active hours" : "outside active hours, lights off");
     }
-    std::printf("\n");
+    std::println();
 
     for (const ev::Role role : ev::kRoles) {
         const ev::DeviceStatus &d = st->devices[role];
-        std::printf("  %-6s ", ev::roleName(role).data());
+        std::print("  {:<6} ", ev::roleName(role));
         switch (d.link) {
         case ev::DeviceLink::Unpaired:
-            std::printf("-  not paired\n");
+            std::println("-  not paired");
             continue;
         case ev::DeviceLink::Silent:
-            std::printf("o  silent");
+            std::print("o  silent");
             break;
         case ev::DeviceLink::Online:
-            std::printf("*  online");
+            std::print("*  online");
             break;
         }
         if (d.last_heard) {
             const auto ago = std::chrono::duration_cast<std::chrono::seconds>(st->at - *d.last_heard);
-            std::printf(", heard %llds ago", static_cast<long long>(ago.count()));
+            std::print(", heard {}s ago", ago.count());
         }
         if (d.rssi != 0) {
-            std::printf(", rssi %d", d.rssi);
+            std::print(", rssi {}", d.rssi);
         }
         if (!d.has_endpoint) {
-            std::printf(", endpoint not found yet");
+            std::print(", endpoint not found yet");
         }
-        std::printf("\n");
+        std::println();
     }
     return 0;
 }
@@ -586,32 +586,32 @@ int cmdStatus(Console &console, int, char **)
 // time-sync task at connect time, so these call the store directly.
 void printWifiUsage()
 {
-    std::printf("usage: wifi                          list saved networks\n"
-                "       wifi add <ssid> [password]    add one (or change its password); up to %u\n"
-                "       wifi remove <ssid>            forget one\n"
-                "       wifi clear                    forget all (falls back to menuconfig's)\n"
-                "quote an SSID with spaces: wifi add \"My Net\" secret\n",
-                static_cast<unsigned>(kMaxWifiNetworks));
+    std::print("usage: wifi                          list saved networks\n"
+               "       wifi add <ssid> [password]    add one (or change its password); up to {}\n"
+               "       wifi remove <ssid>            forget one\n"
+               "       wifi clear                    forget all (falls back to menuconfig's)\n"
+               "quote an SSID with spaces: wifi add \"My Net\" secret\n",
+               kMaxWifiNetworks);
 }
 
 int addWifi(const char *ssid, const char *password)
 {
     switch (addWifiNetwork(ssid, password)) {
     case WifiSaveResult::Added:
-        std::printf("added \"%s\"; type `restart` to sync time now\n", ssid);
+        std::println("added \"{}\"; type `restart` to sync time now", ssid);
         return 0;
     case WifiSaveResult::Updated:
-        std::printf("updated the password for \"%s\"\n", ssid);
+        std::println("updated the password for \"{}\"", ssid);
         return 0;
     case WifiSaveResult::Invalid:
-        std::printf("not saved: SSID must be 1-32 chars, password at most 64\n");
+        std::println("not saved: SSID must be 1-32 chars, password at most 64");
         return 1;
     case WifiSaveResult::Full:
-        std::printf("not saved: already %u networks; `wifi remove` one first\n",
-                    static_cast<unsigned>(kMaxWifiNetworks));
+        std::println("not saved: already {} networks; `wifi remove` one first",
+                     kMaxWifiNetworks);
         return 1;
     case WifiSaveResult::StorageError:
-        std::printf("not saved: storage error\n");
+        std::println("not saved: storage error");
         return 1;
     }
     return 1;
@@ -623,18 +623,18 @@ int cmdWifi(Console &, int argc, char **argv)
     if (argc == 1) {
         const WifiNetworks saved = loadWifiNetworks();
         if (saved.networks.empty()) {
-            std::printf("no Wi-Fi networks; add one with: wifi add <ssid> [password]\n");
+            std::println("no Wi-Fi networks; add one with: wifi add <ssid> [password]");
             return 0;
         }
         if (saved.from_menuconfig) {
-            std::printf("none saved; using the menuconfig fallback:\n");
+            std::println("none saved; using the menuconfig fallback:");
         }
         for (std::size_t i = 0; i < saved.networks.size(); ++i) {
             const WifiNetwork &n = saved.networks[i];
-            std::printf("  %u. \"%s\" (%s)\n", static_cast<unsigned>(i + 1), n.ssid.c_str(),
-                        n.password.empty() ? "open network" : "password set");
+            std::println("  {}. \"{}\" ({})", i + 1, n.ssid,
+                         n.password.empty() ? "open network" : "password set");
         }
-        std::printf("the strongest one in range is used at each clock sync\n");
+        std::println("the strongest one in range is used at each clock sync");
         return 0;
     }
     if (sub == "add" && (argc == 3 || argc == 4)) {
@@ -642,15 +642,15 @@ int cmdWifi(Console &, int argc, char **argv)
     }
     if (sub == "remove" && argc == 3) {
         if (!removeWifiNetwork(argv[2])) {
-            std::printf("no saved network called \"%s\"\n", argv[2]);
+            std::println("no saved network called \"{}\"", argv[2]);
             return 1;
         }
-        std::printf("removed \"%s\"\n", argv[2]);
+        std::println("removed \"{}\"", argv[2]);
         return 0;
     }
     if (sub == "clear" && argc == 2) {
         clearWifiNetworks();
-        std::printf("all networks forgotten; falling back to menuconfig's Wi-Fi settings\n");
+        std::println("all networks forgotten; falling back to menuconfig's Wi-Fi settings");
         return 0;
     }
     printWifiUsage();
