@@ -76,6 +76,17 @@ std::optional<ev::StatusSnapshot> Console::snapshot() const
 
 namespace {
 
+// A whole number from lo to hi, all of `text`: not "12x", "" or "-".
+std::optional<int> numberIn(std::string_view text, int lo, int hi) noexcept
+{
+    int value = 0;
+    const auto [end, err] = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (err != std::errc{} || end != text.data() + text.size() || value < lo || value > hi) {
+        return std::nullopt;
+    }
+    return value;
+}
+
 void printRoleNames()
 {
     std::print("roles:");
@@ -171,12 +182,12 @@ int cmdUnpair(Console &console, int argc, char **argv)
 
 int cmdOpen(Console &console, int argc, char **argv)
 {
-    const int seconds = argc == 2 ? std::atoi(argv[1]) : ev::kDefaultOpenTime.count();
-    if (seconds < 1 || seconds > 254) {
+    const auto seconds = argc == 2 ? numberIn(argv[1], 1, 254) : std::optional<int>{ev::kDefaultOpenTime.count()};
+    if (!seconds) {
         std::println("seconds must be 1-254");
         return 1;
     }
-    console.post(ev::OpenNetwork{ev::OpenTime{seconds}});
+    console.post(ev::OpenNetwork{ev::OpenTime{*seconds}});
     return 0;
 }
 
@@ -253,8 +264,8 @@ int cmdIntensity(Console &console, int argc, char **argv)
         printPeaks(st->peaks);
         return 0;
     }
-    const int percent = argc == 3 ? std::atoi(argv[2]) : 0;
-    if (argc != 3 || percent < 1 || percent > 100) {
+    const auto percent = argc == 3 ? numberIn(argv[2], 1, 100) : std::nullopt;
+    if (!percent) {
         std::println("usage: intensity [<light|group|all> <1-100>]   e.g. intensity WallC 80, intensity wall 60");
         return 1;
     }
@@ -267,11 +278,11 @@ int cmdIntensity(Console &console, int argc, char **argv)
         return 1;
     }
 
-    console.post(ev::SetIntensity{*lights, static_cast<uint8_t>(percent)});
+    console.post(ev::SetIntensity{*lights, static_cast<uint8_t>(*percent)});
     ev::Peaks peaks = st->peaks;
     for (const ev::Role role : ev::bulbs()) {
         if (ev::selects(*lights, role)) {
-            peaks[role] = static_cast<uint8_t>(percent);
+            peaks[role] = static_cast<uint8_t>(*percent);
         }
     }
     printPeaks(peaks);
@@ -288,8 +299,8 @@ int cmdMinLevel(Console &console, int argc, char **argv)
         printMinLevels(st->min_levels);
         return 0;
     }
-    const int level = argc == 3 ? std::atoi(argv[2]) : 0;
-    if (argc != 3 || level < 1 || level > ev::kMaxLevel) {
+    const auto level = argc == 3 ? numberIn(argv[2], 1, ev::kMaxLevel) : std::nullopt;
+    if (!level) {
         std::println("usage: minlevel [<light|group|all> <1-254>]   (find them with `tune`)");
         return 1;
     }
@@ -297,11 +308,11 @@ int cmdMinLevel(Console &console, int argc, char **argv)
     if (!lights) {
         return 1;
     }
-    console.post(ev::SetMinLevel{*lights, static_cast<uint8_t>(level)});
+    console.post(ev::SetMinLevel{*lights, static_cast<uint8_t>(*level)});
     ev::MinLevels levels = st->min_levels;
     for (const ev::Role role : ev::bulbs()) {
         if (ev::selects(*lights, role)) {
-            levels[role] = static_cast<uint8_t>(level);
+            levels[role] = static_cast<uint8_t>(*level);
         }
     }
     printMinLevels(levels);
@@ -339,9 +350,9 @@ int cmdTune(Console &console, int argc, char **argv)
         std::println("saved as the minimum levels (see `minlevel`)");
         return 0;
     }
-    const int level  = argc >= 3 ? std::atoi(argv[2]) : 0;
-    const int kelvin = argc == 4 ? std::atoi(argv[3]) : 0;
-    if (argc < 3 || argc > 4 || level < 1 || level > ev::kMaxLevel || (argc == 4 && (kelvin < 1700 || kelvin > 6500))) {
+    const auto level  = argc >= 3 ? numberIn(argv[2], 1, ev::kMaxLevel) : std::nullopt;
+    const auto kelvin = argc == 4 ? numberIn(argv[3], 1700, 6500) : std::nullopt;
+    if (argc > 4 || !level || (argc == 4 && !kelvin)) {
         std::println("usage: tune [<light|group|all> <1-254> [1700-6500 kelvin] | save | off]");
         return 1;
     }
@@ -353,8 +364,8 @@ int cmdTune(Console &console, int argc, char **argv)
         console.post(ev::ModeRequested{ev::Mode::Tuning});
     }
     console.post(ev::TuneLights{.lights = *lights,
-                              .level  = static_cast<uint8_t>(level),
-                              .kelvin = argc == 4 ? std::optional<uint16_t>{static_cast<uint16_t>(kelvin)} : std::nullopt});
+                              .level  = static_cast<uint8_t>(*level),
+                              .kelvin = kelvin.transform([](int k) { return static_cast<uint16_t>(k); })});
     return 0;
 }
 
@@ -398,12 +409,12 @@ int cmdFastDay(Console &console, int argc, char **argv)
         return 0;
     }
     if (what == "on" && argc <= 3) {
-        const int seconds = argc == 3 ? std::atoi(argv[2]) : CONFIG_SUNSIM_DEBUG_DAY_SECONDS;
-        if (seconds < 10 || seconds > 3600) {
+        const auto seconds = argc == 3 ? numberIn(argv[2], 10, 3600) : std::optional<int>{CONFIG_SUNSIM_DEBUG_DAY_SECONDS};
+        if (!seconds) {
             std::println("seconds per day must be 10-3600");
             return 1;
         }
-        console.post(ev::SetFastDay{.on = true, .day_length = std::chrono::seconds{seconds}});
+        console.post(ev::SetFastDay{.on = true, .day_length = std::chrono::seconds{*seconds}});
         return 0;
     }
     std::println("usage: fastday [on [seconds] | off]   (on: one active window every {} s by default)",
