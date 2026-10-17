@@ -121,18 +121,23 @@ void devicesTests()
 
         h.tick(14);
         h.post(AckReceived{.short_addr = 0x0001, .rssi = -50});
-        h.tick(1); // 15 s after boot: first pings
-        const auto pings = h.all<Ping>();
-        CHECK(pings.size() == 2);
-
+        h.tick(1); // 15 s after pairing: WallA's first ping
+        auto pings = h.all<Ping>();
+        CHECK(pings.size() == 1 && pings[0].role == kWallA);
         // WallA's ping is lost too, but it acked recently: still reachable.
         h.post(PingResult{.role = kWallA, .ok = false});
+
+        h.tick(42); // Work's turn: slot 5 of 7, 5/7 of the minute later
+        pings = h.all<Ping>();
+        CHECK(pings.size() == 2 && pings[1].role == kWork);
         // Work's ping fails and it was never heard after pairing... except
         // at pairing itself, so it needs 60 s of silence first.
         h.post(PingResult{.role = kWork, .ok = false});
         CHECK(h.all<ReachabilityChanged>().empty());
 
-        h.tick(60);
+        h.tick(30);
+        h.post(AckReceived{.short_addr = 0x0001, .rssi = -50}); // WallA keeps answering
+        h.tick(30);                                             // Work's next ping
         h.post(AckReceived{.short_addr = 0x0001, .rssi = -50});
         h.post(PingResult{.role = kWork, .ok = false});
         auto changes = h.all<ReachabilityChanged>();
@@ -181,7 +186,7 @@ void devicesTests()
         h.post(UnpairRequested{});
         CHECK(h.all<RoleCleared>().size() == ev::kRoleCount);
         const auto persisted = h.all<PersistRoles>();
-        CHECK(persisted.size() == 1 && !persisted[0].records[kWallA].valid);
+        CHECK(persisted.size() == 1 && !(*persisted[0].records)[kWallA].valid);
     });
 
     test("the layout: five wall lights east to west, then work and button", [] {
@@ -213,8 +218,8 @@ void devicesTests()
         h.post(UnpairRequested{Group::Wall});
         CHECK(h.all<RoleCleared>().size() == members(Group::Wall).size());
         const auto persisted = h.all<PersistRoles>();
-        CHECK(persisted.size() == 1 && !persisted[0].records[kWallA].valid && !persisted[0].records[kWallE].valid &&
-              persisted[0].records[kWork].valid);
+        CHECK(persisted.size() == 1 && !(*persisted[0].records)[kWallA].valid && !(*persisted[0].records)[kWallE].valid &&
+              (*persisted[0].records)[kWork].valid);
     });
 
     test("addresses are checked against the layout by name; a known one joins as its role", [] {

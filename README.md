@@ -383,7 +383,8 @@ strings checked at compile time.
   `fast_day_clock`, `format` and `wifi` are internal partitions, not exported:
   - `zigbee_adapter.cppm` - the only code using esp-zigbee-lib (stack,
     commissioning, discovery/bind/ping, button frames, bulb commands).
-  - `clock.cppm`, `fast_day_clock.cppm` - heartbeat, program time, fast-day mode.
+  - `clock.cppm` / `.cpp`, `fast_day_clock.cppm` - heartbeat, program time,
+    timer wakes, fast-day mode.
   - `internet_sync.cppm`, `wifi.cppm` - the internet jobs, daily (SNTP, the
     cloud forecast) and every 15 minutes (conditions, NWS alerts), over
     short Wi-Fi sessions; the saved networks.

@@ -12,9 +12,32 @@ import :types;
 
 export namespace sunsim::ev {
 
+// A payload too big to copy into every Event (each is as big as the largest
+// alternative): made once, then shared read-only. Anything that grows with
+// the layout travels like this (see the static_assert on Event).
+template <class T> class Shared {
+public:
+    Shared() : value_(std::make_shared<const T>()) {}
+    Shared(T value) : value_(std::make_shared<const T>(std::move(value))) {} // NOLINT: implicit by design
+
+    [[nodiscard]] const T &operator*() const noexcept { return *value_; }
+    [[nodiscard]] const T *operator->() const noexcept { return value_.get(); }
+
+private:
+    std::shared_ptr<const T> value_;
+};
+
 // ---- Clock ----------------------------------------------------------------
 
-struct Heartbeat {};             // raw 1 Hz timer; the Clock turns it into Tick
+struct Heartbeat {               // raw 1 Hz timer; the Clock turns it into Tick
+    Instant at{};                // when it fired
+};
+struct WakeAt {                  // a module's Timer wants a tick at `at`, not at the next Tick (Clock)
+    Instant at{};
+};
+struct Wake {                    // the Clock, at a WakeAt's time: modules move their Timers on
+    Instant at{};
+};
 struct Tick {                    // 1 Hz, with the program's current time
     Instant     at{};
     TimeReading time{};
@@ -61,10 +84,10 @@ struct SkyChanged {              // SkyModel, whenever the sky now changes
     Sky sky{};
 };
 struct RolesLoaded {             // at boot from NVS
-    DeviceRecords records{};
+    Shared<DeviceRecords> records;
 };
 struct PersistRoles {            // DeviceRegistry -> SettingsStore
-    DeviceRecords records{};
+    Shared<DeviceRecords> records;
 };
 
 // ---- From the Zigbee stack ------------------------------------------------
@@ -166,9 +189,9 @@ struct ReachabilityChanged {     // a bulb stopped answering / answers again
     bool reachable = true;
 };
 struct DevicesUpdated {          // 1 Hz summary for the status model
-    PerRole<DeviceStatus> devices{};
-    DeviceRecords         records{};
-    std::optional<Role>   armed;
+    Shared<PerRole<DeviceStatus>> devices;
+    Shared<DeviceRecords>         records;
+    std::optional<Role>           armed;
 };
 
 // ---- Mode, program, output ------------------------------------------------
@@ -228,7 +251,7 @@ struct StatusChanged {           // shared, not copied: it's by far the largest 
 
 // ---- The event type ------------------------------------------------------
 
-using Payload = std::variant<Heartbeat, Tick, ProgramTick, SetFastDay,                                 //
+using Payload = std::variant<Heartbeat, WakeAt, Wake, Tick, ProgramTick, SetFastDay,                   //
                              ConfigChanged, SetConfig, SetIntensity, SetMinLevel, CloudCoverUpdated,  //
                              ConditionsUpdated, AlertsUpdated, SkyChanged,                            //
                              RolesLoaded, PersistRoles,                                               //
@@ -306,6 +329,11 @@ Event::Event(Event &&) noexcept            = default;
 Event &Event::operator=(const Event &)     = default;
 Event &Event::operator=(Event &&) noexcept = default;
 Event::~Event()                            = default;
+
+// Every event is as big as its largest payload, and a minute's burst
+// queues a few per light: what grows with the layout is Shared, so this
+// holds however many devices there are. (The sky's alerts set it now.)
+static_assert(sizeof(Event) <= 256, "a payload outgrew Event: share it (Shared<T>)");
 
 // What every module gets instead of a reference to the bus or to another
 // module. Thread-safe: may be called from any task.

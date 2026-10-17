@@ -283,7 +283,7 @@ void SettingsStore::loadAll()
 {
     migrateLayout();
 
-    ev::RolesLoaded roles{};
+    ev::DeviceRecords records{};
 
     Nvs nvs{NVS_READONLY};
     if (!nvs.ok()) {
@@ -292,7 +292,7 @@ void SettingsStore::loadAll()
         const nvs_handle_t h = nvs.get();
 
         for (const ev::Role role : ev::kRoles) {
-            ev::DeviceRecord &d = roles.records[role];
+            ev::DeviceRecord &d = records[role];
             if (nvs_get_u64(h, Key(role, "ext").text, &d.ext_addr) != ESP_OK) {
                 continue;
             }
@@ -317,7 +317,7 @@ void SettingsStore::loadAll()
         }
     }
 
-    post_(roles);
+    post_(ev::RolesLoaded{records});
     publish();
 }
 
@@ -372,7 +372,7 @@ void SettingsStore::on(const ev::PersistRoles &e)
     NvsWriter w{nvs, "roles"};
     w.erase(kLegacyBlobKey);
     for (const ev::Role role : ev::kRoles) {
-        const ev::DeviceRecord &d = e.records[role];
+        const ev::DeviceRecord &d = (*e.records)[role];
         if (d.valid) {
             w.u64(Key(role, "ext").text, d.ext_addr);
             w.u16(Key(role, "short").text, d.short_addr);

@@ -46,8 +46,8 @@ void StatusModel::on(const ev::ModeChanged &e)
 
 void StatusModel::on(const ev::DevicesUpdated &e)
 {
-    snap_.devices = e.devices;
-    snap_.records = e.records;
+    snap_.devices = *e.devices;
+    snap_.records = *e.records;
     snap_.armed   = e.armed;
     publish();
 }

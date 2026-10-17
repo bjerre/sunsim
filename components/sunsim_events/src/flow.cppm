@@ -95,10 +95,13 @@ private:
 
 // Time for flows. The owning module calls tick() with each Tick's time, and
 // timestamped events move it too (Inbox::deliver); due waits resume then.
-// Time only moves forward.
+// Time only moves forward. Ticks come once a second; for a wait that must
+// end sooner, give the Timer `wake`: it's called with each new earliest
+// deadline, for the owner to post WakeAt, and tick() it on the Wake.
 class Timer {
 public:
     Timer() = default;
+    explicit Timer(std::function<void(Instant)> wake) : wake_(std::move(wake)) {}
     ~Timer();
 
     [[nodiscard]] Instant now() const noexcept { return now_; }
@@ -115,17 +118,31 @@ public:
         for (;;) {
             const auto due = std::ranges::find_if(timed_, [&](const detail::Timed *t) { return t->deadline_ <= now_; });
             if (due == timed_.end()) {
-                return;
+                break;
             }
             detail::Timed *timed = *due;
             timed_.erase(due);
             timed->queued_ = false;
             timed->expire();
         }
+        announce();
     }
 
 private:
     friend class detail::Timed;
+
+    // The earliest deadline to `wake`, if it's new.
+    void announce()
+    {
+        if (!wake_ || timed_.empty()) {
+            return;
+        }
+        const Instant earliest = (*std::ranges::min_element(timed_, {}, &detail::Timed::deadline_))->deadline_;
+        if (earliest != announced_) {
+            announced_ = earliest;
+            wake_(earliest);
+        }
+    }
 
     class Sleep final : public detail::Timed {
     public:
@@ -147,6 +164,8 @@ private:
 
     Instant                      now_{};
     std::vector<detail::Timed *> timed_;
+    std::function<void(Instant)> wake_;
+    Instant                      announced_{};
 };
 
 // Not inline: sunsim.ev's object file has the one copy. (Inline, GCC 15
@@ -163,6 +182,7 @@ inline void detail::Timed::startTimer()
 {
     timer_.timed_.push_back(this);
     queued_ = true;
+    timer_.announce();
 }
 
 inline void detail::Timed::stopTimer() noexcept

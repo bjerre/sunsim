@@ -237,10 +237,12 @@ classDiagram
         canceled when reassigned or destroyed
     }
     class Timer {
+        +Timer(wake)
         +now() Instant
         +until(Instant) awaitable
         +after(duration) awaitable
         +tick(Instant)
+        -announce() : earliest deadline to wake
     }
     class Inbox~T~ {
         +next(filter, deadline) awaitable optional~T~
@@ -254,6 +256,12 @@ classDiagram
     Flow ..> Timer : co_await
     Flow ..> Inbox~T~ : co_await
 ```
+
+Every `Event` is as big as `Payload`'s largest alternative, and a minute's
+burst queues a few per light, so a payload that grows with the layout (the
+device tables in `DevicesUpdated`, `RolesLoaded`, `PersistRoles`) travels
+as `Shared<T>`: made once, then shared read-only, like `StatusChanged`'s
+snapshot. A `static_assert` keeps `sizeof(Event)` at 256 bytes or less.
 
 An event's type id is its index in `Payload` (`kTypeId<T>`), so there's no
 separate enum to keep in step, and `EventPayload` is the concept "one of
@@ -432,10 +440,11 @@ classDiagram
         -ProgramConfig config_
         -unique_ptr~FastDayClock~ fast_day_
         +start()
-        +on(Heartbeat)
+        +on(Heartbeat / WakeAt / Wake)
         +on(ConfigChanged)
         +on(SetFastDay)
         -read() TimeReading
+        -armWake()
     }
     class InternetSync {
         -kJobs: name, fetch, Daily | Every
@@ -538,9 +547,11 @@ flowchart LR
 - `EventBus::process()` swaps the pending events out under its mutex and
   delivers them without it, so a Zigbee callback posting (already under
   the Zigbee lock) while the app task delivers can't deadlock.
-- The esp_timer only posts `Heartbeat`; `Clock` reads the time on the app
-  task and posts `Tick`, so the fast-day clock can follow `ConfigChanged`
-  without a lock.
+- The esp_timer only posts `Heartbeat`, stamped with when it fired; `Clock`
+  reads the time on the app task and posts `Tick` at that instant, so the
+  fast-day clock can follow `ConfigChanged` without a lock, and a Tick
+  handled late still says when it was. A second, one-shot esp_timer posts
+  `Wake` at the soonest `WakeAt` asked for.
 - **Two deliberate shortcuts** across threads, both small:
   1. The APS hook (Zigbee task) must decide *at once* whether to consume a
      frame. `ZigbeeAdapter` keeps the button's short address in an
@@ -607,14 +618,14 @@ flowchart LR
 | Module | Listens to | Posts |
 |---|---|---|
 | **ZigbeeAdapter** | `SetLight`, `Discover`, `Bind`, `Ping`, `OpenNetwork`, `FactoryReset`, `RoleAssigned`, `RoleCleared` | `NetworkUp`, `DeviceAnnounced`, `EndpointFound`, `BindResult`, `PingResult`, `AckReceived`, `ButtonPressed` |
-| **DeviceRegistry** | `RolesLoaded`, `NetworkUp`, `DeviceAnnounced`, `EndpointFound`, `BindResult`, `PingResult`, `AckReceived`, `ButtonPressed`, `PairRequested`, `PairCanceled`, `UnpairRequested`, `Tick` | `RoleAssigned`, `RoleCleared`, `Discover`, `Bind`, `Ping`, `OpenNetwork`, `PersistRoles`, `RefreshLights`, `ReachabilityChanged`, `DevicesUpdated` |
-| **ModeController** | `ButtonPressed`, `ModeRequested`, `Tick` | `ModeChanged` |
+| **DeviceRegistry** | `RolesLoaded`, `NetworkUp`, `DeviceAnnounced`, `EndpointFound`, `BindResult`, `PingResult`, `AckReceived`, `ButtonPressed`, `PairRequested`, `PairCanceled`, `UnpairRequested`, `Tick`, `Wake` | `RoleAssigned`, `RoleCleared`, `Discover`, `Bind`, `Ping`, `OpenNetwork`, `PersistRoles`, `RefreshLights`, `ReachabilityChanged`, `DevicesUpdated`, `WakeAt` |
+| **ModeController** | `ButtonPressed`, `ModeRequested`, `Tick`, `Wake` | `ModeChanged`, `WakeAt` |
 | **SkyModel** | `CloudCoverUpdated`, `ConditionsUpdated`, `AlertsUpdated`, `Tick` | `SkyChanged` |
 | **ProgramHost** (runs a `Program` per zone) | `ModeChanged`, `ConfigChanged`, `SkyChanged`, `Tick`, `ProgramTick`, `RefreshLights`, `NetworkUp`, `TuneLights`, `TuneSave` | `LightTarget`, `SetMinLevel` (on `TuneSave`) |
 | **Overlays** | `LightTarget`, `Tick`, `ModeChanged`, `ConfigChanged`, `SkyChanged` | `OutputTarget` |
 | **LightOutput** | `OutputTarget`, `RoleAssigned`, `RoleCleared`, `ReachabilityChanged` | `SetLight` |
 | **StatusModel** | `ConfigChanged`, `ModeChanged`, `DevicesUpdated`, `SkyChanged`, `Tick` | `StatusChanged` |
-| **Clock** | `Heartbeat`, `ConfigChanged`, `SetFastDay` | `Heartbeat` (from its timer), `Tick`, `ProgramTick`; on a fast-day switch also `RefreshLights`, `SyncRequested` |
+| **Clock** | `Heartbeat`, `WakeAt`, `Wake`, `ConfigChanged`, `SetFastDay` | `Heartbeat` and `Wake` (from its timers), `Tick`, `ProgramTick`; on a fast-day switch also `RefreshLights`, `SyncRequested` |
 | **InternetSync** | `ConfigChanged` (the sync window), `SyncRequested` | `CloudCoverUpdated` (daily), `ConditionsUpdated` and `AlertsUpdated` (every 15 min); sets the system clock; runs on its own task |
 | **SettingsStore** | `SetConfig`, `SetIntensity`, `SetMinLevel`, `PersistRoles`, `FactoryReset` | `RolesLoaded`, `ConfigChanged` |
 | **Console** | — (REPL task; reads `StatusSlot`) | the requests above |
@@ -713,14 +724,15 @@ ev::Flow DeviceRegistry::findEndpoint(ev::Role role)
 | Piece | What it is |
 |---|---|
 | `Flow` | a coroutine owned by its module; starts at once; reassigning or destroying it cancels it wherever it waits |
-| `Timer` | `co_await timer.until(t)` / `after(15s)`; the module's `on(Tick)` drives it, and timestamped events move it forward |
+| `Timer` | `co_await timer.until(t)` / `after(15s)`; the module's `on(Tick)` drives it, and timestamped events move it forward. Ticks are 1 s apart, so a wait that must end sooner gives the Timer a `wake` callback: it posts `WakeAt` with each new earliest deadline, and the module's `on(Wake)` ticks it then |
 | `Inbox<T>` | `co_await inbox.next(filter, deadline)`: the next `T` the flow wants, or `nullopt` at the deadline; the module's handler calls `deliver()` |
 
 The flows: `ModeController::run` (single vs double press by timing),
 `DeviceRegistry::findEndpoint` (per role, every 15 s until found) and
-`keepAlive` (per bulb: first ping 15 s after the network is up, then every
-60 s; a failed ping plus 60 s of silence marks it unreachable, and it's
-pinged every 15 s until it answers). The host tests run them unchanged.
+`keepAlive` (per light: first ping 15 s after the network is up plus its
+turn, spread across the minute by slot so the pings don't all go at once,
+then every 60 s; a failed ping plus 60 s of silence marks it unreachable,
+and it's pinged every 15 s until it answers). The host tests run them unchanged.
 
 ## 6. Key sequences
 
@@ -827,7 +839,9 @@ Pairing a device (console `pair` or its address in `kAddresses`) is in DESIGN.md
 
 | Event | Payload | Posted by |
 |---|---|---|
-| `Heartbeat` | — | Clock's 1 Hz esp_timer |
+| `Heartbeat` | `at` (when it fired) | Clock's 1 Hz esp_timer |
+| `WakeAt` | `at` | a module's Timer, for a deadline sooner than the next Tick |
+| `Wake` | `at` | Clock's one-shot esp_timer, at the soonest `WakeAt` |
 | `Tick` | `at` (boot time), `TimeReading` (local time, UTC offset, valid, simulated) | Clock, 1 Hz |
 | `ProgramTick` | `TimeReading`, transition | Clock, every 60 s (1 s in fast-day) |
 | `SetFastDay` | on, real seconds per simulated day | Console (`fastday`) |
@@ -842,7 +856,7 @@ Pairing a device (console `pair` or its address in `kAddresses`) is in DESIGN.md
 | `SetMinLevel` | `Selection`, level 1-254 | Console (`minlevel`), ProgramHost (`tune save`) |
 | `ModeRequested` | `Mode`, zone (none: every zone that can run it) | Console (`tune`, `tune off`) |
 | `TuneLights` / `TuneSave` | `Selection`, level, optional kelvin / — | Console (`tune`) |
-| `RolesLoaded` / `PersistRoles` | every `DeviceRecord` | SettingsStore / DeviceRegistry |
+| `RolesLoaded` / `PersistRoles` | every `DeviceRecord` (`Shared`) | SettingsStore / DeviceRegistry |
 | `NetworkUp` | rejoined, `at` | ZigbeeAdapter |
 | `DeviceAnnounced` | ext addr, short addr | ZigbeeAdapter |
 | `EndpointFound` | role, endpoint (0 = none) | ZigbeeAdapter |
@@ -856,7 +870,7 @@ Pairing a device (console `pair` or its address in `kAddresses`) is in DESIGN.md
 | `RoleAssigned` / `RoleCleared` | role (+ `DeviceRecord`) | DeviceRegistry |
 | `Discover` / `Bind` / `Ping` | role, short addr (+ ext addr, endpoint for `Bind`) | DeviceRegistry |
 | `ReachabilityChanged` | role, reachable | DeviceRegistry |
-| `DevicesUpdated` | per-role `DeviceStatus`, records, armed role | DeviceRegistry, 1 Hz |
+| `DevicesUpdated` | per-role `DeviceStatus` and records (both `Shared`), armed role | DeviceRegistry, 1 Hz |
 | `ModeChanged` | zone, `Mode` (`Daylight` / `Off` / `RedAlert` / `Tuning`) | ModeController |
 | `RefreshLights` | role, or every light | DeviceRegistry |
 | `LightTarget` | role, `LightState`, level and color transitions | the running program |
@@ -972,6 +986,7 @@ Each is commented where it is; undo them as GCC's modules mature.
 | `Event`'s copy/move/destructor (`events.cppm`), `Timer::~Timer` (`flow.cppm`), `Program::~Program` (`program.cppm`) | defined out of line, not implicit or inline | importers otherwise link to `std::variant` / `vector` internals nobody emitted |
 | `DaySpan`, `Mireds`, `Xy`, `HueSat` (`types.cppm`), `ZoneId` (`topology.cppm`) | `operator==` spelled out, not defaulted | GCC crashes compiling a file that imports them and compares them |
 | `InternetSync` (`internet_sync.cppm` / `.cpp`) | definitions in a module implementation unit; the thread behind a `Task` | `std::jthread` and the C++20 semaphores in a `.cppm` crash GCC writing the module interface |
+| `Clock` (`clock.cppm` / `.cpp`) | definitions in a module implementation unit | with them in the partition (its wake list), GCC crashes writing `sunsim.platform`'s interface |
 | `kEventNames` (`events.cppm`) | names parsed from `__PRETTY_FUNCTION__` | no reflection until C++26 |
 
 The FreeRTOS tasks (Zigbee, app, display) stay FreeRTOS tasks: as
@@ -984,8 +999,6 @@ crash.
   `SetLight` traffic ever bypass the rest?
 - NVS writes happen on the app task while it holds the Zigbee lock; fine at
   today's rates.
-- `DevicesUpdated` (~250 B) now sets every `Event`'s size; share it like
-  `StatusChanged` if events grow further.
 - A presence sensor is planned to replace the fixed active window: a
   `Presence` rule in the gate (a zone's `gate`, `installation.cppm`), before or
   after the `Window`, depending on which should take precedence.

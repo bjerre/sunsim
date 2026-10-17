@@ -35,8 +35,8 @@ struct Pulse {
 
 // The stage between the running program and LightOutput: passes each
 // LightTarget through as the OutputTarget, except on lights the weather has
-// taken over (weatherPulse), which it pulses itself, a fade per Tick or
-// slower. When the weather lets a light go, the program's latest target for
+// taken over (weatherPulse), which it pulses itself: a fade each beat of
+// the Ticks' time (fade_seconds), whenever the Ticks come. When the weather lets a light go, the program's latest target for
 // it goes out again, with a quick transition. Re-checked when the sky
 // changes (SkyChanged: at once) and every Tick (the mode, the program's
 // lights, the pulse's beat).
@@ -54,6 +54,7 @@ private:
     struct Light {
         std::optional<ev::LightTarget> base;  // the program's latest
         std::optional<Pulse>           pulse; // shown instead, while the weather has the light
+        std::optional<int64_t>         beat;  // the pulse's beat last shown
     };
 
     void reconcile();
@@ -67,7 +68,7 @@ private:
     ev::Peaks             peaks_      = ev::kDefaultPeaks;
     ev::MinLevels         min_levels_ = ev::kDefaultMinLevels;
     ev::PerRole<Light>    lights_{};
-    uint32_t              ticks_ = 0;
+    ev::Instant           now_{}; // the latest Tick's
 };
 
 } // namespace sunsim::core
@@ -172,9 +173,9 @@ void Overlays::on(const ev::LightTarget &e)
     }
 }
 
-void Overlays::on(const ev::Tick &)
+void Overlays::on(const ev::Tick &e)
 {
-    ++ticks_;
+    now_ = e.at;
     reconcile();
 }
 
@@ -198,12 +199,14 @@ void Overlays::reconcile()
             }
             continue;
         }
-        // Every pulse fades on the same beat, so lights with the same
+        // Every pulse beats by the same clock, so lights with the same
         // tempo breathe together.
-        const bool changed = pulse != light.pulse;
-        light.pulse        = pulse;
-        if (changed || ticks_ % pulse->fade_seconds == 0) {
-            show(role, *pulse, (ticks_ / pulse->fade_seconds) % 2 == 0);
+        const int64_t beat    = now_.time_since_epoch() / std::chrono::seconds{pulse->fade_seconds};
+        const bool    changed = pulse != light.pulse;
+        light.pulse           = pulse;
+        if (changed || beat != light.beat) {
+            light.beat = beat;
+            show(role, *pulse, beat % 2 == 0);
         }
     }
 }
@@ -228,6 +231,7 @@ void Overlays::release(ev::Role role)
 {
     Light &light = lights_[role];
     light.pulse.reset();
+    light.beat.reset();
     // Back to the program's latest (off, if it hasn't sent one), quickly.
     ev::LightChange back = light.base.value_or(ev::LightTarget{{.role = role}});
     back.level_transition = back.color_transition = kReleaseTransition;
