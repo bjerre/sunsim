@@ -10,7 +10,7 @@ export namespace sunsim::core {
 // For finding the lowest level each bulb visibly shows (bulbs differ, and
 // below it they go dark before sunset). Holds every bulb steady: at its
 // minimum level, in the sunset's amber, until the console (`tune`) sets a
-// level or colour. On `tune save`, ProgramHost takes the tuned levels and
+// level or color. On `tune save`, ProgramHost takes the tuned levels and
 // makes them the bulbs' minimums (SetMinLevel), which the daylight curve
 // then never goes below while on.
 class TuningProgram final : public Program {
@@ -67,7 +67,7 @@ void TuningProgram::on(const ev::TuneLights &e)
             tuned_[r] = std::clamp<uint8_t>(e.level, 1, ev::kMaxLevel);
         }
     });
-    refresh(std::nullopt, std::nullopt); // a colour change applies to every bulb
+    refresh(std::nullopt, std::nullopt); // a color change applies to every bulb
 }
 
 void TuningProgram::emit(ev::Role role) const

@@ -27,8 +27,8 @@ public:
     ezb_err_t setLevel(uint8_t level_0_254, ev::Transition transition = ev::Transition{1}) const;
     ezb_err_t setColorTemperature(uint16_t mireds, ev::Transition transition = ev::Transition{1}) const;
     ezb_err_t setHueSaturation(uint8_t hue, uint8_t saturation, ev::Transition transition = ev::Transition{1}) const;
-    // CIE 1931 xy chromaticity (each 0..1), for colours outside the bulb's
-    // colour-temperature range (e.g. amber below ~2700K).
+    // CIE 1931 xy chromaticity (each 0..1), for colors outside the bulb's
+    // color-temperature range (e.g. amber below ~2700K).
     ezb_err_t setColorXY(double x, double y, ev::Transition transition = ev::Transition{1}) const;
 
     [[nodiscard]] constexpr uint16_t shortAddress() const noexcept { return short_addr_; }

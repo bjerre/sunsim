@@ -1,6 +1,6 @@
 // Logging for the pure layers (sunsim::ev, sunsim::core), which also build
 // on the host: std::format strings, checked at compile time, written through
-// ESP-IDF's log on the target (its levels, timestamps, colours and
+// ESP-IDF's log on the target (its levels, timestamps, colors and
 // esp_log_level_set) and to stdout on the host. A function, not a macro, so
 // it travels through `import sunsim.ev`.
 //

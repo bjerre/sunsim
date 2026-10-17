@@ -5,7 +5,7 @@ import sunsim.ev;
 
 export namespace sunsim::core {
 
-// A saturated colour: hue in degrees, saturation 0-254 (Zigbee's).
+// A saturated color: hue in degrees, saturation 0-254 (Zigbee's).
 struct Shade {
     uint16_t hue_deg    = 0;
     uint8_t  saturation = 254;
@@ -13,7 +13,7 @@ struct Shade {
     friend constexpr bool operator==(Shade, Shade) noexcept = default;
 };
 
-// A light breathing between bright and dim in one colour, like red alert.
+// A light breathing between bright and dim in one color, like red alert.
 struct Pulse {
     Shade   shade;
     uint8_t fade_seconds = 1;   // each fade, bright to dim or back: a cycle is twice this

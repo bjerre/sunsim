@@ -154,7 +154,7 @@ int cmdPair(Console &console, int argc, char **argv)
         return 1;
     }
     if (std::string_view{argv[1]} == "cancel") {
-        console.post(ev::PairCancelled{});
+        console.post(ev::PairCanceled{});
         return 0;
     }
     const auto role = parseRoleArg(argv[1]);

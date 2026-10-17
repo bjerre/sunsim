@@ -100,7 +100,7 @@ struct Harness {
     }
 };
 
-// A light's or a command's colour, if it's a C.
+// A light's or a command's color, if it's a C.
 template <class C> const C *colorOf(const LightState &s)
 {
     return std::get_if<C>(&s.color);

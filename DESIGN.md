@@ -222,7 +222,7 @@ flowchart TB
 ```
 
 The work light skips the sun: its level is `gate * max_level` and its
-colour follows the work hours (below).
+color follows the work hours (below).
 
 ### Wall bulbs (`DaylightSchedule::wallState`)
 
@@ -281,7 +281,7 @@ rises SE (~123°) and sets SW (~238°) and the middle leads for longer.
 
 ### Amber sunrise/sunset
 
-Below `golden_elevation_deg` (6°) of sun elevation, the wall colour slides
+Below `golden_elevation_deg` (6°) of sun elevation, the wall color slides
 along the blackbody (Planckian) locus from the curve's value down to
 `amber_kelvin` (1800K) at the horizon:
 
@@ -293,15 +293,15 @@ mireds = curve_mireds + g · (1e6/1800 - curve_mireds)
 
 The glow follows the sun along the wall: each bulb sees the sun as if it
 were up to `amber_sweep_deg` higher the further away it is, so the end
-nearest the sun turns amber first and deepest and the colour sweeps across
+nearest the sun turns amber first and deepest and the color sweeps across
 the wall. At sunset in June at the equator (sun ~293°) the five bulbs land
 at about 2400K (east end) through 1980K (west end); at sunrise it runs the
 other way. `amber_sweep_deg = 0` turns the whole wall amber together.
 
-Most bulbs' colour-temperature mode stops around 2700K, so in this band the
-colour is sent as CIE 1931 xy (`BulbEndpoint::setColorXY`, Kim et al.
+Most bulbs' color-temperature mode stops around 2700K, so in this band the
+color is sent as CIE 1931 xy (`BulbEndpoint::setColorXY`, Kim et al.
 Planckian-locus approximation) instead; the rest of the day stays in
-colour-temperature mode, which renders whites with the dedicated white
+color-temperature mode, which renders whites with the dedicated white
 LEDs. On a winter weekday this is visible from ~15:40 to sunset (~16:22).
 
 ### Work bulb (`DaylightSchedule::workState`)
@@ -345,7 +345,7 @@ from everywhere at once:
 sky        = 1 - (clouddim / 100) · c              default clouddim 40
 direction  = 1 - k · away · (1 - c)                no sun direction under overcast
 mireds    += (cool_mireds - mireds) · (cloudcool / 100) · c    default cloudcool 50
-golden    *= 1 - c                                 no golden glow under a grey sky
+golden    *= 1 - c                                 no golden glow under a gray sky
 ```
 
 The work light is task lighting and ignores the sky. In fast-day mode the
@@ -364,7 +364,7 @@ top    = 254 · peak / 100 · strength       (at least the light's minimum)
 bottom = top · 0.2                         (likewise)
 ```
 
-| What | Colour (hue°, sat/254) | Fade | strength |
+| What | Color (hue°, sat/254) | Fade | strength |
 |---|---|---|---|
 | NWS warning | red (0, 254) | 1 s | 1 |
 | NWS watch | orange (28, 254) | 2 s | 1 |
@@ -400,7 +400,7 @@ level the bulb visibly shows instead of fading below it: bulbs stay lit
 until the curve really ends (sunset, or the active window's end), then
 turn off. Find the minimums with tuning mode (`TuningProgram`: every bulb
 steady at its minimum in the sunset's amber; `tune <light> <level>`, then
-`tune save`). Colour is untouched; red alert is not scaled.
+`tune save`). Color is untouched; red alert is not scaled.
 
 ### Active window (`DaylightSchedule::activeGate`)
 
@@ -476,7 +476,7 @@ compute.
 ## 6. Smooth transitions
 
 Every periodic update (`ProgramTick` -> `DaylightProgram`, driven by the
-clock) sends level/colour commands with a transition equal to the update
+clock) sends level/color commands with a transition equal to the update
 interval (60 s normally, 1 s in debug fast-day mode), so bulbs fade
 continuously rather than stepping. Changes that should feel immediate —
 resuming after an override, a bulb finishing discovery or answering

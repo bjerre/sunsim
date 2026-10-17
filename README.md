@@ -147,7 +147,7 @@ Find each bulb's minimum in tuning mode, near sunset or in a dark room:
 sunsim> tune                  # every bulb steady at its minimum, in sunset amber (1800K)
 sunsim> tune wall 6           # try 6 on the whole wall
 sunsim> tune WallC 9          # WallC needs more
-sunsim> tune WallA 8 2200     # a level and a colour (1700-6500K; below 2700K is sent as xy)
+sunsim> tune WallA 8 2200     # a level and a color (1700-6500K; below 2700K is sent as xy)
 sunsim> tune save             # the levels set since `tune` become the minimums
 sunsim> tune off              # back to daylight (or press the button once)
 sunsim> minlevel              # list; `minlevel WallB 7` sets one directly
@@ -162,7 +162,7 @@ The board's LCD (Waveshare ESP32-C6-GEEK, 1.14" ST7789) shows:
 - today's day length, and the countdown to the next sunrise or sunset
 - one dot per device, grouped `D ●●●●●  W ●  B ●`: D = the daylight wall
   (WallA-WallE, east to west), W = the work light, B = the button;
-  green = responding, amber = paired but silent, grey = not paired
+  green = responding, amber = paired but silent, gray = not paired
 
 The `status` console command prints the same information. Pins and
 orientation are under menuconfig, "Sunsim Configuration" -> "Status

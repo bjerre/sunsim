@@ -9,8 +9,8 @@ export namespace sunsim::core {
 using ev::LightState;
 
 // CIE 1931 xy of a blackbody at `kelvin` (Kim et al. cubic spline
-// approximation of the Planckian locus, valid 1667-25000K): for colours
-// below most bulbs' ~2700K colour-temperature floor.
+// approximation of the Planckian locus, valid 1667-25000K): for colors
+// below most bulbs' ~2700K color-temperature floor.
 [[nodiscard]] ev::Xy planckianXy(double kelvin) noexcept;
 
 // Astronomical daylight model for the wall bulbs: warm and dim at the real
@@ -161,7 +161,7 @@ LightState DaylightSchedule::wallState(const ev::TimeReading &time, double wall_
         // 0 at golden_elevation_deg, 1 at (or below) the horizon.
         const double golden =
             std::fmin(1.0, (config_.golden_elevation_deg - amber_elevation) / config_.golden_elevation_deg) *
-            (1.0 - overcast); // no glow under a grey sky
+            (1.0 - overcast); // no glow under a gray sky
         const double amber_mireds = 1e6 / config_.amber_kelvin;
         const double m            = mireds + golden * (amber_mireds - mireds);
         state.color               = planckianXy(1e6 / m);

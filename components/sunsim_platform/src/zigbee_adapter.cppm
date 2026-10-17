@@ -512,7 +512,7 @@ void ZigbeeAdapter::on(const ev::SetLight &e)
 {
     const BulbEndpoint bulb{e.short_addr, e.endpoint, kLightCtrlEp};
 
-    // A saturated colour goes before the level, whites after it.
+    // A saturated color goes before the level, whites after it.
     const auto *hue_sat = e.color ? std::get_if<ev::HueSat>(&*e.color) : nullptr;
     if (e.power && *e.power) {
         countSend(bulb.turnOn());

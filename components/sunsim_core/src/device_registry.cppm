@@ -65,7 +65,7 @@ public:
     void on(const ev::AckReceived &e);
     void on(const ev::ButtonPressed &e);
     void on(const ev::PairRequested &e);
-    void on(const ev::PairCancelled &e);
+    void on(const ev::PairCanceled &e);
     void on(const ev::UnpairRequested &e);
     void on(const ev::Tick &e);
 
@@ -415,10 +415,10 @@ void DeviceRegistry::on(const ev::PairRequested &e)
                   name(e.role), name(e.role));
 }
 
-void DeviceRegistry::on(const ev::PairCancelled &)
+void DeviceRegistry::on(const ev::PairCanceled &)
 {
     armed_.reset();
-    ev::log::info(kTag, "Pairing cancelled");
+    ev::log::info(kTag, "Pairing canceled");
 }
 
 void DeviceRegistry::on(const ev::UnpairRequested &e)

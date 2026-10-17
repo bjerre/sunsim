@@ -135,13 +135,13 @@ void daylightTests()
         clear.tick();
         const auto sunny = wall(clear);
 
-        Harness grey;
-        grey.tick();
+        Harness gray;
+        gray.tick();
         CloudCover overcast;
         overcast.day = kTuesday;
         overcast.percent.fill(100);
-        grey.post(CloudCoverUpdated{overcast});
-        const auto cloudy = wall(grey);
+        gray.post(CloudCoverUpdated{overcast});
+        const auto cloudy = wall(gray);
 
         CHECK(sunny.size() == 5 && cloudy.size() == 5);
         if (sunny.size() == 5 && cloudy.size() == 5) {
@@ -154,8 +154,8 @@ void daylightTests()
 
         ProgramConfig off;
         off.clouds_enabled = false;
-        grey.post(ConfigChanged{.config = off});
-        const auto ignored = wall(grey);
+        gray.post(ConfigChanged{.config = off});
+        const auto ignored = wall(gray);
         CHECK(ignored.size() == 5 && ignored.back().level == sunny.back().level);
     });
 

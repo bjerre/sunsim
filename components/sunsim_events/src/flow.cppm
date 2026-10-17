@@ -1,4 +1,4 @@
-// Coroutines for behaviour that happens in steps over time ("send this,
+// Coroutines for behavior that happens in steps over time ("send this,
 // wait for the reply or 15 s, try again"), written top to bottom instead of
 // spread over handlers, flags and counters. Everything runs on the app
 // task, so nothing here locks.

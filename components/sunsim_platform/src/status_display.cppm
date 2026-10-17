@@ -115,7 +115,7 @@ lv_color_t linkColor(ev::DeviceLink link)
     case ev::DeviceLink::Unpaired:
         break;
     }
-    return lv_color_hex(0x3a3a3a); // dim grey
+    return lv_color_hex(0x3a3a3a); // dim gray
 }
 
 lv_obj_t *makeLabel(lv_obj_t *parent, const lv_font_t *font, lv_align_t align, int x, int y)
@@ -200,8 +200,8 @@ void render(Ui &ui, const ev::StatusSnapshot &st)
         break;
     }
 
-    // The sky: the worst alert in its colour, else what's falling, else cloud.
-    constexpr uint32_t kSkyColor = 0x9ab8d8; // grey-blue
+    // The sky: the worst alert in its color, else what's falling, else cloud.
+    constexpr uint32_t kSkyColor = 0x9ab8d8; // gray-blue
     uint32_t           sky_color = kSkyColor;
     if (const ev::AlertLevel level = st.sky.alert(); level != ev::AlertLevel::None) {
         sky_color = level == ev::AlertLevel::Warning ? 0xff3030 : level == ev::AlertLevel::Watch ? 0xff9a30 : 0xffe040;

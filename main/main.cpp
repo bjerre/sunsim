@@ -94,7 +94,7 @@ void App::appTask(void *arg)
     auto &app = *static_cast<App *>(arg);
 
     // Handlers may call into the Zigbee stack, which needs its lock - and
-    // the lock only exists once the stack is initialised.
+    // the lock only exists once the stack is initialized.
     app.zigbee_.waitUntilReady();
     ev::log::info(kTag, "Processing events");
 

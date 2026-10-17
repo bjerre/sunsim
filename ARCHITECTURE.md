@@ -209,7 +209,7 @@ classDiagram
     class Flow {
         <<coroutine>>
         starts at once
-        cancelled when reassigned or destroyed
+        canceled when reassigned or destroyed
     }
     class Timer {
         +now() Instant
@@ -552,7 +552,7 @@ flowchart LR
     ZA -->|ButtonPressed| MC & DR
     ZA -->|NetworkUp| DR & PH
     CO[Console] -->|"ButtonPressed (press)"| MC
-    CO -->|"PairRequested, PairCancelled,<br/>UnpairRequested"| DR
+    CO -->|"PairRequested, PairCanceled,<br/>UnpairRequested"| DR
     CO -->|OpenNetwork| ZA
     CO -->|FactoryReset| ST & ZA
     CO -->|SetConfig, SetIntensity| ST
@@ -577,7 +577,7 @@ flowchart LR
 | Module | Listens to | Posts |
 |---|---|---|
 | **ZigbeeAdapter** | `SetLight`, `Discover`, `Bind`, `Ping`, `OpenNetwork`, `FactoryReset`, `RoleAssigned`, `RoleCleared` | `NetworkUp`, `DeviceAnnounced`, `EndpointFound`, `BindResult`, `PingResult`, `AckReceived`, `ButtonPressed` |
-| **DeviceRegistry** | `RolesLoaded`, `NetworkUp`, `DeviceAnnounced`, `EndpointFound`, `BindResult`, `PingResult`, `AckReceived`, `ButtonPressed`, `PairRequested`, `PairCancelled`, `UnpairRequested`, `Tick` | `RoleAssigned`, `RoleCleared`, `Discover`, `Bind`, `Ping`, `OpenNetwork`, `PersistRoles`, `RefreshLights`, `ReachabilityChanged`, `DevicesUpdated` |
+| **DeviceRegistry** | `RolesLoaded`, `NetworkUp`, `DeviceAnnounced`, `EndpointFound`, `BindResult`, `PingResult`, `AckReceived`, `ButtonPressed`, `PairRequested`, `PairCanceled`, `UnpairRequested`, `Tick` | `RoleAssigned`, `RoleCleared`, `Discover`, `Bind`, `Ping`, `OpenNetwork`, `PersistRoles`, `RefreshLights`, `ReachabilityChanged`, `DevicesUpdated` |
 | **ModeController** | `ButtonPressed`, `ModeRequested`, `Tick` | `ModeChanged` |
 | **SkyModel** | `CloudCoverUpdated`, `ConditionsUpdated`, `AlertsUpdated`, `Tick` | `SkyChanged` |
 | **ProgramHost** (runs one `Program`) | `ModeChanged`, `ConfigChanged`, `SkyChanged`, `Tick`, `ProgramTick`, `RefreshLights`, `NetworkUp`, `TuneLights`, `TuneSave` | `LightTarget`, `SetMinLevel` (on `TuneSave`) |
@@ -605,9 +605,9 @@ reaches a program only if it has `on()` for it.
 | `refresh(role, now)` | `RefreshLights`, `NetworkUp`, `ConfigChanged` | sun curve now, 2 s | off | red at the current level | the tuned / minimum level |
 | `on(Tick)` | while running | — | — | flip bright/dim, 0.9 s fade | — |
 | `on(ProgramTick)` | while running | sun curve, ramped over the interval | — | — | — |
-| `on(ConfigChanged)` | always | schedule, peaks, minimums | — | — | minimums, amber colour |
+| `on(ConfigChanged)` | always | schedule, peaks, minimums | — | — | minimums, amber color |
 | `on(SkyChanged)` | always | the cloud cover now | — | — | — |
-| `on(TuneLights)` | always | — | — | — | the tuned levels and colour |
+| `on(TuneLights)` | always | — | — | — | the tuned levels and color |
 
 On `TuneSave`, `ProgramHost` takes the tuning program's levels and posts
 them as `SetMinLevel`, so programs still post only `LightTarget`s.
@@ -655,7 +655,7 @@ selects it (`ModeController`, the console). Nothing else changes.
 
 ### Flows
 
-Behaviour that happens in steps over time is a coroutine (`ev::Flow`)
+Behavior that happens in steps over time is a coroutine (`ev::Flow`)
 rather than handlers, flags and Tick counters. `DeviceRegistry`'s endpoint
 discovery, per role:
 
@@ -816,7 +816,7 @@ Pairing a device (console `pair` or the role manifest) is in DESIGN.md §2.
 | `BindResult` / `PingResult` | role, ok (+ error, status) | ZigbeeAdapter |
 | `AckReceived` | short addr, RSSI, ZCL status | ZigbeeAdapter |
 | `ButtonPressed` | `Single` / `Double` / `Hold` / `Ambiguous`, source, `at` | ZigbeeAdapter, Console (`press`) |
-| `PairRequested` / `PairCancelled` | role / — | Console |
+| `PairRequested` / `PairCanceled` | role / — | Console |
 | `UnpairRequested` | `Selection` | Console |
 | `OpenNetwork` | duration (s, default 180) | Console, DeviceRegistry |
 | `FactoryReset` | — | Console |
@@ -826,7 +826,7 @@ Pairing a device (console `pair` or the role manifest) is in DESIGN.md §2.
 | `DevicesUpdated` | per-role `DeviceStatus`, records, armed role | DeviceRegistry, 1 Hz |
 | `ModeChanged` | `Mode` (`Daylight` / `Off` / `RedAlert`) | ModeController |
 | `RefreshLights` | role, or every light | DeviceRegistry |
-| `LightTarget` | role, `LightState`, level and colour transitions | the running program |
+| `LightTarget` | role, `LightState`, level and color transitions | the running program |
 | `OutputTarget` | the same: what the bulb does show | Overlays |
 | `SetLight` | short addr, endpoint, optional power / level / `Color`, transitions | LightOutput |
 | `StatusChanged` | `shared_ptr<const StatusSnapshot>` | StatusModel, 1 Hz |
@@ -920,12 +920,12 @@ bus delivering 40k events from two threads in each poster's order.
 - Since then: every mode became a `Program` (red alert used to be split
   across the mode controller and the output); missing bulbs are tolerated
   (an unreachable bulb used to tie up the stack's buffers with retries);
-  multi-step behaviour moved into coroutine flows; the components became
+  multi-step behavior moved into coroutine flows; the components became
   C++ modules; the bus wrapped eventpp until clangd couldn't build it next
   to `import std`, and is now its own (under 100 lines); roles became groups
   (`kLayout`) for the five-light wall. Then: modules attach themselves to
   the bus by their `on()` overloads; `SkyModel` judges the weather for
-  everyone; the settings became one table; time became `<chrono>`, colours
+  everyone; the settings became one table; time became `<chrono>`, colors
   a `std::variant`.
 - Considered and rejected: ESP-IDF's `esp_event` (C-only, memcpy'd POD
   payloads, no host build).

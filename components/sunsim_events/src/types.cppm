@@ -1,4 +1,4 @@
-// Value types shared by every layer. Plain data only: no behaviour beyond
+// Value types shared by every layer. Plain data only: no behavior beyond
 // trivial helpers, no ESP-IDF includes.
 
 module;
@@ -50,7 +50,7 @@ struct DaySpan {
         return start >= std::chrono::minutes{0} && end <= std::chrono::days{1} && start < end;
     }
 
-    // Spelled out, like the colours': GCC 15 crashes compiling a file that
+    // Spelled out, like the colors': GCC 15 crashes compiling a file that
     // imports this and compares DaySpans with a defaulted ==.
     friend constexpr bool operator==(DaySpan a, DaySpan b) noexcept { return a.start == b.start && a.end == b.end; }
 };
@@ -292,9 +292,9 @@ using DeviceRecords = PerRole<DeviceRecord>;
 
 // ---- Light state ----------------------------------------------------------
 
-// A light's colour, in whichever of the bulbs' three colour modes shows it.
+// A light's color, in whichever of the bulbs' three color modes shows it.
 
-// A white on the blackbody line, by colour temperature: mireds = 1e6 / kelvin.
+// A white on the blackbody line, by color temperature: mireds = 1e6 / kelvin.
 struct Mireds {
     uint16_t value = 0;
 
@@ -302,7 +302,7 @@ struct Mireds {
     // compiling a file that imports this and compares them.
     friend constexpr bool operator==(Mireds a, Mireds b) noexcept { return a.value == b.value; }
 };
-// A CIE 1931 chromaticity: warmer than colour-temperature mode can show
+// A CIE 1931 chromaticity: warmer than color-temperature mode can show
 // (amber, below most bulbs' ~2700 K).
 struct Xy {
     float x = 0.0f;
@@ -310,7 +310,7 @@ struct Xy {
 
     friend constexpr bool operator==(Xy a, Xy b) noexcept { return a.x == b.x && a.y == b.y; }
 };
-// A saturated colour: Zigbee's hue (0-254 for 0-360 deg) and saturation (0-254).
+// A saturated color: Zigbee's hue (0-254 for 0-360 deg) and saturation (0-254).
 struct HueSat {
     uint8_t hue        = 0;
     uint8_t saturation = 0;
@@ -326,7 +326,7 @@ inline constexpr uint8_t kMaxLevel = 254; // Zigbee's brightest
 
 struct LightState {
     bool    on    = false;
-    uint8_t level = 0; // 0-254; this and the colour are meaningful only if `on`
+    uint8_t level = 0; // 0-254; this and the color are meaningful only if `on`
     Color   color = Mireds{};
 };
 
@@ -385,8 +385,8 @@ struct ProgramConfig {
     uint8_t sun_shift_percent = 25;
 
     // Amber sunrise/sunset: below golden_elevation_deg of sun elevation the
-    // wall colour slides along the blackbody line down to amber_kelvin at the
-    // horizon (beyond most bulbs' ~2700K colour-temperature floor, so xy).
+    // wall color slides along the blackbody line down to amber_kelvin at the
+    // horizon (beyond most bulbs' ~2700K color-temperature floor, so xy).
     // The glow follows the sun along the wall: the bulb nearest it turns
     // amber first, and the far end lags as if the sun were up to
     // amber_sweep_deg higher (sunset: the west end deepest; 0 = all alike).
@@ -414,13 +414,13 @@ struct ProgramConfig {
 
     // Cloud cover over the wall (the hourly forecast, CloudCover): under
     // full overcast the wall is up to cloud_dim_percent dimmer and its
-    // colour up to cloud_cool_percent of the way to cool_mireds, and the
+    // color up to cloud_cool_percent of the way to cool_mireds, and the
     // sun-direction dimming and amber glow fade out (diffuse light).
     bool    clouds_enabled     = true;
     uint8_t cloud_dim_percent  = 40;
     uint8_t cloud_cool_percent = 50;
 
-    // Weather lights (core::Overlays): precip_lights pulse a colour while
+    // Weather lights (core::Overlays): precip_lights pulse a color while
     // rain or snow falls, alert_lights yellow/orange/red for an NWS
     // advisory/watch/warning (an alert wins where they overlap). Off: every
     // light shows its program alone.

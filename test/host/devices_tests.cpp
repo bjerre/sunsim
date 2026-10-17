@@ -147,7 +147,7 @@ void devicesTests()
             to_wall |= l.short_addr == 0x0001;
         }
         CHECK(!to_work); // paused
-        CHECK(to_wall);  // others unaffected (level/colour moved since last time)
+        CHECK(to_wall);  // others unaffected (level/color moved since last time)
 
         h.clearLog();
         h.tick(15);

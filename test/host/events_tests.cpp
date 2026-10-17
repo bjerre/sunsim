@@ -90,7 +90,7 @@ void eventsTests()
 
         const auto error = set(*findSetting("sunshift"), c, "lots");
         CHECK(!error && error.error() == "sunshift takes 0-100");
-        CHECK(!findSetting("colour"));
+        CHECK(!findSetting("color"));
 
         // The keys the device already has values under.
         const auto keys = settingKeys();

@@ -113,7 +113,7 @@ struct ButtonPressed {
 struct PairRequested {
     Role role{};
 };
-struct PairCancelled {};
+struct PairCanceled {};
 struct UnpairRequested {
     Selection roles;
 };
@@ -130,7 +130,7 @@ struct ModeRequested {           // console: `tune`, `tune off`
 struct TuneLights {              // console `tune <lights> <level> [kelvin]`: the tuning program's levels
     Selection               lights;
     uint8_t                 level = 1;
-    std::optional<uint16_t> kelvin{}; // none: keep the colour
+    std::optional<uint16_t> kelvin{}; // none: keep the color
 };
 struct TuneSave {};              // console `tune save`: the tuned levels become the minimums
 
@@ -207,7 +207,7 @@ using Payload = std::variant<Heartbeat, Tick, ProgramTick, SetFastDay,          
                              RolesLoaded, PersistRoles,                                               //
                              NetworkUp, DeviceAnnounced, EndpointFound, BindResult, PingResult,       //
                              AckReceived, ButtonPressed,                                              //
-                             PairRequested, PairCancelled, UnpairRequested, OpenNetwork, FactoryReset, //
+                             PairRequested, PairCanceled, UnpairRequested, OpenNetwork, FactoryReset, //
                              SyncRequested, ModeRequested, TuneLights, TuneSave,                      //
                              RoleAssigned, RoleCleared, Discover, Bind, Ping, ReachabilityChanged,    //
                              DevicesUpdated,                                                          //
