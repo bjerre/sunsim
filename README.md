@@ -337,9 +337,11 @@ by a single app task. See [ARCHITECTURE.md](ARCHITECTURE.md).
 Each component is one C++ module (`import sunsim.ev;` and so on, plus
 `import std.compat;`): each `.cppm` is a partition holding one class (or
 one piece of math), declaration and definitions together, and a
-component's main `.cppm` re-exports the partitions. The only headers left
-are `sunsim/ev/log.h` (macros don't travel through an import) and the
-generated `role_manifest.h`.
+component's main `.cppm` re-exports the partitions (one exception:
+`InternetSync`'s definitions are in `internet_sync.cpp`, see ARCHITECTURE.md
+§12). The only headers left are the generated `role_manifest.h` and the
+tests' `check.h`; logging is `ev::log::info(tag, "{}", ...)`, std::format
+strings checked at compile time.
 
 - `components/sunsim_events/` (`sunsim::ev`, module `sunsim.ev`) - the
   shared vocabulary: value types (`types.cppm`), every event

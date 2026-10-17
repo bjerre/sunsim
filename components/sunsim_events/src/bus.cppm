@@ -3,14 +3,11 @@
 // calls every listener for each queued event in order. Listeners may post
 // more events; those are handled on a following process() pass.
 
-module;
-
-#include "sunsim/ev/log.h"
-
 export module sunsim.ev:bus;
 
 import std.compat;
 import :events;
+import :log;
 
 export namespace sunsim::ev {
 
@@ -58,7 +55,7 @@ public:
     // Any task.
     void enqueue(Event e)
     {
-        SUNSIM_LOGD("EV", "%.*s", static_cast<int>(e.name().size()), e.name().data()); // full event trace at DEBUG
+        log::debug("EV", "{}", e.name()); // the full event trace, at DEBUG
         {
             const std::scoped_lock lock{mutex_};
             pending_.push_back(std::move(e));

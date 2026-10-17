@@ -1,7 +1,3 @@
-module;
-
-#include "sunsim/ev/log.h"
-
 export module sunsim.core:mode_controller;
 
 import std.compat;
@@ -88,16 +84,16 @@ void ModeController::enter(ev::Mode mode)
 {
     switch (mode) {
     case ev::Mode::Daylight:
-        SUNSIM_LOGI(kTag, "Resuming daylight program");
+        ev::log::info(kTag, "Resuming daylight program");
         break;
     case ev::Mode::Off:
-        SUNSIM_LOGI(kTag, "Manual off (press again to resume)");
+        ev::log::info(kTag, "Manual off (press again to resume)");
         break;
     case ev::Mode::RedAlert:
-        SUNSIM_LOGW(kTag, "RED ALERT");
+        ev::log::warn(kTag, "RED ALERT");
         break;
     case ev::Mode::Tuning:
-        SUNSIM_LOGI(kTag, "Tuning: every bulb steady at its minimum level (`tune`; press to resume)");
+        ev::log::info(kTag, "Tuning: every bulb steady at its minimum level (`tune`; press to resume)");
         break;
     }
     post_(ev::ModeChanged{mode});

@@ -1,6 +1,6 @@
 # sunsim::ev - the event vocabulary shared by every layer: value types,
-# event payloads, coroutine flows, and the EventBus. No ESP-IDF dependencies
-# beyond logging and the boot clock, so it also builds on the host (see
+# event payloads, coroutine flows, the EventBus, the settings table and
+# logging. No ESP-IDF dependencies beyond logging and the boot clock, so it also builds on the host (see
 # test/host).
 #
 # The C++ module sunsim.ev: one .cppm per partition (ev.cppm the module's
@@ -10,11 +10,11 @@ set(modules "src/ev.cppm"
             "src/bus.cppm"
             "src/events.cppm"
             "src/flow.cppm"
+            "src/log.cppm"
             "src/settings.cppm"
             "src/types.cppm")
 
 idf_component_register(SRCS ${modules}
-                       INCLUDE_DIRS "include" # sunsim/ev/log.h
                        REQUIRES log
                        PRIV_REQUIRES esp_timer)
 

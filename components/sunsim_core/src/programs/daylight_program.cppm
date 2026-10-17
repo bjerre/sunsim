@@ -1,7 +1,3 @@
-module;
-
-#include "sunsim/ev/log.h"
-
 export module sunsim.core:daylight_program;
 
 import std.compat;
@@ -102,7 +98,7 @@ void DaylightProgram::emit(ev::Role role, const ev::TimeReading &time, ev::Trans
                             : schedule_.wallState(time, wallPosition(role), cloud_percent_ / 100.0);
     } else if (!clock_warned_) {
         clock_warned_ = true;
-        SUNSIM_LOGW(kTag, "Clock not set yet (no time sync) - holding lights off");
+        ev::log::warn(kTag, "Clock not set yet (no time sync) - holding lights off");
     }
     if (state.on) {
         state.level = outputLevel(role, state.level);

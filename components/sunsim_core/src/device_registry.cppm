@@ -1,7 +1,3 @@
-module;
-
-#include "sunsim/ev/log.h"
-
 export module sunsim.core:device_registry;
 
 import std.compat;
@@ -137,9 +133,9 @@ constexpr auto kUnreachablePing  = 15s;  // until they answer again
 constexpr auto kUnreachableAfter = 60s;  // of silence, plus a failed ping
 constexpr auto kOnlineWindow     = 150s; // shown as online: a couple of missed pings
 
-const char *name(ev::Role role) noexcept
+std::string_view name(ev::Role role) noexcept
 {
-    return ev::roleName(role).data();
+    return ev::roleName(role);
 }
 
 // A filter for events about `role`.
@@ -191,12 +187,12 @@ void DeviceRegistry::setReachable(ev::Role role, bool reachable)
     l.reachable = reachable;
     post_(ev::ReachabilityChanged{role, reachable});
     if (reachable) {
-        SUNSIM_LOGI(kTag, "%s is answering again - resuming its light", name(role));
+        ev::log::info(kTag, "{} is answering again - resuming its light", name(role));
         if (ev::isBulb(role)) {
             post_(ev::RefreshLights{role});
         }
     } else {
-        SUNSIM_LOGW(kTag, "%s not answering - pausing its light commands (powered off or out of range?)",
+        ev::log::warn(kTag, "{} not answering - pausing its light commands (powered off or out of range?)",
                     name(role));
     }
 }
@@ -267,7 +263,7 @@ void DeviceRegistry::on(const ev::DeviceAnnounced &e)
             d.short_addr = e.short_addr;
             persist();
         }
-        SUNSIM_LOGI(kTag, "Known device rejoined: %s short=0x%04x", name(*existing), e.short_addr);
+        ev::log::info(kTag, "Known device rejoined: {} short=0x{:04x}", name(*existing), e.short_addr);
         heard(*existing);
         post_(ev::RoleAssigned{*existing, d});
         if (!ev::isBulb(*existing) || d.endpoint == 0) {
@@ -281,7 +277,7 @@ void DeviceRegistry::on(const ev::DeviceAnnounced &e)
     if (armed_) {
         const ev::Role role = *armed_;
         armed_.reset();
-        SUNSIM_LOGI(kTag, "Paired ext=0x%016llx short=0x%04x -> %s", static_cast<unsigned long long>(e.ext_addr),
+        ev::log::info(kTag, "Paired ext=0x{:016x} short=0x{:04x} -> {}", e.ext_addr,
                     e.short_addr, name(role));
         assign(role, e.ext_addr, e.short_addr);
         return;
@@ -289,18 +285,18 @@ void DeviceRegistry::on(const ev::DeviceAnnounced &e)
 
     const auto role = roleFromManifest(e.ext_addr);
     if (!role) {
-        SUNSIM_LOGW(kTag,
-                    "Ignoring unknown device 0x%04x (ext=0x%016llx): not in role manifest (use `pair <role>` to "
+        ev::log::warn(kTag,
+                    "Ignoring unknown device 0x{:04x} (ext=0x{:016x}): not in role manifest (use `pair <role>` to "
                     "claim it)",
-                    e.short_addr, static_cast<unsigned long long>(e.ext_addr));
+                    e.short_addr, e.ext_addr);
         return;
     }
     if (record(*role).valid) {
-        SUNSIM_LOGW(kTag, "Ignoring device 0x%04x: %s already assigned to a different device", e.short_addr,
+        ev::log::warn(kTag, "Ignoring device 0x{:04x}: {} already assigned to a different device", e.short_addr,
                     name(*role));
         return;
     }
-    SUNSIM_LOGI(kTag, "New device joined -> %s (from role manifest)", name(*role));
+    ev::log::info(kTag, "New device joined -> {} (from role manifest)", name(*role));
     assign(*role, e.ext_addr, e.short_addr);
 }
 
@@ -323,7 +319,7 @@ ev::Flow DeviceRegistry::findEndpoint(ev::Role role)
                 co_return endpointFound(role, found->endpoint);
             }
         }
-        SUNSIM_LOGI(kTag, "Retrying endpoint discovery for %s (short=0x%04x)", name(role), record(role).short_addr);
+        ev::log::info(kTag, "Retrying endpoint discovery for {} (short=0x{:04x})", name(role), record(role).short_addr);
     }
 }
 
@@ -334,10 +330,10 @@ void DeviceRegistry::endpointFound(ev::Role role, uint8_t endpoint)
     persist();
     post_(ev::RoleAssigned{role, d});
     if (!ev::isBulb(role)) {
-        SUNSIM_LOGI(kTag, "%s endpoint = %d, binding to local receiver", name(role), d.endpoint);
+        ev::log::info(kTag, "{} endpoint = {}, binding to local receiver", name(role), d.endpoint);
         post_(ev::Bind{role, d.ext_addr, d.short_addr, d.endpoint});
     } else {
-        SUNSIM_LOGI(kTag, "%s (bulb) endpoint = %d", name(role), d.endpoint);
+        ev::log::info(kTag, "{} (bulb) endpoint = {}", name(role), d.endpoint);
         post_(ev::RefreshLights{role});
     }
 }
@@ -345,9 +341,9 @@ void DeviceRegistry::endpointFound(ev::Role role, uint8_t endpoint)
 void DeviceRegistry::on(const ev::BindResult &e)
 {
     if (e.ok) {
-        SUNSIM_LOGI(kTag, "Bound %s to local receiver endpoint", name(e.role));
+        ev::log::info(kTag, "Bound {} to local receiver endpoint", name(e.role));
     } else {
-        SUNSIM_LOGE(kTag, "Failed to bind %s", name(e.role));
+        ev::log::error(kTag, "Failed to bind {}", name(e.role));
     }
 }
 
@@ -375,7 +371,7 @@ ev::Flow DeviceRegistry::keepAlive(ev::Role bulb)
             // must also have been silent - no acks - for a while.
             const Liveness &l = liveness(bulb);
             if (!l.last_heard || timer_.now() - *l.last_heard > kUnreachableAfter) {
-                SUNSIM_LOGD(kTag, "Ping to %s failed (err=0x%x status=0x%x)", name(bulb), reply ? reply->error : -1,
+                ev::log::debug(kTag, "Ping to {} failed (err=0x{:x} status=0x{:x})", name(bulb), reply ? reply->error : -1,
                             reply ? reply->status : -1);
                 setReachable(bulb, false);
             }
@@ -409,20 +405,20 @@ void DeviceRegistry::on(const ev::ButtonPressed &e)
 void DeviceRegistry::on(const ev::PairRequested &e)
 {
     if (record(e.role).valid) {
-        SUNSIM_LOGW(kTag, "%s is already assigned; the next device to join will replace it", name(e.role));
+        ev::log::warn(kTag, "{} is already assigned; the next device to join will replace it", name(e.role));
     }
     armed_ = e.role;
     post_(ev::OpenNetwork{});
-    SUNSIM_LOGI(kTag,
-                "Armed %s: factory-reset / power on the device now. The next device that joins and doesn't already "
-                "hold a role becomes %s.",
+    ev::log::info(kTag,
+                "Armed {}: factory-reset / power on the device now. The next device that joins and doesn't already "
+                "hold a role becomes {}.",
                 name(e.role), name(e.role));
 }
 
 void DeviceRegistry::on(const ev::PairCancelled &)
 {
     armed_.reset();
-    SUNSIM_LOGI(kTag, "Pairing cancelled");
+    ev::log::info(kTag, "Pairing cancelled");
 }
 
 void DeviceRegistry::on(const ev::UnpairRequested &e)
@@ -431,12 +427,12 @@ void DeviceRegistry::on(const ev::UnpairRequested &e)
         if (ev::selects(e.roles, role)) {
             clear(role);
             if (!std::holds_alternative<ev::AllRoles>(e.roles)) {
-                SUNSIM_LOGI(kTag, "%s cleared", name(role));
+                ev::log::info(kTag, "{} cleared", name(role));
             }
         }
     }
     if (std::holds_alternative<ev::AllRoles>(e.roles)) {
-        SUNSIM_LOGI(kTag, "All roles cleared");
+        ev::log::info(kTag, "All roles cleared");
     }
     persist();
 }
