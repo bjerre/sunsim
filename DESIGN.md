@@ -60,8 +60,10 @@ flowchart LR
     W(["Work light"]) ~~~ BT(["Button"])
 ```
 
-The roles come from one table, `ev::kLayout` (`types.cppm`): Wall 5, Work
-1, Button 1. A wall light's letter is its place: light `i` of `n` sits at
+The roles come from one table, `ev::kLayout` (`types.cppm`): five color
+bulbs on the wall, one at work, one button. Each group's kind (color, white
+or dimmable bulb, plug, button) decides what discovery looks for and what
+the light is sent. A wall light's letter is its place: light `i` of `n` sits at
 `x = 1 - 2i/(n-1)`. Changing the count there is all it takes for a
 different wall: the role names, positions, the display's dots and the
 address checks follow at compile time.
@@ -115,7 +117,7 @@ sequenceDiagram
     end
 
     loop findEndpoint flow, every 15 s until found
-        DR->>ZA: Discover (ZDO Match_Desc: On/Off + Level + Color,<br/>or the button's On/Off output)
+        DR->>ZA: Discover (ZDO Match_Desc by kind: a light's On/Off, Level, Color,<br/>or the button's On/Off output)
         ZA->>DR: EndpointFound(endpoint)
     end
     DR->>SS: PersistRoles (endpoint)

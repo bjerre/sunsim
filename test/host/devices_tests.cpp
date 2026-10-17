@@ -185,13 +185,15 @@ void devicesTests()
     });
 
     test("the layout: five wall lights east to west, then work and button", [] {
-        static_assert(kRoleCount == 7 && kBulbCount == 6);
+        static_assert(kRoleCount == 7 && kLightCount == 6);
         static_assert(members(Group::Wall).size() == 5);
         static_assert(roleName(kWallA) == "WallA" && roleName(kWallE) == "WallE");
         static_assert(roleName(kWork) == "Work" && roleName(kButton) == "Button");
         static_assert(parseRole("wallc") == kWallC && !parseRole("WallF"));
         static_assert(slot(kWork) == 5 && kRoles[slot(kWallC)] == kWallC);
-        CHECK(std::ranges::equal(bulbs(), std::span{kRoles}.first(6)));
+        CHECK(std::ranges::equal(lights(), std::span{kRoles}.first(6)));
+        static_assert(kindOf(kWallA) == Kind::ColorBulb && kindOf(kButton) == Kind::Button);
+        static_assert(isLight(kWork) && !isLight(kButton) && isButton(kButton) && !isButton(kWork));
 
         const auto wall = parseSelection("wall");
         CHECK(wall && selects(*wall, kWallE) && !selects(*wall, kWork));
@@ -233,9 +235,40 @@ void devicesTests()
         CHECK(assigned.size() == 1 && assigned[0].role == kWallE);
     });
 
+    test("each kind of light gets only the commands it takes", [] {
+        const LightState amber{.on = true, .level = 80, .color = Xy{0.55f, 0.41f}};
+        const LightState red{.on = true, .level = 200, .color = HueSat{0, 254}};
+        const auto       to = [](const LightState &state) {
+            return LightChange{.state = state, .level_transition = 60s, .color_transition = 60s};
+        };
+
+        // A color bulb: everything, then only what moves.
+        const auto color = core::commandsFor(std::nullopt, to(amber), caps(Kind::ColorBulb));
+        CHECK(color && color->power == true && color->level == 80 && colorOf<Xy>(*color));
+        const auto dimmer = core::commandsFor(amber, to({.on = true, .level = 60, .color = amber.color}),
+                                              caps(Kind::ColorBulb));
+        CHECK(dimmer && !dimmer->power && dimmer->level == 60 && !dimmer->color);
+
+        // A white bulb: xy as its nearest color temperature; a saturated color not at all.
+        const LightState white = core::fitted(amber, caps(Kind::WhiteBulb));
+        CHECK(colorOf<Mireds>(white) && colorOf<Mireds>(white)->value > 450 && colorOf<Mireds>(white)->value < 600);
+        const auto alert = core::commandsFor(white, to(core::fitted(red, caps(Kind::WhiteBulb))), caps(Kind::WhiteBulb));
+        CHECK(alert && alert->level == 200 && !alert->color);
+
+        // A dimmable bulb: no color. A plug: only on and off.
+        const auto dim = core::commandsFor(std::nullopt, to(amber), caps(Kind::DimmableBulb));
+        CHECK(dim && dim->level == 80 && !dim->color);
+        const LightState plugged = core::fitted(amber, caps(Kind::Plug));
+        const auto       on      = core::commandsFor(std::nullopt, to(plugged), caps(Kind::Plug));
+        CHECK(on && on->power == true && !on->level && !on->color);
+        CHECK(!core::commandsFor(plugged, to(core::fitted(red, caps(Kind::Plug))), caps(Kind::Plug))); // still on
+        const auto off = core::commandsFor(plugged, to(LightState{}), caps(Kind::Plug));
+        CHECK(off && off->power == false);
+    });
+
     test("role sets: lists, groups and none", [] {
         CHECK(parseRoleSet("WallB,walld") == roleSet({kWallB, Role{Group::Wall, 3}}));
-        CHECK(parseRoleSet("wall,Work")->count() == kBulbCount);
+        CHECK(parseRoleSet("wall,Work")->count() == kLightCount);
         CHECK(parseRoleSet("none")->none());
         CHECK(!parseRoleSet("WallB,attic"));
     });

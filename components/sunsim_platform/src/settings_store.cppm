@@ -347,7 +347,7 @@ void SettingsStore::on(const ev::SetIntensity &e)
 
     Nvs       nvs{NVS_READWRITE};
     NvsWriter w{nvs, "intensity"};
-    for (const ev::Role role : ev::bulbs()) {
+    for (const ev::Role role : ev::lights()) {
         if (ev::selects(e.lights, role)) {
             peaks_[role] = percent;
             w.u8(Key(role, "peak").text, percent);
@@ -363,7 +363,7 @@ void SettingsStore::on(const ev::SetMinLevel &e)
 
     Nvs       nvs{NVS_READWRITE};
     NvsWriter w{nvs, "minimum level"};
-    for (const ev::Role role : ev::bulbs()) {
+    for (const ev::Role role : ev::lights()) {
         if (ev::selects(e.lights, role)) {
             min_levels_[role] = level;
             w.u8(Key(role, "min").text, level);

@@ -116,7 +116,7 @@ void ProgramHost::on(const ev::ConfigChanged &e)
 void ProgramHost::on(const ev::TuneSave &)
 {
     const auto tuned = std::get<TuningProgram>(programs_).takeTuned();
-    for (const ev::Role role : ev::bulbs()) {
+    for (const ev::Role role : ev::lights()) {
         if (tuned[role]) {
             post_(ev::SetMinLevel{.lights = role, .level = *tuned[role]});
         }

@@ -128,7 +128,7 @@ std::optional<Pulse> weatherPulse(ev::Role role, bool lit, ev::Mode mode, const 
 {
     const ev::AlertLevel                 alert = sky.alert();
     const std::optional<ev::Conditions> &now   = sky.conditions;
-    if (!config.weather_enabled || !ev::isBulb(role)) {
+    if (!config.weather_enabled || !ev::caps(role).color) { // a pulse is a saturated color
         return std::nullopt;
     }
     const bool daylight = mode == ev::Mode::Daylight;
@@ -159,7 +159,7 @@ void Overlays::on(const ev::ConfigChanged &e)
 
 void Overlays::on(const ev::LightTarget &e)
 {
-    if (!ev::isBulb(e.role)) {
+    if (!ev::isLight(e.role)) {
         return;
     }
     Light &light = lights_[e.role];
@@ -185,7 +185,7 @@ void Overlays::on(const ev::SkyChanged &e)
 // one fading on this beat, or one let go.
 void Overlays::reconcile()
 {
-    for (const ev::Role role : ev::bulbs()) {
+    for (const ev::Role role : ev::lights()) {
         Light     &light = lights_[role];
         const bool lit   = light.base && light.base->state.on;
         const auto pulse = weatherPulse(role, lit, mode_, config_, sky_);

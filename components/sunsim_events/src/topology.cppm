@@ -147,7 +147,7 @@ template <std::ranges::input_range ShowsTable>
             if (!selects(*selection, role)) {
                 continue;
             }
-            if (!isBulb(role)) {
+            if (!isLight(role)) {
                 detail::showsGivesALookToAButton();
             }
             if (given[role]) {
@@ -157,7 +157,7 @@ template <std::ranges::input_range ShowsTable>
             given[role] = true;
         }
     }
-    for (const Role role : bulbs()) {
+    for (const Role role : lights()) {
         if (!given[role]) {
             detail::aLightShowsNothing();
         }

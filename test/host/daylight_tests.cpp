@@ -23,7 +23,7 @@ void daylightTests()
         h.clearLog();
         h.post(ProgramTick{.time = unset, .transition = 60s});
         const auto targets = h.all<LightTarget>();
-        CHECK(targets.size() == ev::kBulbCount);
+        CHECK(targets.size() == ev::kLightCount);
         for (const auto &t : targets) {
             CHECK(!t.state.on);
         }
@@ -94,8 +94,8 @@ void daylightTests()
         h.clearLog();
         h.post(ProgramTick{.time = noon(), .transition = 60s});
         const auto targets = h.all<LightTarget>();
-        CHECK(targets.size() == ev::kBulbCount);
-        if (targets.size() == ev::kBulbCount) {
+        CHECK(targets.size() == ev::kLightCount);
+        if (targets.size() == ev::kLightCount) {
             CHECK(targets[0].state.on && targets[1].state.on);
             CHECK(targets[0].state.level * 2 <= targets[1].state.level + 2); // WallA ~half of WallB
             CHECK(targets[0].level_transition == 60s && targets[0].color_transition == 60s);

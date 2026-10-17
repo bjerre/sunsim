@@ -5,7 +5,7 @@ import sunsim.ev;
 
 export namespace sunsim::core {
 
-// A lighting program: decides what every bulb should show and posts it as
+// A lighting program: decides what every light should show and posts it as
 // LightTargets. It never deals with addresses, reachability or what was
 // last sent; LightOutput does that, the same way for every program.
 //
@@ -13,11 +13,11 @@ export namespace sunsim::core {
 // derives from Program (for posting) and has:
 //
 //   static constexpr ev::Mode kMode           the mode it is
-//   void refresh(role, now)                   re-apply `role` (nullopt = every bulb) now, with
-//                                             a quick transition: a bulb (re)joined or answers
+//   void refresh(role, now)                   re-apply `role` (nullopt = every light) now, with
+//                                             a quick transition: a light (re)joined or answers
 //                                             again, the network came up, a setting changed
 //   void start(now)                           optional: it became the running program
-//                                             (otherwise: refresh every bulb)
+//                                             (otherwise: refresh every light)
 //   void on(const T &)                        optional, any events: Tick and ProgramTick reach
 //                                             it only while it runs; settings, weather and the
 //                                             console's tuning always, so it's current whenever
@@ -34,10 +34,10 @@ public:
 protected:
     ~Program();
 
-    // Calls f(role) for each bulb, or only for `only` if it's given (and a bulb).
-    template <class F> static void forEachBulb(std::optional<ev::Role> only, F &&f)
+    // Calls f(role) for each light, or only for `only` if it's given (and a light).
+    template <class F> static void forEachLight(std::optional<ev::Role> only, F &&f)
     {
-        for (const ev::Role role : ev::bulbs()) {
+        for (const ev::Role role : ev::lights()) {
             if (!only || *only == role) {
                 f(role);
             }

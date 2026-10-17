@@ -48,7 +48,7 @@ void TuningProgram::start(const std::optional<ev::TimeReading> &now)
 
 void TuningProgram::refresh(std::optional<ev::Role> role, const std::optional<ev::TimeReading> &)
 {
-    forEachBulb(role, [&](ev::Role r) { emit(r); });
+    forEachLight(role, [&](ev::Role r) { emit(r); });
 }
 
 void TuningProgram::on(const ev::ConfigChanged &e)
@@ -62,7 +62,7 @@ void TuningProgram::on(const ev::TuneLights &e)
     if (e.kelvin) {
         kelvin_ = *e.kelvin;
     }
-    forEachBulb(std::nullopt, [&](ev::Role r) {
+    forEachLight(std::nullopt, [&](ev::Role r) {
         if (ev::selects(e.lights, r)) {
             tuned_[r] = std::clamp<uint8_t>(e.level, 1, ev::kMaxLevel);
         }

@@ -120,7 +120,7 @@ void modesTests()
 
         h.post(ModeRequested{Mode::Tuning});
         const auto start = h.all<LightTarget>();
-        CHECK(start.size() == kBulbCount);
+        CHECK(start.size() == kLightCount);
         for (const auto &t : start) {
             CHECK(t.state.on && colorOf<Xy>(t.state)); // the sunset's amber
             CHECK(t.state.level == (t.role == kWork ? 12 : 1));

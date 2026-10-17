@@ -13,11 +13,11 @@ export namespace sunsim::core {
 //  - Discovery (a flow per role): finds the device's endpoint
 //    (Discover/EndpointFound), retried every 15 s until it's known; the
 //    button is then bound (Bind).
-//  - Liveness (a flow per bulb): acks, ping replies, announces and button
-//    presses count as "heard". Bulbs are pinged 15 s after the network is up
-//    (or after pairing), then every
-//    60 s. A failed or unanswered ping with nothing heard for a minute marks
-//    a bulb unreachable (ReachabilityChanged): its light commands pause -
+//  - Liveness (a flow per light): acks, ping replies, announces and button
+//    presses count as "heard". Lights are pinged 15 s after the network is
+//    up (or after pairing), then every 60 s. A failed or unanswered ping
+//    with nothing heard for a minute marks a light unreachable
+//    (ReachabilityChanged): its commands pause -
 //    sending to a missing device ties up the stack's buffers with retries
 //    and starves everything else - and it's pinged every 15 s until it
 //    answers anything, when it's marked reachable again and its light
@@ -67,7 +67,7 @@ private:
 
     // Flows; reassigning a slot restarts it, an empty Flow{} stops it.
     ev::Flow findEndpoint(ev::Role role);
-    ev::Flow keepAlive(ev::Role bulb);
+    ev::Flow keepAlive(ev::Role light);
 
     ev::Post                     post_;
     ev::Addresses                addresses_;
@@ -81,7 +81,7 @@ private:
     ev::Inbox<ev::EndpointFound> endpoints_{timer_};
     ev::Inbox<ev::PingResult>    pings_{timer_};
     ev::PerRole<ev::Flow>        discovery_;  // last, so they're destroyed
-    ev::PerRole<ev::Flow>        keep_alive_; // before what they wait on (bulbs only)
+    ev::PerRole<ev::Flow>        keep_alive_; // before what they wait on (lights only)
 };
 
 } // namespace sunsim::core
@@ -95,7 +95,7 @@ constexpr const char *kTag = "REGISTRY";
 
 constexpr auto kDiscoveryRetry   = 15s;
 constexpr auto kFirstPing        = 15s;  // after the network is up, or pairing
-constexpr auto kPingInterval     = 60s;  // reachable bulbs
+constexpr auto kPingInterval     = 60s;  // reachable lights
 constexpr auto kUnreachablePing  = 15s;  // until they answer again
 constexpr auto kUnreachableAfter = 60s;  // of silence, plus a failed ping
 constexpr auto kOnlineWindow     = 150s; // shown as online: a couple of missed pings
@@ -158,7 +158,7 @@ void DeviceRegistry::setReachable(ev::Role role, bool reachable)
     post_(ev::ReachabilityChanged{role, reachable});
     if (reachable) {
         ev::log::info(kTag, "{} is answering again - resuming its light", name(role));
-        if (ev::isBulb(role)) {
+        if (ev::isLight(role)) {
             post_(ev::RefreshLights{role});
         }
     } else {
@@ -188,7 +188,7 @@ void DeviceRegistry::assign(ev::Role role, uint64_t ext_addr, uint16_t short_add
     heard(role);
     post_(ev::RoleAssigned{role, record(role)});
     discovery_[role] = findEndpoint(role);
-    if (ev::isBulb(role)) {
+    if (ev::isLight(role)) {
         keep_alive_[role] = keepAlive(role);
     }
 }
@@ -213,7 +213,7 @@ void DeviceRegistry::on(const ev::RolesLoaded &e)
         if (record(role).endpoint == 0) {
             discovery_[role] = findEndpoint(role);
         }
-        if (ev::isBulb(role)) {
+        if (ev::isLight(role)) {
             keep_alive_[role] = keepAlive(role);
         }
     }
@@ -236,7 +236,7 @@ void DeviceRegistry::on(const ev::DeviceAnnounced &e)
         ev::log::info(kTag, "Known device rejoined: {} short=0x{:04x}", name(*existing), e.short_addr);
         heard(*existing);
         post_(ev::RoleAssigned{*existing, d});
-        if (!ev::isBulb(*existing) || d.endpoint == 0) {
+        if (ev::isButton(*existing) || d.endpoint == 0) {
             discovery_[*existing] = findEndpoint(*existing); // a button is re-bound
         } else {
             post_(ev::RefreshLights{*existing});
@@ -299,11 +299,11 @@ void DeviceRegistry::endpointFound(ev::Role role, uint8_t endpoint)
     d.endpoint          = endpoint;
     persist();
     post_(ev::RoleAssigned{role, d});
-    if (!ev::isBulb(role)) {
+    if (ev::isButton(role)) {
         ev::log::info(kTag, "{} endpoint = {}, binding to local receiver", name(role), d.endpoint);
         post_(ev::Bind{role, d.ext_addr, d.short_addr, d.endpoint});
     } else {
-        ev::log::info(kTag, "{} (bulb) endpoint = {}", name(role), d.endpoint);
+        ev::log::info(kTag, "{} (light) endpoint = {}", name(role), d.endpoint);
         post_(ev::RefreshLights{role});
     }
 }
@@ -324,7 +324,7 @@ void DeviceRegistry::on(const ev::PingResult &e)
 
 // A button is a sleepy end device that won't answer pings; it counts as
 // heard when it's pressed instead.
-ev::Flow DeviceRegistry::keepAlive(ev::Role bulb)
+ev::Flow DeviceRegistry::keepAlive(ev::Role light)
 {
     if (!network_up_) {
         co_await network_.next();
@@ -332,21 +332,21 @@ ev::Flow DeviceRegistry::keepAlive(ev::Role bulb)
     co_await timer_.after(kFirstPing);
     for (;;) {
         const ev::Instant sent = timer_.now();
-        post_(ev::Ping{bulb, record(bulb).short_addr});
-        const auto reply = co_await pings_.next(about(bulb), sent + kUnreachablePing);
+        post_(ev::Ping{light, record(light).short_addr});
+        const auto reply = co_await pings_.next(about(light), sent + kUnreachablePing);
         if (reply && reply->ok) {
-            heard(bulb);
+            heard(light);
         } else {
             // A lost ping alone isn't enough (a busy network drops some); it
             // must also have been silent - no acks - for a while.
-            const Liveness &l = liveness(bulb);
+            const Liveness &l = liveness(light);
             if (!l.last_heard || timer_.now() - *l.last_heard > kUnreachableAfter) {
-                ev::log::debug(kTag, "Ping to {} failed (err=0x{:x} status=0x{:x})", name(bulb), reply ? reply->error : -1,
+                ev::log::debug(kTag, "Ping to {} failed (err=0x{:x} status=0x{:x})", name(light), reply ? reply->error : -1,
                                reply ? reply->status : -1);
-                setReachable(bulb, false);
+                setReachable(light, false);
             }
         }
-        co_await timer_.until(sent + (liveness(bulb).reachable ? kPingInterval : kUnreachablePing));
+        co_await timer_.until(sent + (liveness(light).reachable ? kPingInterval : kUnreachablePing));
     }
 }
 
@@ -365,9 +365,9 @@ void DeviceRegistry::on(const ev::ButtonPressed &e)
     if (e.source != ev::Source::Zigbee) {
         return;
     }
-    for (const ev::Role button : ev::members(ev::Group::Button)) { // a press doesn't say which
-        if (record(button).valid) {
-            heard(button);
+    for (const ev::Role role : ev::kRoles) { // a press doesn't say which button
+        if (ev::isButton(role) && record(role).valid) {
+            heard(role);
         }
     }
 }

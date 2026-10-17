@@ -220,8 +220,8 @@ bulbs' sunrise/sunset calculation - see
 ## Pairing
 
 Roles (`WallA`-`WallE` east to west along the wall, `Work`, `Button`; the
-counts per group are `ev::kLayout` in `types.cppm`, the one place to change
-for more or fewer wall lights) are assigned from the serial
+kind and count of each group are `ev::kLayout` in `types.cppm`, the one
+place to change for more or fewer wall lights, or a plug) are assigned from the serial
 console (`idf.py monitor`, over the same USB cable used for flashing), one
 device at a time:
 

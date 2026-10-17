@@ -484,7 +484,7 @@ void ZigbeeAdapter::onMatchDescResult(const ezb_zdo_match_desc_req_result_t *res
     const ev::Role role = roleFromCtx(user_ctx);
     if (!zdoOk(result) || result->rsp->match_length == 0) {
         ev::log::warn(kTag, "Could not find {} endpoint for {} (err=0x{:x} status=0x{:x} matches={}), will retry",
-                      ev::isBulb(role) ? "light" : "On/Off output", ev::roleName(role).data(),
+                      ev::isButton(role) ? "On/Off output" : "light", ev::roleName(role).data(),
                       result ? result->error : -1, (result && result->rsp) ? result->rsp->status : -1,
                       (result && result->rsp) ? result->rsp->match_length : -1);
         s_self->post_(ev::EndpointFound{.role = role, .endpoint = 0});
@@ -564,17 +564,30 @@ void ZigbeeAdapter::on(const ev::Discover &e)
     req.field.profile_id           = EZB_AF_HA_PROFILE_ID;
     req.cb                         = &ZigbeeAdapter::onMatchDescResult;
     req.user_ctx                   = roleCtx(e.role);
-    if (!ev::isBulb(e.role)) {
-        static uint16_t out_clusters[] = {EZB_ZCL_CLUSTER_ID_ON_OFF};
-        req.field.num_in_clusters      = 0;
-        req.field.num_out_clusters     = 1;
-        req.field.cluster_list         = out_clusters;
-    } else {
-        static uint16_t in_clusters[] = {EZB_ZCL_CLUSTER_ID_ON_OFF, EZB_ZCL_CLUSTER_ID_LEVEL,
-                                          EZB_ZCL_CLUSTER_ID_COLOR_CONTROL};
-        req.field.num_in_clusters     = 3;
-        req.field.num_out_clusters    = 0;
-        req.field.cluster_list        = in_clusters;
+    // Its endpoint with any of these: a light's server clusters (what it
+    // takes), a button's On/Off client (what it sends).
+    static uint16_t color_bulb[] = {EZB_ZCL_CLUSTER_ID_ON_OFF, EZB_ZCL_CLUSTER_ID_LEVEL, EZB_ZCL_CLUSTER_ID_COLOR_CONTROL};
+    static uint16_t dimmable[]   = {EZB_ZCL_CLUSTER_ID_ON_OFF, EZB_ZCL_CLUSTER_ID_LEVEL};
+    static uint16_t on_off[]     = {EZB_ZCL_CLUSTER_ID_ON_OFF};
+    const auto      in = [&](std::span<uint16_t> clusters) {
+        req.field.num_in_clusters = static_cast<uint8_t>(clusters.size());
+        req.field.cluster_list    = clusters.data();
+    };
+    switch (ev::kindOf(e.role)) {
+    case ev::Kind::ColorBulb:
+    case ev::Kind::WhiteBulb:
+        in(color_bulb);
+        break;
+    case ev::Kind::DimmableBulb:
+        in(dimmable);
+        break;
+    case ev::Kind::Plug:
+        in(on_off);
+        break;
+    case ev::Kind::Button:
+        req.field.num_out_clusters = 1;
+        req.field.cluster_list     = on_off;
+        break;
     }
     ezb_zdo_match_desc_req(&req);
 }
@@ -625,14 +638,14 @@ void ZigbeeAdapter::on(const ev::FactoryReset &)
 
 void ZigbeeAdapter::on(const ev::RoleAssigned &e)
 {
-    if (!ev::isBulb(e.role)) {
+    if (ev::isButton(e.role)) {
         button_short_.store(e.record.valid ? e.record.short_addr : 0xFFFF);
     }
 }
 
 void ZigbeeAdapter::on(const ev::RoleCleared &e)
 {
-    if (!ev::isBulb(e.role)) {
+    if (ev::isButton(e.role)) {
         button_short_.store(0xFFFF);
     }
 }

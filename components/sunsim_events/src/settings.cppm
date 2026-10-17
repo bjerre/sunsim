@@ -45,7 +45,7 @@ struct Days { // mon-fri | all | mon,wed,...; stored as Weekdays' bits, a u8
     Weekdays ProgramConfig::*field;
     const char              *key;
 };
-struct Lights { // none | WallB,WallD | wall ...: bulbs only; stored as the set's bits, a u16
+struct Lights { // none | WallB,WallD | wall ...: color lights only; stored as the set's bits, a u16
     RoleSet ProgramConfig::*field;
     const char             *key;
 };
@@ -221,11 +221,11 @@ std::string daysText(Weekdays days)
     return text.empty() ? "none" : text;
 }
 
-std::string lightsText(const RoleSet &lights)
+std::string lightsText(const RoleSet &set)
 {
     std::string text;
-    for (const Role role : bulbs()) {
-        if (contains(lights, role)) {
+    for (const Role role : lights()) {
+        if (contains(set, role)) {
             text += text.empty() ? "" : ",";
             text += roleName(role);
         }
@@ -301,11 +301,12 @@ std::expected<void, std::string> set(const Setting &setting, ProgramConfig &conf
         }
         bool operator()(const setting::Lights &k) const
         {
-            const auto lights = parseRoleSet(text);
-            if (!lights || std::ranges::any_of(kRoles, [&](Role r) { return !isBulb(r) && contains(*lights, r); })) {
+            // The weather pulses a color: only lights that show one.
+            const auto set = parseRoleSet(text);
+            if (!set || std::ranges::any_of(kRoles, [&](Role r) { return !caps(r).color && contains(*set, r); })) {
                 return false;
             }
-            c.*k.field = *lights;
+            c.*k.field = *set;
             return true;
         }
     };

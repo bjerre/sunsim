@@ -62,12 +62,12 @@ void DaylightProgram::refresh(std::optional<ev::Role> role, const std::optional<
     if (!now) {
         return; // no time yet: the first ProgramTick will apply it
     }
-    forEachBulb(role, [&](ev::Role r) { emit(r, *now, kSnapTransition); });
+    forEachLight(role, [&](ev::Role r) { emit(r, *now, kSnapTransition); });
 }
 
 void DaylightProgram::on(const ev::ProgramTick &e)
 {
-    forEachBulb(std::nullopt, [&](ev::Role r) { emit(r, e.time, e.transition); });
+    forEachLight(std::nullopt, [&](ev::Role r) { emit(r, e.time, e.transition); });
 }
 
 void DaylightProgram::on(const ev::ConfigChanged &e)

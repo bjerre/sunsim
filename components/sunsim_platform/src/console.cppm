@@ -242,14 +242,14 @@ int cmdConfig(Console &console, int argc, char **argv)
 
 void printPeaks(const ev::Peaks &peaks)
 {
-    for (const ev::Role role : ev::bulbs()) {
+    for (const ev::Role role : ev::lights()) {
         std::println("  {:<6} {:3}%", ev::roleName(role), peaks[role]);
     }
 }
 
 void printMinLevels(const ev::MinLevels &levels)
 {
-    for (const ev::Role role : ev::bulbs()) {
+    for (const ev::Role role : ev::lights()) {
         std::println("  {:<6} {:3}", ev::roleName(role), levels[role]);
     }
 }
@@ -273,14 +273,14 @@ int cmdIntensity(Console &console, int argc, char **argv)
     if (!lights) {
         return 1;
     }
-    if (std::ranges::none_of(ev::bulbs(), [&](ev::Role role) { return ev::selects(*lights, role); })) {
+    if (std::ranges::none_of(ev::lights(), [&](ev::Role role) { return ev::selects(*lights, role); })) {
         std::println("'{}' isn't a light", argv[1]);
         return 1;
     }
 
     console.post(ev::SetIntensity{*lights, static_cast<uint8_t>(*percent)});
     ev::Peaks peaks = st->peaks;
-    for (const ev::Role role : ev::bulbs()) {
+    for (const ev::Role role : ev::lights()) {
         if (ev::selects(*lights, role)) {
             peaks[role] = static_cast<uint8_t>(*percent);
         }
@@ -310,7 +310,7 @@ int cmdMinLevel(Console &console, int argc, char **argv)
     }
     console.post(ev::SetMinLevel{*lights, static_cast<uint8_t>(*level)});
     ev::MinLevels levels = st->min_levels;
-    for (const ev::Role role : ev::bulbs()) {
+    for (const ev::Role role : ev::lights()) {
         if (ev::selects(*lights, role)) {
             levels[role] = static_cast<uint8_t>(*level);
         }

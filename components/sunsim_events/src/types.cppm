@@ -75,20 +75,57 @@ inline constexpr Weekdays kEveryDay{0b1111111};
 // What a device does. Each group can hold any number of devices.
 enum class Group : uint8_t { Wall, Work, Button };
 
+// What a device is, and so what it can do (caps()).
+enum class Kind : uint8_t {
+    ColorBulb,    // on/off, level, color temperature, xy and hue/saturation
+    WhiteBulb,    // on/off, level, color temperature
+    DimmableBulb, // on/off, level
+    Plug,         // on/off, for whatever's plugged into it
+    Button,       // presses: its On/Off client, bound to us
+};
+
+// What a device takes from us. A light takes at least On/Off; a button
+// takes nothing (it sends).
+struct Caps {
+    bool power  = false; // On/Off
+    bool level  = false; // Level Control
+    bool mireds = false; // Color Control's color temperature
+    bool color  = false; // Color Control's xy and hue/saturation
+};
+
+[[nodiscard]] constexpr Caps caps(Kind kind) noexcept
+{
+    switch (kind) {
+    case Kind::ColorBulb:
+        return {.power = true, .level = true, .mireds = true, .color = true};
+    case Kind::WhiteBulb:
+        return {.power = true, .level = true, .mireds = true};
+    case Kind::DimmableBulb:
+        return {.power = true, .level = true};
+    case Kind::Plug:
+        return {.power = true};
+    case Kind::Button:
+        break;
+    }
+    return {};
+}
+
+// N devices of one kind with one job.
 struct GroupSpec {
     Group            group;
     std::string_view name;
+    Kind             kind;
     uint8_t          count;
 };
 
-// The installation: how many devices each group has, in Group order. A
-// group's members are lettered (WallA, WallB, ...); a group of one is just
-// its name (Work, Button). Wall lights are lettered east to west: their
-// order along the wall drives the sun-direction dimming.
+// The installation: what each group is and how many it has, in Group
+// order. A group's members are lettered (WallA, WallB, ...); a group of one
+// is just its name (Work, Button). Wall lights are lettered east to west:
+// their order along the wall drives the sun-direction dimming.
 inline constexpr std::array kLayout{
-    GroupSpec{Group::Wall, "Wall", 5},
-    GroupSpec{Group::Work, "Work", 1},
-    GroupSpec{Group::Button, "Button", 1},
+    GroupSpec{Group::Wall, "Wall", Kind::ColorBulb, 5},
+    GroupSpec{Group::Work, "Work", Kind::ColorBulb, 1},
+    GroupSpec{Group::Button, "Button", Kind::Button, 1},
 };
 
 // One device's job: its group, and which member of it. Assigned at pairing
@@ -137,11 +174,16 @@ inline constexpr std::array<Role, kRoleCount> kRoles = [] {
     return std::span{kRoles}.subspan(slot({group, 0}), spec(group).count);
 }
 
-[[nodiscard]] constexpr bool isBulb(Role role) noexcept { return role.group != Group::Button; }
+[[nodiscard]] constexpr Kind kindOf(Role role) noexcept { return spec(role.group).kind; }
+[[nodiscard]] constexpr Caps caps(Role role) noexcept { return caps(kindOf(role)); }
 
-// The bulbs (every role but the buttons), in slot order.
-[[nodiscard]] constexpr auto bulbs() noexcept { return kRoles | std::views::filter(isBulb); }
-inline constexpr std::size_t kBulbCount = std::ranges::count_if(kRoles, isBulb);
+// A light: something we switch (a bulb or a plug), not a button.
+[[nodiscard]] constexpr bool isLight(Role role) noexcept { return caps(role).power; }
+[[nodiscard]] constexpr bool isButton(Role role) noexcept { return kindOf(role) == Kind::Button; }
+
+// The lights (every role but the buttons), in slot order.
+[[nodiscard]] constexpr auto lights() noexcept { return kRoles | std::views::filter(isLight); }
+inline constexpr std::size_t kLightCount = std::ranges::count_if(kRoles, isLight);
 
 // One T per role, indexed by the role.
 template <class T> struct PerRole {
@@ -157,6 +199,8 @@ static_assert(std::ranges::all_of(kLayout, [](const GroupSpec &g) { return g.cou
 static_assert(std::ranges::equal(kLayout | std::views::transform(&GroupSpec::group),
                                  std::array{Group::Wall, Group::Work, Group::Button}),
               "kLayout must list the groups in Group order");
+static_assert(std::ranges::count_if(kRoles, isButton) <= 1,
+              "one button at most: ZigbeeAdapter tells presses apart by its one address");
 
 // A role's name, NUL-terminated (it's printed with %s).
 struct RoleName {

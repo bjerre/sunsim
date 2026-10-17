@@ -78,22 +78,26 @@ in `detail`.
 
 ### Value types (`sunsim::ev`, `types.cppm`)
 
-The installation is data: `kLayout` says how many devices each group has,
-and the roles, their names (`WallA`-`WallE`, `Work`, `Button`), their slots
-and `PerRole<T>` are all derived from it at compile time.
+The installation is data: `kLayout` says what each group is (its `Kind`)
+and how many devices it has, and the roles, their names (`WallA`-`WallE`,
+`Work`, `Button`), their slots and `PerRole<T>` are all derived from it at
+compile time. A kind's `Caps` say what it takes (On/Off, level, color
+temperature, color): `isLight()` is anything that takes On/Off (a bulb or a
+plug), and `LightOutput` sends each light only what it takes.
 
 ```mermaid
 classDiagram
     direction LR
     class kLayout {
         <<constant>>
-        Wall: 5
-        Work: 1
-        Button: 1
+        Wall: ColorBulb x 5
+        Work: ColorBulb x 1
+        Button: Button x 1
     }
     class GroupSpec {
         Group group
         string_view name
+        Kind kind
         uint8 count
     }
     class Group {
@@ -293,7 +297,7 @@ classDiagram
     class Program {
         <<base>>
         #target(role, LightState, transitions)
-        #forEachBulb(role, f)$
+        #forEachLight(role, f)$
     }
     class DaylightProgram {
         -ProgramConfig config_
@@ -349,7 +353,7 @@ classDiagram
         -reconcile()
     }
     class LightOutput {
-        -PerRole~Bulb~ bulbs_
+        -PerRole~Light~ lights_
         +on(RoleAssigned / RoleCleared)
         +on(ReachabilityChanged)
         +on(OutputTarget)
@@ -635,9 +639,12 @@ them as `SetMinLevel`, so programs still post only `LightTarget`s.
 
 Only the running program gets ticks and refreshes, so no program checks
 the mode. `LightOutput` doesn't know programs exist: it diffs each target
-against what it last sent that bulb, so switching programs sends only what
+against what it last sent that light, so switching programs sends only what
 differs (daylight -> red alert: hue/sat + level; each pulse after that:
-level only), and it holds back bulbs marked unreachable.
+level only), and it holds back lights marked unreachable. It also fits
+each target to the light's kind (`fitted`, `commandsFor`): a plug gets only
+On/Off, a dimmable bulb no color, a white bulb an xy color as its nearest
+color temperature and a saturated one not at all.
 
 ### SkyModel: what the sky is now
 

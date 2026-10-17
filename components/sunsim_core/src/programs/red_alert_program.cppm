@@ -58,7 +58,7 @@ void RedAlertProgram::emit(std::optional<ev::Role> role)
     const ev::LightState red{.on    = true,
                              .level = bright_ ? kBrightLevel : kDimLevel,
                              .color = ev::HueSat{.hue = 0, .saturation = 254}};
-    forEachBulb(role, [&](ev::Role r) { target(r, red, kFade, kColor); });
+    forEachLight(role, [&](ev::Role r) { target(r, red, kFade, kColor); });
 }
 
 } // namespace sunsim::core
