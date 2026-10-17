@@ -8,7 +8,6 @@ import std.compat;
 import sunsim.ev;
 import :daylight;
 import :program;
-import :sky;
 
 export namespace sunsim::core {
 
@@ -25,11 +24,9 @@ public:
     using Program::Program;
 
     void refresh(std::optional<ev::Role> role, const std::optional<ev::TimeReading> &now);
-    void on(const ev::Tick &e) { now_ = e.at; }
     void on(const ev::ProgramTick &e);
     void on(const ev::ConfigChanged &e);
-    void on(const ev::CloudCoverUpdated &e) { weather_.onForecast(e); }
-    void on(const ev::ConditionsUpdated &e) { weather_.onConditions(e); }
+    void on(const ev::SkyChanged &e) { cloud_percent_ = e.sky.cloud_percent.value_or(0); }
 
 private:
     void emit(ev::Role role, const ev::TimeReading &time, ev::Transition transition);
@@ -38,8 +35,7 @@ private:
     DaylightSchedule schedule_;
     ev::Peaks        peaks_        = ev::kDefaultPeaks;
     ev::MinLevels    min_levels_   = ev::kDefaultMinLevels;
-    Weather          weather_;
-    ev::Instant      now_{}; // the latest Tick's: whether the live weather is fresh
+    uint8_t          cloud_percent_ = 0; // the sky now (none known: clear)
     bool             clock_warned_ = false;
 };
 
@@ -104,7 +100,7 @@ void DaylightProgram::emit(ev::Role role, const ev::TimeReading &time, ev::Trans
         state         = role.group == ev::Group::Work
                             ? schedule_.workState(time.local)
                             : schedule_.wallState(time.local, time.utc_offset_hours, wallPosition(role),
-                                                  weather_.cloud(time, now_).value_or(CloudReading{}).cover);
+                                                  cloud_percent_ / 100.0);
     } else if (!clock_warned_) {
         clock_warned_ = true;
         SUNSIM_LOGW(kTag, "Clock not set yet (no time sync) - holding lights off");

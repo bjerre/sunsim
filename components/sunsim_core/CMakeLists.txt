@@ -19,6 +19,7 @@ set(modules "src/core.cppm"
             "src/programs/program_host.cppm"
             "src/programs/red_alert_program.cppm"
             "src/programs/tuning_program.cppm"
+            "src/sky_model.cppm"
             "src/status_model.cppm")
 
 idf_component_register(SRCS ${modules}

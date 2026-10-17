@@ -30,8 +30,7 @@ public:
     void on(const ev::RefreshLights &e) { running([&](auto &p) { p.refresh(e.role, time_); }); }
     void on(const ev::NetworkUp &) { on(ev::RefreshLights{}); }
     void on(const ev::ConfigChanged &e);
-    void on(const ev::CloudCoverUpdated &e) { toEvery(e); }
-    void on(const ev::ConditionsUpdated &e) { toEvery(e); }
+    void on(const ev::SkyChanged &e) { toEvery(e); }
     void on(const ev::TuneLights &e) { toEvery(e); }
     void on(const ev::TuneSave &e);
 

@@ -839,22 +839,41 @@ int main()
 
     // ---- Weather: the live sky and the weather lights ---------------------------
 
-    test("live cloud cover wins while fresh, then the forecast again", [&] {
-        core::Weather w;
-        w.onForecast(CloudCoverUpdated{forecast});
-        const Instant fetched{1h};
-        w.onConditions(ConditionsUpdated{.now = {.cloud_percent = 90}, .at = fetched});
+    test("the sky: live cloud cover while fresh, then the forecast; alerts until they end", [&] {
+        Harness    h;
+        const auto sky = [&] { return h.all<SkyChanged>().back().sky; };
+        h.tick();
+        h.post(CloudCoverUpdated{forecast});
+        CHECK(sky().cloud_percent == 20 && !sky().cloud_live);
 
-        const auto live = w.cloud(noon(), fetched + 10min);
-        CHECK(live && live->live && std::abs(live->cover - 0.90) < 1e-9);
+        const Instant fetched = h.now;
+        h.post(ConditionsUpdated{.now = {.cloud_percent = 90, .precip = Precip::Rain}, .at = fetched});
+        CHECK(sky().cloud_percent == 90 && sky().cloud_live && sky().conditions->precip == Precip::Rain);
 
-        const auto stale = w.cloud(noon(), fetched + kWeatherFreshFor);
-        CHECK(stale && !stale->live && std::abs(stale->cover - 0.20) < 1e-9);
+        AlertsUpdated alerts{.at = fetched};
+        alerts.alerts.items[0] = {.level = AlertLevel::Watch, .until = fetched + 30min};
+        alerts.alerts.count    = 1;
+        h.post(alerts);
+        CHECK(sky().alert() == AlertLevel::Watch);
 
         TimeReading sim = noon();
         sim.simulated   = true; // fast-day plays the forecast's day
-        const auto fast = w.cloud(sim, fetched + 10min);
-        CHECK(fast && !fast->live);
+        h.tick(1, sim);
+        CHECK(sky().cloud_percent == 20 && !sky().cloud_live && sky().conditions);
+        h.tick();
+
+        h.clearLog();
+        h.now = fetched + 30min - 1s;
+        h.tick(); // the watch has ended
+        CHECK(h.all<SkyChanged>().size() == 1 && sky().alert() == AlertLevel::None && sky().cloud_live);
+
+        h.now = fetched + kWeatherFreshFor - 1s;
+        h.tick(); // the live reading is stale
+        CHECK(sky().cloud_percent == 20 && !sky().cloud_live && !sky().conditions);
+
+        h.clearLog();
+        h.tick(5);
+        CHECK(h.all<SkyChanged>().empty()); // only when it changes
     });
 
     test("role sets: lists, groups and none", [] {
@@ -908,9 +927,8 @@ int main()
         h.post(ProgramTick{.time = noon(), .transition = 60s});
         CHECK(outputs(h, kWallC).empty() && !outputs(h, kWallA).empty());
 
-        h.post(ConditionsUpdated{.now = {.cloud_percent = 100}, .at = h.now});
         h.clearLog();
-        h.tick();
+        h.post(ConditionsUpdated{.now = {.cloud_percent = 100}, .at = h.now}); // let go at once
         const auto back = outputs(h, kWallC);
         CHECK(back.size() == 1 && back[0].state.color != ColorMode::HueSat && back[0].level_transition == 2s);
     });
@@ -960,7 +978,7 @@ int main()
         h.tick(4, night);
         for (const Role role : {kWallB, Role{Group::Wall, 3}}) {
             const auto alarm = outputs(h, role);
-            CHECK(alarm.size() == 4); // a fade every second
+            CHECK(alarm.size() == 5); // at once, then a fade every second
             CHECK(std::ranges::all_of(alarm, [](const OutputTarget &t) {
                 return t.state.on && t.state.color == ColorMode::HueSat && t.state.hue == 0;
             }));

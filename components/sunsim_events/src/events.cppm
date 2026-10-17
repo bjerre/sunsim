@@ -55,6 +55,9 @@ struct AlertsUpdated {           // InternetSync, every 15 min (none in force: c
     Alerts  alerts{};
     Instant at{};
 };
+struct SkyChanged {              // SkyModel, whenever the sky now changes
+    Sky sky{};
+};
 struct RolesLoaded {             // at boot from NVS
     DeviceRecords records{};
 };
@@ -202,7 +205,7 @@ struct StatusChanged {           // shared, not copied: it's by far the largest 
 
 using Payload = std::variant<Heartbeat, Tick, ProgramTick, SetFastDay,                                 //
                              ConfigChanged, SetConfig, SetIntensity, SetMinLevel, CloudCoverUpdated,  //
-                             ConditionsUpdated, AlertsUpdated,                                        //
+                             ConditionsUpdated, AlertsUpdated, SkyChanged,                            //
                              RolesLoaded, PersistRoles,                                               //
                              NetworkUp, DeviceAnnounced, EndpointFound, BindResult, PingResult,       //
                              AckReceived, ButtonPressed,                                              //

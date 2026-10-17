@@ -209,14 +209,13 @@ void render(Ui &ui, const ev::StatusSnapshot &st)
     // The sky: the worst alert in its colour, else what's falling, else cloud.
     constexpr uint32_t kSkyColor = 0x9ab8d8; // grey-blue
     uint32_t           sky_color = kSkyColor;
-    if (st.alerts.count > 0) {
-        const ev::AlertLevel level = st.alerts.items[0].level;
+    if (const ev::AlertLevel level = st.sky.alert(); level != ev::AlertLevel::None) {
         sky_color = level == ev::AlertLevel::Warning ? 0xff3030 : level == ev::AlertLevel::Watch ? 0xff9a30 : 0xffe040;
         lv_label_set_text(ui.cloud, ev::alertLevelName(level));
-    } else if (st.conditions && st.conditions->precip != ev::Precip::None) {
-        lv_label_set_text(ui.cloud, ev::precipName(st.conditions->precip));
-    } else if (st.cloud_percent) {
-        lv_label_set_text_fmt(ui.cloud, "cloud %u%%", *st.cloud_percent);
+    } else if (st.sky.conditions && st.sky.conditions->precip != ev::Precip::None) {
+        lv_label_set_text(ui.cloud, ev::precipName(st.sky.conditions->precip));
+    } else if (st.sky.cloud_percent) {
+        lv_label_set_text_fmt(ui.cloud, "cloud %u%%", *st.sky.cloud_percent);
     } else {
         lv_label_set_text(ui.cloud, "");
     }

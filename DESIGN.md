@@ -327,15 +327,17 @@ Defaults: `work_cool_mireds=167` (~6000K), `work_warm_mireds=333`
 off. Interpolating in mireds rather than kelvin
 keeps the steps perceptually closer to even.
 
-### Cloud cover (`core::Weather`, `sky.cppm`)
+### Cloud cover (`core::SkyModel`, `sky_model.cppm`; `cloudCover()`, `sky.cppm`)
 
 Every 15 minutes the internet sync (§5) fetches Open-Meteo's `current`
 cloud cover for the configured location (15-minute model data: in the US,
 HRRR's) and posts it as `ConditionsUpdated`; that's `c` while it's under
 45 minutes old (`kWeatherFreshFor`). Failing that, the daily sync's hourly
 forecast: a `CloudCover`, 48 local hours from 00:00 of the day it was
-fetched, which `cloudCover()` interpolates linearly between hours. Either
-way `c` runs 0 (clear) to 1 (overcast); no data means clear. The
+fetched, which `cloudCover()` interpolates linearly between hours.
+`SkyModel` decides which applies and posts it in `SkyChanged`, to the
+percent. Either way `c` runs 0 (clear) to 1 (overcast); no data means
+clear. The
 wall then gets what an overcast sky gives a room - less light, cooler,
 from everywhere at once:
 

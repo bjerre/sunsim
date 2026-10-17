@@ -18,6 +18,7 @@ export import :program_host;
 export import :red_alert_program;
 export import :solar;
 export import :sky;
+export import :sky_model;
 export import :status_model;
 export import :tuning_program;
 
@@ -27,12 +28,13 @@ export namespace sunsim::core {
 // console, display) talks to it only through events on the bus.
 struct CoreModules {
     CoreModules(const ev::Post &post, DeviceRegistry::Manifest manifest)
-        : mode(post), registry(post, manifest), programs(post), overlays(post), output(post), status(post)
+        : mode(post), registry(post, manifest), sky(post), programs(post), overlays(post), output(post), status(post)
     {
     }
 
     ModeController  mode;
     DeviceRegistry  registry;
+    SkyModel        sky;
     ProgramHost     programs;
     Overlays        overlays;
     LightOutput     output;
@@ -50,7 +52,7 @@ namespace sunsim::core {
 
 void wireCore(ev::EventBus &bus, CoreModules &m)
 {
-    bus.attach(m.mode, m.registry, m.programs, m.overlays, m.output, m.status);
+    bus.attach(m.mode, m.registry, m.sky, m.programs, m.overlays, m.output, m.status);
 }
 
 } // namespace sunsim::core

@@ -360,9 +360,10 @@ generated `role_manifest.h`.
   - `light_output.cppm` - turns any program's targets into ZCL commands, diffed
     against what was last sent.
   - `status_model.cppm` - the snapshot shown by `status` and the display.
-  - `math/` - `daylight.cppm`, `solar.cppm`, `sky.cppm` (the cloud cover,
-    live or forecast; `Weather`, what's known and still fresh),
-    `day_info.cppm`: the pure math.
+  - `sky_model.cppm` - what the sky is now (forecast, live conditions and
+    alerts while they count), posted as `SkyChanged`.
+  - `math/` - `daylight.cppm`, `solar.cppm`, `sky.cppm` (the forecast's
+    cloud cover by hour), `day_info.cppm`: the pure math.
   - `core.cppm` - `CoreModules` and `wireCore()`, which attaches them to the bus.
 - `components/sunsim_weather/` (`sunsim::weather`, module `sunsim.weather`)
   - reading the weather services' replies as they stream in, pure C++

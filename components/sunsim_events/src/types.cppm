@@ -487,6 +487,8 @@ struct Alert {
     AlertLevel           level = AlertLevel::None;
     std::array<char, 32> event{}; // "Winter Storm Warning", NUL-terminated, cut to fit
     Instant              until{}; // when it ends
+
+    friend constexpr bool operator==(const Alert &, const Alert &) noexcept = default;
 };
 
 // The NWS alerts for the location, highest level first.
@@ -497,11 +499,29 @@ struct Alerts {
     uint8_t                 count = 0;
 
     [[nodiscard]] std::span<const Alert> list() const noexcept { return {items.data(), count}; }
+
+    friend constexpr bool operator==(const Alerts &, const Alerts &) noexcept = default;
 };
 
 // Live weather older than this (three missed 15-minute fetches) is ignored:
 // cloud cover falls back to the forecast, the weather lights to their program.
 inline constexpr std::chrono::minutes kWeatherFreshFor{45};
+
+// The sky now, as core::SkyModel concludes it from the forecast and the live
+// weather: what the daylight program, the weather lights and the status show.
+struct Sky {
+    std::optional<uint8_t>    cloud_percent;      // none: no data at all (clear assumed)
+    bool                      cloud_live = false; // from the live conditions, not the forecast
+    std::optional<Conditions> conditions;         // live, while fresh
+    Alerts                    alerts{};           // in force, highest level first
+
+    [[nodiscard]] constexpr AlertLevel alert() const noexcept
+    {
+        return alerts.count > 0 ? alerts.items[0].level : AlertLevel::None;
+    }
+
+    friend constexpr bool operator==(const Sky &, const Sky &) noexcept = default;
+};
 
 // ---- Time -----------------------------------------------------------------
 
@@ -539,10 +559,7 @@ struct StatusSnapshot {
     ProgramConfig                         config{};
     Peaks                                 peaks      = kDefaultPeaks;
     MinLevels                             min_levels = kDefaultMinLevels;
-    std::optional<uint8_t>                cloud_percent; // now (none: no data)
-    bool                                  cloud_live = false; // cloud_percent is live, not the forecast's
-    std::optional<Conditions>             conditions; // live, while fresh
-    Alerts                                alerts{};   // in force now
+    Sky                                   sky{};
 };
 
 } // namespace sunsim::ev

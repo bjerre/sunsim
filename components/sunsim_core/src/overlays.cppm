@@ -2,7 +2,6 @@ export module sunsim.core:overlays;
 
 import std.compat;
 import sunsim.ev;
-import :sky;
 
 export namespace sunsim::core {
 
@@ -23,21 +22,21 @@ struct Pulse {
     friend constexpr bool operator==(const Pulse &, const Pulse &) noexcept = default;
 };
 
-// What the weather shows on `role`, if anything; pure. `lit`: the program
-// has the light on. On the alert lights, a warning shows in daylight and off
+// What the sky shows on `role`, if anything; pure. `lit`: the program has
+// the light on. On the alert lights, a warning shows in daylight and off
 // modes whether lit or not (it's an alarm); an advisory or watch only on a
 // lit light in daylight mode. Failing that, on the precipitation lights,
 // rain or snow shows in daylight mode: dimmer if the light is otherwise off.
 [[nodiscard]] std::optional<Pulse> weatherPulse(ev::Role role, bool lit, ev::Mode mode,
-                                                const ev::ProgramConfig &config, ev::AlertLevel alert,
-                                                const std::optional<ev::Conditions> &now) noexcept;
+                                                const ev::ProgramConfig &config, const ev::Sky &sky) noexcept;
 
 // The stage between the running program and LightOutput: passes each
 // LightTarget through as the OutputTarget, except on lights the weather has
 // taken over (weatherPulse), which it pulses itself, a fade per Tick or
 // slower. When the weather lets a light go, the program's latest target for
-// it goes out again, with a quick transition. The weather is re-checked
-// every Tick, so a change shows within a second.
+// it goes out again, with a quick transition. Re-checked when the sky
+// changes (SkyChanged: at once) and every Tick (the mode, the program's
+// lights, the pulse's beat).
 class Overlays {
 public:
     explicit Overlays(ev::Post post);
@@ -46,8 +45,7 @@ public:
     void on(const ev::Tick &e);
     void on(const ev::ModeChanged &e) { mode_ = e.mode; }
     void on(const ev::ConfigChanged &e);
-    void on(const ev::ConditionsUpdated &e) { weather_.onConditions(e); }
-    void on(const ev::AlertsUpdated &e) { weather_.onAlerts(e); }
+    void on(const ev::SkyChanged &e);
 
 private:
     struct Light {
@@ -55,11 +53,12 @@ private:
         std::optional<Pulse>           pulse; // shown instead, while the weather has the light
     };
 
+    void reconcile();
     void show(ev::Role role, const Pulse &pulse, bool bright);
     void release(ev::Role role);
 
     ev::Post           post_;
-    Weather            weather_;
+    ev::Sky            sky_{};
     ev::Mode           mode_ = ev::Mode::Daylight;
     ev::ProgramConfig  config_{};
     ev::Peaks          peaks_      = ev::kDefaultPeaks;
@@ -125,8 +124,10 @@ constexpr uint8_t zigbeeHue(uint16_t degrees) noexcept
 } // namespace
 
 std::optional<Pulse> weatherPulse(ev::Role role, bool lit, ev::Mode mode, const ev::ProgramConfig &config,
-                                  ev::AlertLevel alert, const std::optional<ev::Conditions> &now) noexcept
+                                  const ev::Sky &sky) noexcept
 {
+    const ev::AlertLevel                 alert = sky.alert();
+    const std::optional<ev::Conditions> &now   = sky.conditions;
     if (!config.weather_enabled || !ev::isBulb(role)) {
         return std::nullopt;
     }
@@ -168,15 +169,26 @@ void Overlays::on(const ev::LightTarget &e)
     }
 }
 
-void Overlays::on(const ev::Tick &e)
+void Overlays::on(const ev::Tick &)
 {
     ++ticks_;
-    const ev::AlertLevel                alert = weather_.alertLevel(e.at);
-    const std::optional<ev::Conditions> now   = weather_.conditions(e.at);
+    reconcile();
+}
+
+void Overlays::on(const ev::SkyChanged &e)
+{
+    sky_ = e.sky;
+    reconcile();
+}
+
+// Each light to what the sky shows on it now: a pulse started or changed,
+// one fading on this beat, or one let go.
+void Overlays::reconcile()
+{
     for (const ev::Role role : ev::bulbs()) {
         Light     &light = lights_[role];
         const bool lit   = light.base && light.base->state.on;
-        const auto pulse = weatherPulse(role, lit, mode_, config_, alert, now);
+        const auto pulse = weatherPulse(role, lit, mode_, config_, sky_);
         if (!pulse) {
             if (light.pulse) {
                 release(role);

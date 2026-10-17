@@ -65,7 +65,7 @@ flowchart TB
 | Namespace / module | Holds | Imports |
 |---|---|---|
 | `sunsim::ev` (`sunsim.ev`) | every event, the `Event` variant, `Post`, `EventBus`; coroutine flows (`Flow`, `Timer`, `Inbox`); value types (`Role` and the layout, `LightState`, `ProgramConfig`, `StatusSnapshot`, ...) | `std` |
-| `sunsim::core` (`sunsim.core`) | `DeviceRegistry`, `ModeController`, `ProgramHost` and the programs, `Overlays`, `LightOutput`, `StatusModel`, the daylight/solar/sky math and `Weather`; `CoreModules` and `wireCore()` | `ev` |
+| `sunsim::core` (`sunsim.core`) | `DeviceRegistry`, `ModeController`, `SkyModel`, `ProgramHost` and the programs, `Overlays`, `LightOutput`, `StatusModel`, the daylight/solar/sky math; `CoreModules` and `wireCore()` | `ev` |
 | `sunsim::weather` (`sunsim.weather`) | `JsonScanner` (streaming), the Open-Meteo and NWS reply readers, WMO codes and NWS alert tiers | `ev` |
 | `sunsim::platform` (`sunsim.platform`) | `ZigbeeAdapter`, `Clock`, `InternetSync`, `SettingsStore`, the console, the status display, `StatusSlot` | `ev`, `weather`, ESP-IDF |
 | `sunsim` (`main/main.cpp`) | `App`, `app_main` | all |
@@ -275,7 +275,7 @@ classDiagram
         -Mode mode_
         -optional~TimeReading~ time_
         +on(ModeChanged / Tick / ProgramTick / RefreshLights / NetworkUp)
-        +on(ConfigChanged / CloudCoverUpdated / ConditionsUpdated)
+        +on(ConfigChanged / SkyChanged)
         +on(TuneLights / TuneSave)
         -running(f) / toEvery(e) / toRunning(e)
     }
@@ -288,8 +288,8 @@ classDiagram
         -DaylightSchedule schedule_
         -Peaks peaks_
         -MinLevels min_levels_
-        -Weather weather_
-        -Instant now_
+        -uint8 cloud_percent_
+        +on(SkyChanged)
         -outputLevel(role, level) uint8
     }
     class TuningProgram {
@@ -315,20 +315,21 @@ classDiagram
         computeDayInfo()
         cloudCover(forecast, time)
     }
-    class Weather {
+    class SkyModel {
         -CloudCover forecast_
         -optional~ConditionsUpdated~ conditions_
         -optional~AlertsUpdated~ alerts_
-        +conditions(now) optional~Conditions~
-        +alerts(now) Alerts
-        +cloud(time, now) optional~CloudReading~
+        -optional~Sky~ posted_
+        +on(Tick / CloudCoverUpdated / ConditionsUpdated / AlertsUpdated)
+        -judge() Sky
     }
     class Overlays {
-        -Weather weather_
+        -Sky sky_
         -PerRole~Light~ lights_ : base target, pulse
         +on(LightTarget)
-        +on(Tick)
-        +on(ConditionsUpdated / AlertsUpdated / ConfigChanged / ModeChanged)
+        +on(Tick / SkyChanged)
+        +on(ConfigChanged / ModeChanged)
+        -reconcile()
     }
     class LightOutput {
         -PerRole~Bulb~ bulbs_
@@ -338,11 +339,12 @@ classDiagram
     }
     class StatusModel {
         -StatusSnapshot snap_
-        +on(ConfigChanged / ModeChanged / DevicesUpdated / Tick)
+        +on(ConfigChanged / ModeChanged / DevicesUpdated / Tick / SkyChanged)
     }
 
     CoreModules *-- DeviceRegistry
     CoreModules *-- ModeController
+    CoreModules *-- SkyModel
     CoreModules *-- ProgramHost
     CoreModules *-- Overlays
     CoreModules *-- LightOutput
@@ -358,9 +360,7 @@ classDiagram
     DaylightProgram *-- DaylightSchedule
     DaylightSchedule ..> solar
     StatusModel ..> solar : day info
-    StatusModel *-- Weather
-    DaylightProgram *-- Weather : cloud now
-    Overlays *-- Weather : precipitation, alerts
+    SkyModel ..> solar : the forecast by hour
 ```
 
 The modules share nothing: each only knows the events it handles (its
@@ -530,16 +530,15 @@ type.
 
 ```mermaid
 flowchart LR
-    CK[Clock] -->|"Tick (1 Hz)"| MC & DR & PH & OV & SM
+    CK[Clock] -->|"Tick (1 Hz)"| MC & DR & SKY & PH & OV & SM
     CK -->|"ProgramTick (60 s)"| PH
     CK -->|"SyncRequested<br/>(fast-day switched)"| IS[InternetSync]
     CO -->|SyncRequested| IS
     CO -->|SetFastDay| CK
     ST -->|ConfigChanged| IS
-    IS -->|CloudCoverUpdated| PH & SM
-    IS -->|"ConditionsUpdated<br/>(15 min)"| PH & OV & SM
-    IS -->|"AlertsUpdated<br/>(15 min)"| OV & SM
-    CO -->|"ConditionsUpdated, AlertsUpdated<br/>(weather simulate)"| OV
+    IS -->|"CloudCoverUpdated (daily),<br/>ConditionsUpdated, AlertsUpdated (15 min)"| SKY[SkyModel]
+    CO -->|"ConditionsUpdated, AlertsUpdated<br/>(weather simulate)"| SKY
+    SKY -->|"SkyChanged<br/>(when it changes)"| PH & OV & SM
     CO -->|ModeRequested| MC
     CO -->|"TuneLights, TuneSave"| PH
     CO -->|SetMinLevel| ST
@@ -580,10 +579,11 @@ flowchart LR
 | **ZigbeeAdapter** | `SetLight`, `Discover`, `Bind`, `Ping`, `OpenNetwork`, `FactoryReset`, `RoleAssigned`, `RoleCleared` | `NetworkUp`, `DeviceAnnounced`, `EndpointFound`, `BindResult`, `PingResult`, `AckReceived`, `ButtonPressed` |
 | **DeviceRegistry** | `RolesLoaded`, `NetworkUp`, `DeviceAnnounced`, `EndpointFound`, `BindResult`, `PingResult`, `AckReceived`, `ButtonPressed`, `PairRequested`, `PairCancelled`, `UnpairRequested`, `Tick` | `RoleAssigned`, `RoleCleared`, `Discover`, `Bind`, `Ping`, `OpenNetwork`, `PersistRoles`, `RefreshLights`, `ReachabilityChanged`, `DevicesUpdated` |
 | **ModeController** | `ButtonPressed`, `ModeRequested`, `Tick` | `ModeChanged` |
-| **ProgramHost** (runs one `Program`) | `ModeChanged`, `ConfigChanged`, `CloudCoverUpdated`, `ConditionsUpdated`, `Tick`, `ProgramTick`, `RefreshLights`, `NetworkUp`, `TuneLights`, `TuneSave` | `LightTarget`, `SetMinLevel` (on `TuneSave`) |
-| **Overlays** | `LightTarget`, `Tick`, `ModeChanged`, `ConfigChanged`, `ConditionsUpdated`, `AlertsUpdated` | `OutputTarget` |
+| **SkyModel** | `CloudCoverUpdated`, `ConditionsUpdated`, `AlertsUpdated`, `Tick` | `SkyChanged` |
+| **ProgramHost** (runs one `Program`) | `ModeChanged`, `ConfigChanged`, `SkyChanged`, `Tick`, `ProgramTick`, `RefreshLights`, `NetworkUp`, `TuneLights`, `TuneSave` | `LightTarget`, `SetMinLevel` (on `TuneSave`) |
+| **Overlays** | `LightTarget`, `Tick`, `ModeChanged`, `ConfigChanged`, `SkyChanged` | `OutputTarget` |
 | **LightOutput** | `OutputTarget`, `RoleAssigned`, `RoleCleared`, `ReachabilityChanged` | `SetLight` |
-| **StatusModel** | `ConfigChanged`, `ModeChanged`, `DevicesUpdated`, `CloudCoverUpdated`, `ConditionsUpdated`, `AlertsUpdated`, `Tick` | `StatusChanged` |
+| **StatusModel** | `ConfigChanged`, `ModeChanged`, `DevicesUpdated`, `SkyChanged`, `Tick` | `StatusChanged` |
 | **Clock** | `Heartbeat`, `ConfigChanged`, `SetFastDay` | `Heartbeat` (from its timer), `Tick`, `ProgramTick`; on a fast-day switch also `RefreshLights`, `SyncRequested` |
 | **InternetSync** | `ConfigChanged` (the sync window), `SyncRequested` | `CloudCoverUpdated` (daily), `ConditionsUpdated` and `AlertsUpdated` (every 15 min); sets the system clock; runs on its own task |
 | **SettingsStore** | `SetConfig`, `SetIntensity`, `SetMinLevel`, `PersistRoles`, `FactoryReset` | `RolesLoaded`, `ConfigChanged` |
@@ -603,25 +603,40 @@ reaches a program only if it has `on()` for it.
 |---|---|---|---|---|---|
 | `start(now)` (optional) | `ModeChanged` | refresh all | refresh all | bright, refresh all | every bulb at its minimum, amber |
 | `refresh(role, now)` | `RefreshLights`, `NetworkUp`, `ConfigChanged` | sun curve now, 2 s | off | red at the current level | the tuned / minimum level |
-| `on(Tick)` | while running | the time, for the weather's freshness | — | flip bright/dim, 0.9 s fade | — |
+| `on(Tick)` | while running | — | — | flip bright/dim, 0.9 s fade | — |
 | `on(ProgramTick)` | while running | sun curve, ramped over the interval | — | — | — |
 | `on(ConfigChanged)` | always | schedule, peaks, minimums | — | — | minimums, amber colour |
-| `on(CloudCoverUpdated)`, `on(ConditionsUpdated)` | always | the forecast, the live cloud cover | — | — | — |
+| `on(SkyChanged)` | always | the cloud cover now | — | — | — |
 | `on(TuneLights)` | always | — | — | — | the tuned levels and colour |
 
 On `TuneSave`, `ProgramHost` takes the tuning program's levels and posts
 them as `SetMinLevel`, so programs still post only `LightTarget`s.
 
 Only the running program gets ticks and refreshes, so no program checks
-the mode.
+the mode. `LightOutput` doesn't know programs exist: it diffs each target
+against what it last sent that bulb, so switching programs sends only what
+differs (daylight -> red alert: hue/sat + level; each pulse after that:
+level only), and it holds back bulbs marked unreachable.
+
+### SkyModel: what the sky is now
+
+The weather arrives as facts with a time: the daily forecast, and every 15
+minutes the conditions and the alerts. Whether they still count is one
+module's call: `SkyModel` re-judges on every `Tick` and each update - live
+weather for `kWeatherFreshFor` (45 min), alerts until they end, the
+forecast's cloud for the time (always, in fast-day) - and posts
+`SkyChanged` whenever its conclusion changes. Everyone else just reacts:
+the daylight program takes the cloud cover, `Overlays` the conditions and
+alerts, `StatusModel` the lot. Nobody else keeps the weather or a clock to
+judge it by.
 
 ### Overlays: the weather lights
 
 `Overlays` sits between the programs and `LightOutput`. Each
 `LightTarget` passes straight through as an `OutputTarget`, except on a
-light the weather has taken over. It checks that once a `Tick` with
-`weatherPulse()`, a pure function of the light, whether its program has it
-on, the mode, the settings and the live weather:
+light the weather has taken over. It checks that on every `SkyChanged` and
+`Tick` with `weatherPulse()`, a pure function of the light, whether its
+program has it on, the mode, the settings and the `Sky`:
 
 | On | When | Shows |
 |---|---|---|
@@ -630,14 +645,9 @@ on, the mode, the settings and the live weather:
 | `precip_lights` (default WallC) | rain, snow, ... falling, in daylight mode | a blue to violet per type; dimmer (35%) on an unlit light |
 
 An alert wins where the two sets overlap. While a light pulses, its
-program's targets are kept but not sent. When the weather lets it go, the
-latest one goes out with a 2 s transition. Live weather counts for
-`kWeatherFreshFor` (45 min), so a dead connection lets the lights go
-(`core::Weather`, which `DaylightProgram` and `StatusModel` also keep for
-the live cloud cover). `LightOutput` doesn't know programs exist: it diffs each target
-against what it last sent that bulb, so switching programs sends only what
-differs (daylight -> red alert: hue/sat + level; each pulse after that:
-level only), and it holds back bulbs marked unreachable.
+program's targets are kept but not sent. When the sky lets it go (at once,
+on `SkyChanged`; a dead connection does it once the weather goes stale),
+the latest one goes out with a 2 s transition.
 
 To add a program: a `Mode` (the enum, `kModes`, `modeName`), a `Program`
 subclass, a member and its case in `ProgramHost::program()`, and whatever
@@ -691,6 +701,7 @@ sequenceDiagram
     participant ZA as ZigbeeAdapter
     participant Q as EventBus (app task)
     participant DR as DeviceRegistry
+    participant SKY as SkyModel
     participant PH as ProgramHost
     participant LO as LightOutput
 
@@ -707,7 +718,9 @@ sequenceDiagram
     Note over DR: discovery / keep-alive flows wait for NetworkUp
     Q->>LO: RoleAssigned: bulb addresses
     Q->>ZA: RoleAssigned: the button's address
-    Q->>PH: ConfigChanged, CloudCoverUpdated
+    Q->>PH: ConfigChanged
+    Q->>SKY: CloudCoverUpdated
+    SKY-->>Q: SkyChanged (to the programs, overlays, status)
     loop every second
         Q->>CK: Heartbeat
         CK-->>Q: Tick (+ ProgramTick every 60 s)
@@ -790,6 +803,7 @@ Pairing a device (console `pair` or the role manifest) is in DESIGN.md §2.
 | `CloudCoverUpdated` | `CloudCover` (48 local hours) | InternetSync, daily |
 | `ConditionsUpdated` | `Conditions` (cloud %, `Precip`, `Intensity`), `at` | InternetSync, every 15 min; Console (`weather simulate`) |
 | `AlertsUpdated` | `Alerts` (up to 4: tier, event name, `until`), `at` | InternetSync, every 15 min; Console (`weather simulate`) |
+| `SkyChanged` | `Sky`: cloud % (live or forecast), live `Conditions`, `Alerts` in force | SkyModel, when it changes |
 | `SetConfig` | `ProgramConfig` | Console (`config`) |
 | `SetIntensity` | `Selection` (all, a group or a role), percent | Console (`intensity`) |
 | `SetMinLevel` | `Selection`, level 1-254 | Console (`minlevel`), ProgramHost (`tune save`) |

@@ -577,21 +577,21 @@ int cmdSync(int, char **)
 
 void printWeather(const ev::StatusSnapshot &st)
 {
-    if (st.conditions) {
-        std::printf("now      %u%% cloud, ", st.conditions->cloud_percent);
-        if (st.conditions->precip == ev::Precip::None) {
+    if (st.sky.conditions) {
+        std::printf("now      %u%% cloud, ", st.sky.conditions->cloud_percent);
+        if (st.sky.conditions->precip == ev::Precip::None) {
             std::printf("nothing falling\n");
         } else {
-            std::printf("%s %s\n", ev::intensityName(st.conditions->intensity), ev::precipName(st.conditions->precip));
+            std::printf("%s %s\n", ev::intensityName(st.sky.conditions->intensity), ev::precipName(st.sky.conditions->precip));
         }
     } else {
         std::printf("now      no live conditions (none fetched in the last %lld min)\n",
                     static_cast<long long>(ev::kWeatherFreshFor.count()));
     }
-    if (st.alerts.count == 0) {
+    if (st.sky.alerts.count == 0) {
         std::printf("alerts   none\n");
     }
-    for (const ev::Alert &alert : st.alerts.list()) {
+    for (const ev::Alert &alert : st.sky.alerts.list()) {
         const auto left = std::chrono::duration_cast<std::chrono::minutes>(alert.until - st.at);
         std::printf("alert    %s (%s), %lld min left\n", alert.event.data(), ev::alertLevelName(alert.level),
                     static_cast<long long>(left.count()));
@@ -623,7 +623,7 @@ std::optional<T> lookup(const std::pair<std::string_view, T> (&names)[N], std::s
 int simulateWeather(const ev::StatusSnapshot &st, std::string_view what, std::string_view how)
 {
     const ev::Instant now   = ev::BootClock::now();
-    const uint8_t     cloud = st.conditions ? st.conditions->cloud_percent : st.cloud_percent.value_or(0);
+    const uint8_t     cloud = st.sky.conditions ? st.sky.conditions->cloud_percent : st.sky.cloud_percent.value_or(0);
     if (what == "clear") {
         g_ctx.post(ev::ConditionsUpdated{.now = {.cloud_percent = cloud}, .at = now});
         g_ctx.post(ev::AlertsUpdated{.at = now});
@@ -695,16 +695,16 @@ int cmdStatus(int, char **)
     printClock(st->day.next_event_hour);
     std::printf(")\n");
 
-    if (st->cloud_percent) {
-        std::printf("sky     %u%% cloud (%s)%s\n", *st->cloud_percent, st->cloud_live ? "now" : "forecast",
+    if (st->sky.cloud_percent) {
+        std::printf("sky     %u%% cloud (%s)%s\n", *st->sky.cloud_percent, st->sky.cloud_live ? "now" : "forecast",
                     st->config.clouds_enabled ? "" : " (clouds off)");
     } else {
         std::printf("sky     no forecast yet (clear assumed)\n");
     }
-    if (st->conditions && st->conditions->precip != ev::Precip::None) {
-        std::printf("falling %s %s\n", ev::intensityName(st->conditions->intensity), ev::precipName(st->conditions->precip));
+    if (st->sky.conditions && st->sky.conditions->precip != ev::Precip::None) {
+        std::printf("falling %s %s\n", ev::intensityName(st->sky.conditions->intensity), ev::precipName(st->sky.conditions->precip));
     }
-    for (const ev::Alert &alert : st->alerts.list()) {
+    for (const ev::Alert &alert : st->sky.alerts.list()) {
         std::printf("alert   %s\n", alert.event.data());
     }
 
