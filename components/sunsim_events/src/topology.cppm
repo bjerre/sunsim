@@ -186,6 +186,15 @@ struct Controls {
     std::optional<Mode> hold   = Mode::Off;
 };
 
+// The lights the weather pulses (core::Overlays), each a group or a light:
+// precipitation lights pulse a color while rain or snow falls, alert lights
+// yellow, orange or red for an NWS advisory, watch or warning (an alert wins
+// where they overlap). Color lights in the zone only.
+struct Weather {
+    List<std::string_view, 8> precip;
+    List<std::string_view, 8> alerts;
+};
+
 // Lights that share a mode (chosen by their buttons, or the console) and a
 // gate. Each light is in exactly one zone; it starts in daylight.
 struct ZoneSpec {
@@ -194,9 +203,15 @@ struct ZoneSpec {
     Gate              gate  = {Always{}};
     List<Mode, 4>     modes = {Mode::Daylight, Mode::Off, Mode::RedAlert, Mode::Tuning}; // what it may run
     List<Controls, 2> controls{};
-    bool              weather = false; // the weather lights (`config precip`, `alerts`) may be in it
+    std::optional<Weather> weather{}; // none: the weather never touches these lights
 
     [[nodiscard]] constexpr bool allows(Mode mode) const noexcept { return std::ranges::contains(modes, mode); }
+};
+
+// Every zone's weather lights.
+struct WeatherLights {
+    RoleSet precip{};
+    RoleSet alerts{};
 };
 
 // The zones table, per role: checked when it's built.
@@ -204,13 +219,15 @@ struct Topology {
     PerRole<std::optional<ZoneId>>   zone_of{};     // a light's zone, or the zone a button controls
     PerRole<Look>                    look_of{};     // lights
     PerRole<std::optional<Controls>> controls_of{}; // buttons that control a zone
+    WeatherLights                    weather{};
 };
 
 // `zones` per role. Doesn't compile if two zones share a name; a zone has no
 // lights, no gate, a gate rule after one that always answers
 // (answersAlways), or can't run daylight; a name in it isn't in the layout,
 // gives a button a look or a light a second one; a light is in no zone; or
-// a button is named twice, isn't a button, or picks a mode its zone can't run.
+// a button is named twice, isn't a button, or picks a mode its zone can't run;
+// or a weather light isn't a color light in its zone.
 template <std::ranges::input_range Zones> [[nodiscard]] consteval Topology topologyOf(const Zones &zones)
 {
     Topology      t{};
@@ -272,6 +289,26 @@ template <std::ranges::input_range Zones> [[nodiscard]] consteval Topology topol
             }
             t.controls_of[*button] = c;
             t.zone_of[*button]     = id;
+        }
+        if (zone.weather) {
+            const auto add = [&](const auto &names, RoleSet &set) {
+                for (const std::string_view name : names) {
+                    const auto selection = parseSelection(name);
+                    if (!selection) {
+                        fail("a zone's weather lights name something the layout doesn't have");
+                    }
+                    for (const Role role : kRoles) {
+                        if (selects(*selection, role)) {
+                            if (t.zone_of[role] != id || !caps(role).color) {
+                                fail("a weather light isn't a color light in its zone");
+                            }
+                            set.set(slot(role));
+                        }
+                    }
+                }
+            };
+            add(zone.weather->precip, t.weather.precip);
+            add(zone.weather->alerts, t.weather.alerts);
         }
     }
     for (const Role role : lights()) {

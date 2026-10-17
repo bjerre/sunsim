@@ -21,8 +21,9 @@ simulation and responds to one physical button controller:
   purple for thunder, glowing dimly even outside active hours. Two more
   (WallB, WallD) pulse yellow, orange or red for a National Weather Service
   advisory, watch or warning; a warning turns them on whatever the hour,
-  in daylight or off mode. `config weather`, `config precip`, `config alerts`,
-  and the `weather` command.
+  in daylight or off mode. Which lights pulse is the office zone's
+  `.weather` in `installation.cppm`; `config weather on|off` and the
+  `weather` command.
 - All bulbs only run inside an **active window** (default Mon-Fri,
   08:00-19:00, 10 min fade at each edge) and are off outside it.
 - **1 button controller** (any simple single-button Zigbee switch):
@@ -112,8 +113,6 @@ sunsim> config clouds on            # cloud cover shapes the wall (off: always c
 sunsim> config clouddim 40          # full overcast: up to 40% dimmer
 sunsim> config cloudcool 50         # ... and 50% of the way to the cool end
 sunsim> config weather on           # the weather lights (off: every light follows its program)
-sunsim> config precip WallC         # which lights show rain and snow (or none)
-sunsim> config alerts WallB,WallD   # which show NWS advisories/watches/warnings (or none)
 ```
 
 Settings are stored on the device and survive reflashing; changes apply

@@ -279,43 +279,7 @@ using Selection = std::variant<AllRoles, Group, Role>;
 // Any number of roles, by slot: the weather lights.
 using RoleSet = std::bitset<kRoleCount>;
 
-[[nodiscard]] constexpr RoleSet roleSet(std::initializer_list<Role> roles) noexcept
-{
-    RoleSet set;
-    for (const Role role : roles) {
-        set.set(slot(role));
-    }
-    return set;
-}
-
 [[nodiscard]] constexpr bool contains(const RoleSet &set, Role role) noexcept { return set.test(slot(role)); }
-
-// "none", or a comma list of what parseSelection() takes: "WallB,WallD",
-// "wall", "WallA,Work".
-[[nodiscard]] constexpr std::optional<RoleSet> parseRoleSet(std::string_view text) noexcept
-{
-    RoleSet set;
-    if (detail::equalsIgnoringCase(text, "none")) {
-        return set;
-    }
-    // (Not views::split: GCC 15 trips over its subrange across modules.)
-    for (;;) {
-        const auto comma     = text.find(',');
-        const auto selection = parseSelection(text.substr(0, comma));
-        if (!selection) {
-            return std::nullopt;
-        }
-        for (const Role role : kRoles) {
-            if (selects(*selection, role)) {
-                set.set(slot(role));
-            }
-        }
-        if (comma == std::string_view::npos) {
-            return set;
-        }
-        text.remove_prefix(comma + 1);
-    }
-}
 
 // A paired device's addresses. short_addr is network-assigned and refreshed
 // on every announce; endpoint is 0 until discovery finds it.
@@ -456,13 +420,9 @@ struct ProgramConfig {
     uint8_t cloud_dim_percent  = 40;
     uint8_t cloud_cool_percent = 50;
 
-    // Weather lights (core::Overlays): precip_lights pulse a color while
-    // rain or snow falls, alert_lights yellow/orange/red for an NWS
-    // advisory/watch/warning (an alert wins where they overlap). Off: every
-    // light shows its program alone.
-    bool    weather_enabled = true;
-    RoleSet precip_lights   = roleSet({Role{Group::Wall, 2}});                      // WallC
-    RoleSet alert_lights    = roleSet({Role{Group::Wall, 1}, Role{Group::Wall, 3}}); // WallB, WallD
+    // The weather lights (core::Overlays; which they are, each zone
+    // declares: ev::Weather). Off: every light shows its program alone.
+    bool weather_enabled = true;
 };
 
 inline constexpr uint8_t kMaxAmberSweepDeg = 30;

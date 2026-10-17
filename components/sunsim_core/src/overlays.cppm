@@ -22,14 +22,16 @@ struct Pulse {
     friend constexpr bool operator==(const Pulse &, const Pulse &) noexcept = default;
 };
 
-// What the sky shows on `role`, if anything; pure. Only on lights the
-// weather may take (ev::takesWeather: color lights in a weather zone).
-// `lit`: the program has the light on; `mode`: its zone's. On the alert lights, a warning shows in daylight and off
-// modes whether lit or not (it's an alarm); an advisory or watch only on a
-// lit light in daylight mode. Failing that, on the precipitation lights,
-// rain or snow shows in daylight mode: dimmer if the light is otherwise off.
-[[nodiscard]] std::optional<Pulse> weatherPulse(ev::Role role, bool lit, ev::Mode mode,
-                                                const ev::ProgramConfig &config, const ev::Sky &sky) noexcept;
+// What the sky shows on `role`, if anything; pure. Only on the weather
+// lights (`lights`: the zones' declared ones). `lit`: the program has the
+// light on; `mode`: its zone's. On the alert lights, a warning shows in
+// daylight and off modes whether lit or not (it's an alarm); an advisory or
+// watch only on a lit light in daylight mode. Failing that, on the
+// precipitation lights, rain or snow shows in daylight mode: dimmer if the
+// light is otherwise off.
+[[nodiscard]] std::optional<Pulse> weatherPulse(ev::Role role, bool lit, ev::Mode mode, const ev::ProgramConfig &config,
+                                                const ev::Sky           &sky,
+                                                const ev::WeatherLights &lights = ev::kWeatherLights) noexcept;
 
 // The stage between the running program and LightOutput: passes each
 // LightTarget through as the OutputTarget, except on lights the weather has
@@ -125,21 +127,21 @@ constexpr uint8_t zigbeeHue(uint16_t degrees) noexcept
 } // namespace
 
 std::optional<Pulse> weatherPulse(ev::Role role, bool lit, ev::Mode mode, const ev::ProgramConfig &config,
-                                  const ev::Sky &sky) noexcept
+                                  const ev::Sky &sky, const ev::WeatherLights &lights) noexcept
 {
     const ev::AlertLevel                 alert = sky.alert();
     const std::optional<ev::Conditions> &now   = sky.conditions;
-    if (!config.weather_enabled || !ev::takesWeather(role)) {
+    if (!config.weather_enabled) {
         return std::nullopt;
     }
     const bool daylight = mode == ev::Mode::Daylight;
-    if (alert != ev::AlertLevel::None && ev::contains(config.alert_lights, role)) {
+    if (alert != ev::AlertLevel::None && ev::contains(lights.alerts, role)) {
         const bool shown = alert == ev::AlertLevel::Warning ? daylight || mode == ev::Mode::Off : daylight && lit;
         if (shown) {
             return alertPulse(alert);
         }
     }
-    if (daylight && now && now->precip != ev::Precip::None && ev::contains(config.precip_lights, role)) {
+    if (daylight && now && now->precip != ev::Precip::None && ev::contains(lights.precip, role)) {
         Pulse pulse = precipPulse(now->precip, now->intensity);
         if (!lit) {
             pulse.strength *= kUnlitStrength;

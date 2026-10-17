@@ -96,17 +96,16 @@ grow lights. Rename it, keeping `daylight` as a console alias.
 
 ## The whole room in installation.cppm
 
-`kLayout` (the groups and their kinds) still lives in `types.cppm`, because
-`ProgramConfig` needs the role count (through `RoleSet`) and the topology
-needs `ProgramConfig`.
+`kLayout` (the groups and their kinds) still lives in `types.cppm`. One
+obstacle is gone: `ProgramConfig` no longer depends on the layout, since
+the weather lights moved into the zones. But `topology.cppm`'s checks use
+the roles, which are derived from `kLayout`, and installation.cppm uses the
+checks.
 
-- [ ] Reorder `sunsim.ev`'s partitions: basics -> program_config ->
-      topology -> installation -> roles.
-- [ ] Make `RoleSet` a fixed-capacity set (32 roles, `static_assert`ed).
-      Its NVS type changes from u16 to u32, so stored weather lights reset
-      once.
-- [ ] Move the weather lights' defaults into the zone:
-      `Weather{.precip = {"WallC"}, .alerts = {"WallB", "WallD"}}`.
+- [ ] Reorder `sunsim.ev`'s partitions so `kLayout` can sit in
+      installation.cppm. Options: give the layout a partition of its own
+      that installation.cppm re-exports, or make the checks independent of
+      the roles until they're instantiated.
 - [ ] Move the default peaks into the zone: `Shows{..., .peak = 90}`.
 - [ ] Optional: replace the `Group` enum with names (a group is its place
       in `kLayout`).

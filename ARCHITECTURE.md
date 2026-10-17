@@ -180,13 +180,14 @@ zone gives its lights a look (a `Look` variant: `SunCurve`, `WorkCurve`),
 says when they may be on (its `Gate`: a list of rules, `Always` or
 `Window`, where the first rule with an answer decides), which modes it can
 run, which buttons choose its mode (`Controls`: what a single, double and
-held press pick) and whether the weather lights may be in it.
+held press pick) and which of its lights the weather pulses (`Weather`).
 `topologyOf()` checks it at compile time into `kZoneOf`, `kLookOf` and
 `kControlsOf`: two zones with one name; a zone with no lights, no gate or
 no daylight; a gate rule after one that always answers (`Always`, a
 two-way `Window`), which would never be asked; a name the layout doesn't have; a light in two zones or none;
 a look on a button; a button named twice or picking a mode its zone can't
-run - none of these compile. Each zone runs its own mode: a red alert or
+run; a weather light that isn't a color light in its zone - none of these
+compile. Each zone runs its own mode: a red alert or
 a hold in one leaves the others alone. Their values are `Tunable`: fixed in the file, or a
 `ProgramConfig` field the console can change (`&ProgramConfig::active`).
 `core` evaluates them: `show()` per look (`daylight.cppm`), `openness()`
@@ -666,13 +667,15 @@ judge it by.
 `LightTarget` passes straight through as an `OutputTarget`, except on a
 light the weather has taken over. It checks that on every `SkyChanged` and
 `Tick` with `weatherPulse()`, a pure function of the light, whether its
-program has it on, the mode, the settings and the `Sky`:
+program has it on, its zone's mode, the settings, the `Sky` and the
+weather lights each zone declares (`Weather`, collected in
+`kWeatherLights`):
 
 | On | When | Shows |
 |---|---|---|
-| `alert_lights` (default WallB, WallD) | an NWS warning, in daylight or off mode, lit or not | red, a 1 s fade |
+| `alerts` (the office: WallB, WallD) | an NWS warning, in daylight or off mode, lit or not | red, a 1 s fade |
 | | an advisory / watch, in daylight mode, on a lit light | yellow 3 s / orange 2 s |
-| `precip_lights` (default WallC) | rain, snow, ... falling, in daylight mode | a blue to violet per type; dimmer (35%) on an unlit light |
+| `precip` (the office: WallC) | rain, snow, ... falling, in daylight mode | a blue to violet per type; dimmer (35%) on an unlit light |
 
 An alert wins where the two sets overlap. While a light pulses, its
 program's targets are kept but not sent. When the sky lets it go (at once,
@@ -968,7 +971,6 @@ Each is commented where it is; undo them as GCC's modules mature.
 |---|---|---|
 | `Event`'s copy/move/destructor (`events.cppm`), `Timer::~Timer` (`flow.cppm`), `Program::~Program` (`program.cppm`) | defined out of line, not implicit or inline | importers otherwise link to `std::variant` / `vector` internals nobody emitted |
 | `DaySpan`, `Mireds`, `Xy`, `HueSat` (`types.cppm`), `ZoneId` (`topology.cppm`) | `operator==` spelled out, not defaulted | GCC crashes compiling a file that imports them and compares them |
-| `parseRoleSet` (`types.cppm`) | a `find` loop, not `views::split` | its `subrange` fails to compile across modules |
 | `InternetSync` (`internet_sync.cppm` / `.cpp`) | definitions in a module implementation unit; the thread behind a `Task` | `std::jthread` and the C++20 semaphores in a `.cppm` crash GCC writing the module interface |
 | `kEventNames` (`events.cppm`) | names parsed from `__PRETTY_FUNCTION__` | no reflection until C++26 |
 

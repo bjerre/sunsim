@@ -6,7 +6,6 @@
 export module sunsim.ev:settings;
 
 import std.compat;
-import :installation;
 import :types;
 
 export namespace sunsim::ev {
@@ -46,12 +45,8 @@ struct Days { // mon-fri | all | mon,wed,...; stored as Weekdays' bits, a u8
     Weekdays ProgramConfig::*field;
     const char              *key;
 };
-struct Lights { // none | WallB,WallD | wall ...: takesWeather() lights only; stored as the set's bits, a u16
-    RoleSet ProgramConfig::*field;
-    const char             *key;
-};
 
-using Kind = std::variant<OnOff, Number, Minutes, Span, Days, Lights>;
+using Kind = std::variant<OnOff, Number, Minutes, Span, Days>;
 
 } // namespace setting
 
@@ -79,9 +74,7 @@ inline constexpr std::array kSettings = [] {
                 "full overcast: up to this much dimmer"},
         Setting{"cloudcool", setting::Number{&PC::cloud_cool_percent, 0, 100, "%", "sky.cool"},
                 "... and this far to the cool end"},
-        Setting{"weather", setting::OnOff{&PC::weather_enabled, "wx.on"}, "the weather lights"},
-        Setting{"precip", setting::Lights{&PC::precip_lights, "wx.precip"}, "the lights that pulse for rain and snow"},
-        Setting{"alerts", setting::Lights{&PC::alert_lights, "wx.alert"}, "the lights that pulse for NWS alerts"},
+        Setting{"weather", setting::OnOff{&PC::weather_enabled, "wx.on"}, "the weather lights (each zone declares which)"},
         Setting{"syncwindow", setting::Span{&PC::sync, "sync.start", "sync.end"}, "the daily clock and forecast sync"},
     };
 }();
@@ -222,18 +215,6 @@ std::string daysText(Weekdays days)
     return text.empty() ? "none" : text;
 }
 
-std::string lightsText(const RoleSet &set)
-{
-    std::string text;
-    for (const Role role : lights()) {
-        if (contains(set, role)) {
-            text += text.empty() ? "" : ",";
-            text += roleName(role);
-        }
-    }
-    return text.empty() ? "none" : text;
-}
-
 // The text set() takes for each kind, and its value.
 struct Syntax {
     std::string operator()(const setting::OnOff &) const { return "on|off"; }
@@ -241,7 +222,6 @@ struct Syntax {
     std::string operator()(const setting::Minutes &k) const { return std::format("0-{} (minutes)", k.max.count()); }
     std::string operator()(const setting::Span &) const { return "HH:MM-HH:MM"; }
     std::string operator()(const setting::Days &) const { return "mon-fri|all|mon,tue,..."; }
-    std::string operator()(const setting::Lights &) const { return "none|WallC|WallB,WallD|..."; }
 };
 } // namespace
 
@@ -300,16 +280,6 @@ std::expected<void, std::string> set(const Setting &setting, ProgramConfig &conf
             c.*k.field = *days;
             return true;
         }
-        bool operator()(const setting::Lights &k) const
-        {
-            // The weather pulses a color: only lights that show one, in a weather zone.
-            const auto set = parseRoleSet(text);
-            if (!set || std::ranges::any_of(kRoles, [&](Role r) { return !takesWeather(r) && contains(*set, r); })) {
-                return false;
-            }
-            c.*k.field = *set;
-            return true;
-        }
     };
     if (!std::visit(Set{config, text}, setting.kind)) {
         return expected();
@@ -330,7 +300,6 @@ std::string show(const Setting &setting, const ProgramConfig &c)
             return clockText((c.*k.field).start) + "-" + clockText((c.*k.field).end);
         }
         std::string operator()(const setting::Days &k) const { return daysText(c.*k.field); }
-        std::string operator()(const setting::Lights &k) const { return lightsText(c.*k.field); }
     };
     return std::visit(Show{c}, setting.kind);
 }

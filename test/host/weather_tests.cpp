@@ -299,26 +299,26 @@ void weatherTests()
         CHECK(!released.empty() && !released.back().state.on);
     });
 
-    test("an alert outranks the precipitation on a light that's both; weather off stops both", [&] {
-        Harness h;
-        weatherRig(h, noon());
-        ProgramConfig both;
-        both.alert_lights = both.precip_lights = roleSet({kWallC});
-        h.post(ConfigChanged{.config = both});
-        h.post(snowing(h.now));
-        h.post(alerted(h.now, AlertLevel::Advisory));
-        h.clearLog();
-        h.tick(3);
-        const auto c = outputs(h, kWallC);
-        CHECK(!c.empty() && std::ranges::all_of(c, [](const OutputTarget &t) { return colorOf<HueSat>(t.state) && colorOf<HueSat>(t.state)->hue == 35; }));
+    test("an alert outranks the precipitation on a light that's both; weather off stops both", [] {
+        Sky sky;
+        sky.conditions      = Conditions{.cloud_percent = 100, .precip = Precip::Snow};
+        sky.alerts.items[0] = {.level = AlertLevel::Advisory};
+        sky.alerts.count    = 1;
+        WeatherLights both;
+        both.precip.set(slot(kWallC));
+        both.alerts.set(slot(kWallC));
 
-        both.weather_enabled = false;
-        h.post(ConfigChanged{.config = both});
-        h.clearLog();
-        h.tick(3);
-        const auto plain = outputs(h, kWallC);
-        CHECK(!plain.empty() && std::ranges::none_of(plain, [](const OutputTarget &t) {
-            return colorOf<HueSat>(t.state) != nullptr;
-        }));
+        const ProgramConfig on;
+        const auto          pulse = core::weatherPulse(kWallC, true, Mode::Daylight, on, sky, both);
+        CHECK(pulse && pulse->shade.hue_deg == 50); // advisory yellow, not snow's blue
+
+        // The declared lights: WallC takes precipitation only, WallA nothing.
+        const auto snow = core::weatherPulse(kWallC, true, Mode::Daylight, on, sky);
+        CHECK(snow && snow->shade.hue_deg == 195);
+        CHECK(!core::weatherPulse(kWallA, true, Mode::Daylight, on, sky));
+
+        ProgramConfig off;
+        off.weather_enabled = false;
+        CHECK(!core::weatherPulse(kWallC, true, Mode::Daylight, off, sky, both));
     });
 }
