@@ -6,19 +6,19 @@ import sunsim.ev;
 export namespace sunsim::platform {
 
 // The latest StatusSnapshot, for readers outside the app task (console
-// commands, the display task). Written by a StatusChanged listener.
+// commands, the display task).
 class StatusSlot {
 public:
-    void set(const ev::StatusSnapshot &snapshot)
+    void on(const ev::StatusChanged &e)
     {
-        std::lock_guard lock(mutex_);
-        snapshot_ = snapshot;
+        const std::scoped_lock lock{mutex_};
+        snapshot_ = *e.snapshot;
     }
 
     // Empty until the first status update (about a second after the app starts).
     [[nodiscard]] std::optional<ev::StatusSnapshot> get() const
     {
-        std::lock_guard lock(mutex_);
+        const std::scoped_lock lock{mutex_};
         return snapshot_;
     }
 

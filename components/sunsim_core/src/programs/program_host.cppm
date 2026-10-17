@@ -11,38 +11,68 @@ import :tuning_program;
 export namespace sunsim::core {
 
 // Owns the lighting programs and runs the one the Mode selects: it starts
-// it on ModeChanged and forwards ticks and refreshes to it alone. Settings
-// and the weather go to every program. Keeps the latest time, for
-// programs that need it when they start or refresh. The console's tuning
-// requests go to the tuning program; `tune save` posts its levels as the
-// lights' minimums.
+// it on ModeChanged, and passes it the ticks and refreshes. Settings, the
+// weather and the console's tuning go to every program that handles them
+// (see Program). Keeps the latest time, for programs that need it when they
+// start or refresh. On `tune save` it posts the tuning program's levels as
+// the lights' minimums.
 //
 // Adding a program: a Mode (in sunsim::ev: the enum, kModes, modeName), a
-// Program subclass, a member and its case in program() here, and whatever
-// selects it (ModeController, console).
+// Program subclass, its place in Programs here, and whatever selects it
+// (ModeController, console).
 class ProgramHost {
 public:
     explicit ProgramHost(const ev::Post &post);
 
-    void onModeChanged(const ev::ModeChanged &e);
-    void onConfig(const ev::ConfigChanged &e);
-    void onTick(const ev::Tick &e);
-    void onProgramTick(const ev::ProgramTick &e);
-    void onRefresh(const ev::RefreshLights &e);
-    void onCloudCover(const ev::CloudCoverUpdated &e);
-    void onConditions(const ev::ConditionsUpdated &e);
-    void onTune(const ev::TuneLights &e);
-    void onTuneSave(const ev::TuneSave &e);
+    void on(const ev::ModeChanged &e);
+    void on(const ev::Tick &e);
+    void on(const ev::ProgramTick &e);
+    void on(const ev::RefreshLights &e) { running([&](auto &p) { p.refresh(e.role, time_); }); }
+    void on(const ev::NetworkUp &) { on(ev::RefreshLights{}); }
+    void on(const ev::ConfigChanged &e);
+    void on(const ev::CloudCoverUpdated &e) { toEvery(e); }
+    void on(const ev::ConditionsUpdated &e) { toEvery(e); }
+    void on(const ev::TuneLights &e) { toEvery(e); }
+    void on(const ev::TuneSave &e);
 
 private:
-    Program &program(ev::Mode mode) noexcept;
-    Program &running() noexcept { return program(mode_); }
+    // One of each, in Mode order: element m is mode m's program.
+    using Programs = std::tuple<DaylightProgram, OffProgram, RedAlertProgram, TuningProgram>;
 
-    DaylightProgram daylight_;
-    OffProgram      off_;
-    RedAlertProgram red_alert_;
-    TuningProgram   tuning_;
-    ev::Post        post_;
+    static constexpr bool inModeOrder = []<std::size_t... I>(std::index_sequence<I...>) {
+        return ((LightingProgram<std::tuple_element_t<I, Programs>> &&
+                 std::to_underlying(std::tuple_element_t<I, Programs>::kMode) == I) &&
+                ...);
+    }(std::make_index_sequence<std::tuple_size_v<Programs>>{});
+    static_assert(std::tuple_size_v<Programs> == ev::kModes.size() && inModeOrder,
+                  "Programs holds one program per Mode, in Mode order");
+
+    // f(the running program)
+    template <class F> void running(F &&f)
+    {
+        [&]<std::size_t... I>(std::index_sequence<I...>) {
+            ((std::to_underlying(mode_) == I ? f(std::get<I>(programs_)) : void()), ...);
+        }(std::make_index_sequence<std::tuple_size_v<Programs>>{});
+    }
+
+    // e to every program that handles it, or to the running one if it does.
+    template <class E> void toEvery(const E &e)
+    {
+        std::apply([&](auto &...p) { (deliver(p, e), ...); }, programs_);
+    }
+    template <class E> void toRunning(const E &e)
+    {
+        running([&](auto &p) { deliver(p, e); });
+    }
+    template <class P, class E> static void deliver(P &program, const E &e)
+    {
+        if constexpr (ev::HandlerOf<P, E>) {
+            program.on(e);
+        }
+    }
+
+    Programs programs_;
+    ev::Post post_;
 
     ev::Mode                       mode_ = ev::Mode::Daylight;
     std::optional<ev::TimeReading> time_; // latest, from Tick/ProgramTick
@@ -52,79 +82,41 @@ private:
 
 namespace sunsim::core {
 
-ProgramHost::ProgramHost(const ev::Post &post)
-    : daylight_(post), off_(post), red_alert_(post), tuning_(post), post_(post)
-{
-}
+ProgramHost::ProgramHost(const ev::Post &post) : programs_{post, post, post, post}, post_(post) {}
 
-Program &ProgramHost::program(ev::Mode mode) noexcept
-{
-    switch (mode) {
-    case ev::Mode::Daylight:
-        return daylight_;
-    case ev::Mode::Off:
-        return off_;
-    case ev::Mode::RedAlert:
-        return red_alert_;
-    case ev::Mode::Tuning:
-        return tuning_;
-    }
-    return daylight_;
-}
-
-void ProgramHost::onModeChanged(const ev::ModeChanged &e)
+void ProgramHost::on(const ev::ModeChanged &e)
 {
     mode_ = e.mode;
-    running().start(time_);
+    running([&](auto &p) {
+        if constexpr (requires { p.start(time_); }) {
+            p.start(time_);
+        } else {
+            p.refresh(std::nullopt, time_);
+        }
+    });
 }
 
-void ProgramHost::onConfig(const ev::ConfigChanged &e)
-{
-    for (const ev::Mode mode : ev::kModes) {
-        program(mode).onConfig(e);
-    }
-    running().refresh(std::nullopt, time_); // show a change now, not at the next update
-}
-
-void ProgramHost::onTick(const ev::Tick &e)
+void ProgramHost::on(const ev::Tick &e)
 {
     time_ = e.time;
-    running().onTick(e);
+    toRunning(e);
 }
 
-void ProgramHost::onProgramTick(const ev::ProgramTick &e)
+void ProgramHost::on(const ev::ProgramTick &e)
 {
     time_ = e.time;
-    running().onProgramTick(e);
+    toRunning(e);
 }
 
-void ProgramHost::onRefresh(const ev::RefreshLights &e)
+void ProgramHost::on(const ev::ConfigChanged &e)
 {
-    running().refresh(e.role, time_);
+    toEvery(e);
+    on(ev::RefreshLights{}); // show a change now, not at the next update
 }
 
-void ProgramHost::onCloudCover(const ev::CloudCoverUpdated &e)
+void ProgramHost::on(const ev::TuneSave &)
 {
-    for (const ev::Mode mode : ev::kModes) {
-        program(mode).onCloudCover(e);
-    }
-}
-
-void ProgramHost::onConditions(const ev::ConditionsUpdated &e)
-{
-    for (const ev::Mode mode : ev::kModes) {
-        program(mode).onConditions(e);
-    }
-}
-
-void ProgramHost::onTune(const ev::TuneLights &e)
-{
-    tuning_.onTune(e);
-}
-
-void ProgramHost::onTuneSave(const ev::TuneSave &)
-{
-    const auto tuned = tuning_.takeTuned();
+    const auto tuned = std::get<TuningProgram>(programs_).takeTuned();
     for (const ev::Role role : ev::bulbs()) {
         if (tuned[role]) {
             post_(ev::SetMinLevel{.lights = role, .level = *tuned[role]});

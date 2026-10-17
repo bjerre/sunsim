@@ -18,6 +18,16 @@ export namespace sunsim::ev {
 template <class F, class T>
 concept ListenerFor = EventPayload<T> && std::invocable<F &, const T &> && std::copy_constructible<F>;
 
+// A module that handles T: it has `void on(const T &)`, exactly that.
+template <class M, class T>
+concept HandlerOf = EventPayload<T> && requires { static_cast<void (M::*)(const T &)>(&M::on); };
+
+// A module that would take T only through a conversion (`on(T)` by value,
+// or `on(const Base &)` for a T derived from Base): a handler that attach()
+// would miss, so it doesn't compile.
+template <class M, class T>
+concept TakesByConversion = !HandlerOf<M, T> && requires(M &m, const T &e) { m.on(e); };
+
 // process() takes everything queued so far under the lock, then delivers it
 // without holding it, so posting never waits on a listener. Listeners are
 // added while wiring, before anything is processed, and never removed.
@@ -35,10 +45,20 @@ public:
             [listener = std::move(listener)](const Event &e) mutable { listener(e.as<T>()); });
     }
 
+    // Subscribe each module to every payload it has a handler for:
+    // `void on(const T &)`. Listeners for an event run in the order they
+    // were added; what they post is delivered on a later pass, so that order
+    // only matters for effects outside the bus (FactoryReset: erase, then
+    // reboot).
+    template <class... Modules> void attach(Modules &...modules)
+    {
+        (attachOne(modules), ...);
+    }
+
     // Any task.
     void enqueue(Event e)
     {
-        SUNSIM_LOGD("EV", "%s", e.name()); // full event trace at DEBUG
+        SUNSIM_LOGD("EV", "%.*s", static_cast<int>(e.name().size()), e.name().data()); // full event trace at DEBUG
         {
             const std::scoped_lock lock{mutex_};
             pending_.push_back(std::move(e));
@@ -80,6 +100,21 @@ public:
     }
 
 private:
+    template <class M> void attachOne(M &module)
+    {
+        [&]<std::size_t... I>(std::index_sequence<I...>) {
+            (subscribe<std::variant_alternative_t<I, Payload>>(module), ...);
+        }(std::make_index_sequence<std::variant_size_v<Payload>>{});
+    }
+
+    template <class T, class M> void subscribe(M &module)
+    {
+        static_assert(!TakesByConversion<M, T>, "a handler must take its event as `const T &`");
+        if constexpr (HandlerOf<M, T>) {
+            on<T>([&module](const T &e) { module.on(e); });
+        }
+    }
+
     using Listeners = std::vector<std::function<void(const Event &)>>;
     std::array<Listeners, std::variant_size_v<Payload>> listeners_; // by payload type
 

@@ -60,18 +60,18 @@ public:
 
     DeviceRegistry(ev::Post post, Manifest manifest);
 
-    void onRolesLoaded(const ev::RolesLoaded &e);
-    void onNetworkUp(const ev::NetworkUp &e);
-    void onAnnounced(const ev::DeviceAnnounced &e);
-    void onEndpointFound(const ev::EndpointFound &e);
-    void onBindResult(const ev::BindResult &e);
-    void onPingResult(const ev::PingResult &e);
-    void onAck(const ev::AckReceived &e);
-    void onButtonPressed(const ev::ButtonPressed &e);
-    void onPairRequested(const ev::PairRequested &e);
-    void onPairCancelled(const ev::PairCancelled &e);
-    void onUnpairRequested(const ev::UnpairRequested &e);
-    void onTick(const ev::Tick &e);
+    void on(const ev::RolesLoaded &e);
+    void on(const ev::NetworkUp &e);
+    void on(const ev::DeviceAnnounced &e);
+    void on(const ev::EndpointFound &e);
+    void on(const ev::BindResult &e);
+    void on(const ev::PingResult &e);
+    void on(const ev::AckReceived &e);
+    void on(const ev::ButtonPressed &e);
+    void on(const ev::PairRequested &e);
+    void on(const ev::PairCancelled &e);
+    void on(const ev::UnpairRequested &e);
+    void on(const ev::Tick &e);
 
 private:
     // Not constexpr: reached while building a manifest, they stop the
@@ -236,7 +236,7 @@ void DeviceRegistry::clear(ev::Role role)
     post_(ev::RoleCleared{role});
 }
 
-void DeviceRegistry::onRolesLoaded(const ev::RolesLoaded &e)
+void DeviceRegistry::on(const ev::RolesLoaded &e)
 {
     records_ = e.records;
     for (const ev::Role role : ev::kRoles) {
@@ -253,13 +253,13 @@ void DeviceRegistry::onRolesLoaded(const ev::RolesLoaded &e)
     }
 }
 
-void DeviceRegistry::onNetworkUp(const ev::NetworkUp &e)
+void DeviceRegistry::on(const ev::NetworkUp &e)
 {
     network_up_ = true;
     network_.deliver(e, e.at);
 }
 
-void DeviceRegistry::onAnnounced(const ev::DeviceAnnounced &e)
+void DeviceRegistry::on(const ev::DeviceAnnounced &e)
 {
     if (const auto existing = roleByExt(e.ext_addr)) {
         ev::DeviceRecord &d = record(*existing);
@@ -304,7 +304,7 @@ void DeviceRegistry::onAnnounced(const ev::DeviceAnnounced &e)
     assign(*role, e.ext_addr, e.short_addr);
 }
 
-void DeviceRegistry::onEndpointFound(const ev::EndpointFound &e)
+void DeviceRegistry::on(const ev::EndpointFound &e)
 {
     endpoints_.deliver(e);
 }
@@ -342,7 +342,7 @@ void DeviceRegistry::endpointFound(ev::Role role, uint8_t endpoint)
     }
 }
 
-void DeviceRegistry::onBindResult(const ev::BindResult &e)
+void DeviceRegistry::on(const ev::BindResult &e)
 {
     if (e.ok) {
         SUNSIM_LOGI(kTag, "Bound %s to local receiver endpoint", name(e.role));
@@ -351,7 +351,7 @@ void DeviceRegistry::onBindResult(const ev::BindResult &e)
     }
 }
 
-void DeviceRegistry::onPingResult(const ev::PingResult &e)
+void DeviceRegistry::on(const ev::PingResult &e)
 {
     pings_.deliver(e);
 }
@@ -384,7 +384,7 @@ ev::Flow DeviceRegistry::keepAlive(ev::Role bulb)
     }
 }
 
-void DeviceRegistry::onAck(const ev::AckReceived &e)
+void DeviceRegistry::on(const ev::AckReceived &e)
 {
     for (const ev::Role role : ev::kRoles) {
         if (record(role).valid && record(role).short_addr == e.short_addr) {
@@ -394,7 +394,7 @@ void DeviceRegistry::onAck(const ev::AckReceived &e)
     }
 }
 
-void DeviceRegistry::onButtonPressed(const ev::ButtonPressed &e)
+void DeviceRegistry::on(const ev::ButtonPressed &e)
 {
     if (e.source != ev::Source::Zigbee) {
         return;
@@ -406,7 +406,7 @@ void DeviceRegistry::onButtonPressed(const ev::ButtonPressed &e)
     }
 }
 
-void DeviceRegistry::onPairRequested(const ev::PairRequested &e)
+void DeviceRegistry::on(const ev::PairRequested &e)
 {
     if (record(e.role).valid) {
         SUNSIM_LOGW(kTag, "%s is already assigned; the next device to join will replace it", name(e.role));
@@ -419,13 +419,13 @@ void DeviceRegistry::onPairRequested(const ev::PairRequested &e)
                 name(e.role), name(e.role));
 }
 
-void DeviceRegistry::onPairCancelled(const ev::PairCancelled &)
+void DeviceRegistry::on(const ev::PairCancelled &)
 {
     armed_.reset();
     SUNSIM_LOGI(kTag, "Pairing cancelled");
 }
 
-void DeviceRegistry::onUnpairRequested(const ev::UnpairRequested &e)
+void DeviceRegistry::on(const ev::UnpairRequested &e)
 {
     for (const ev::Role role : ev::kRoles) {
         if (ev::selects(e.roles, role)) {
@@ -441,7 +441,7 @@ void DeviceRegistry::onUnpairRequested(const ev::UnpairRequested &e)
     persist();
 }
 
-void DeviceRegistry::onTick(const ev::Tick &e)
+void DeviceRegistry::on(const ev::Tick &e)
 {
     timer_.tick(e.at);
     publishDevices();

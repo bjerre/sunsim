@@ -46,14 +46,14 @@ public:
     static void lock();
     static void unlock();
 
-    void onSetLight(const ev::SetLight &e);
-    void onDiscover(const ev::Discover &e);
-    void onBind(const ev::Bind &e);
-    void onPing(const ev::Ping &e);
-    void onOpenNetwork(const ev::OpenNetwork &e);
-    [[noreturn]] void onFactoryReset();
-    void onRoleAssigned(const ev::RoleAssigned &e);
-    void onRoleCleared(const ev::RoleCleared &e);
+    void on(const ev::SetLight &e);
+    void on(const ev::Discover &e);
+    void on(const ev::Bind &e);
+    void on(const ev::Ping &e);
+    void on(const ev::OpenNetwork &e);
+    [[noreturn]] void on(const ev::FactoryReset &);
+    void on(const ev::RoleAssigned &e);
+    void on(const ev::RoleCleared &e);
 
 private:
     void taskBody();
@@ -493,7 +493,7 @@ void ZigbeeAdapter::onPingResult(const ezb_zdo_active_ep_req_result_t *result, v
 
 // ---- Events -> stack (app task; it holds the lock) ------------------------------
 
-void ZigbeeAdapter::onSetLight(const ev::SetLight &e)
+void ZigbeeAdapter::on(const ev::SetLight &e)
 {
     const BulbEndpoint bulb{e.short_addr, e.endpoint, kLightCtrlEp};
 
@@ -539,7 +539,7 @@ void ZigbeeAdapter::countSend(ezb_err_t err)
     }
 }
 
-void ZigbeeAdapter::onDiscover(const ev::Discover &e)
+void ZigbeeAdapter::on(const ev::Discover &e)
 {
     ezb_zdo_match_desc_req_t req{};
     req.dst_nwk_addr               = e.short_addr;
@@ -562,7 +562,7 @@ void ZigbeeAdapter::onDiscover(const ev::Discover &e)
     ezb_zdo_match_desc_req(&req);
 }
 
-void ZigbeeAdapter::onBind(const ev::Bind &e)
+void ZigbeeAdapter::on(const ev::Bind &e)
 {
     ezb_extaddr_t self_ext;
     ezb_get_extended_address(&self_ext);
@@ -582,7 +582,7 @@ void ZigbeeAdapter::onBind(const ev::Bind &e)
     ezb_zdo_bind_req(&req);
 }
 
-void ZigbeeAdapter::onPing(const ev::Ping &e)
+void ZigbeeAdapter::on(const ev::Ping &e)
 {
     ezb_zdo_active_ep_req_t req{};
     req.dst_nwk_addr               = e.short_addr;
@@ -592,7 +592,7 @@ void ZigbeeAdapter::onPing(const ev::Ping &e)
     ezb_zdo_active_ep_req(&req);
 }
 
-void ZigbeeAdapter::onOpenNetwork(const ev::OpenNetwork &e)
+void ZigbeeAdapter::on(const ev::OpenNetwork &e)
 {
     const ezb_err_t err = ezb_bdb_open_network(e.duration.count());
     if (err != EZB_ERR_NONE) {
@@ -600,20 +600,20 @@ void ZigbeeAdapter::onOpenNetwork(const ev::OpenNetwork &e)
     }
 }
 
-void ZigbeeAdapter::onFactoryReset()
+void ZigbeeAdapter::on(const ev::FactoryReset &)
 {
     ESP_LOGW(kTag, "Clearing the Zigbee network, then restarting");
     esp_zigbee_factory_reset(); // does not return
 }
 
-void ZigbeeAdapter::onRoleAssigned(const ev::RoleAssigned &e)
+void ZigbeeAdapter::on(const ev::RoleAssigned &e)
 {
     if (!ev::isBulb(e.role)) {
         button_short_.store(e.record.valid ? e.record.short_addr : 0xFFFF);
     }
 }
 
-void ZigbeeAdapter::onRoleCleared(const ev::RoleCleared &e)
+void ZigbeeAdapter::on(const ev::RoleCleared &e)
 {
     if (!ev::isBulb(e.role)) {
         button_short_.store(0xFFFF);

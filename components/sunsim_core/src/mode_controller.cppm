@@ -22,9 +22,9 @@ class ModeController {
 public:
     explicit ModeController(ev::Post post, std::chrono::milliseconds double_click_window = std::chrono::milliseconds{450});
 
-    void onPress(const ev::ButtonPressed &press) { presses_.deliver(press, press.at); }
-    void onModeRequested(const ev::ModeRequested &e) { enter(e.mode); } // the console's `tune`
-    void onTick(const ev::Tick &tick) { timer_.tick(tick.at); }
+    void on(const ev::ButtonPressed &press) { presses_.deliver(press, press.at); }
+    void on(const ev::ModeRequested &e) { enter(e.mode); } // the console's `tune`
+    void on(const ev::Tick &tick) { timer_.tick(tick.at); }
 
 private:
     ev::Flow run();

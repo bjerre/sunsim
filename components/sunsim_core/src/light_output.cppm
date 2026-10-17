@@ -15,10 +15,10 @@ class LightOutput {
 public:
     explicit LightOutput(ev::Post post);
 
-    void onRoleAssigned(const ev::RoleAssigned &e);
-    void onRoleCleared(const ev::RoleCleared &e);
-    void onReachability(const ev::ReachabilityChanged &e);
-    void onTarget(const ev::OutputTarget &e);
+    void on(const ev::RoleAssigned &e);
+    void on(const ev::RoleCleared &e);
+    void on(const ev::ReachabilityChanged &e);
+    void on(const ev::OutputTarget &e);
 
 private:
     struct Bulb {
@@ -75,7 +75,7 @@ void setColor(ev::SetLight &s, const ev::LightState &state) noexcept
 
 LightOutput::LightOutput(ev::Post post) : post_(std::move(post)) {}
 
-void LightOutput::onRoleAssigned(const ev::RoleAssigned &e)
+void LightOutput::on(const ev::RoleAssigned &e)
 {
     if (!ev::isBulb(e.role)) {
         return;
@@ -87,14 +87,14 @@ void LightOutput::onRoleAssigned(const ev::RoleAssigned &e)
     b.sent.reset(); // (re)paired or moved: resend everything next time
 }
 
-void LightOutput::onRoleCleared(const ev::RoleCleared &e)
+void LightOutput::on(const ev::RoleCleared &e)
 {
     if (ev::isBulb(e.role)) {
         bulbs_[e.role] = {};
     }
 }
 
-void LightOutput::onReachability(const ev::ReachabilityChanged &e)
+void LightOutput::on(const ev::ReachabilityChanged &e)
 {
     if (!ev::isBulb(e.role)) {
         return;
@@ -106,7 +106,7 @@ void LightOutput::onReachability(const ev::ReachabilityChanged &e)
     }
 }
 
-void LightOutput::onTarget(const ev::OutputTarget &e)
+void LightOutput::on(const ev::OutputTarget &e)
 {
     if (!ev::isBulb(e.role)) {
         return;

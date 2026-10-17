@@ -9,32 +9,31 @@ export namespace sunsim::core {
 // LightTargets. It never deals with addresses, reachability or what was
 // last sent; LightOutput does that, the same way for every program.
 //
-// ProgramHost owns the programs and runs one at a time (the Mode). Only the
-// running program gets ticks and refreshes; every program gets settings, so
-// it's current whenever it starts.
+// ProgramHost owns one of each and runs the one the Mode selects. A program
+// derives from Program (for posting) and has:
+//
+//   static constexpr ev::Mode kMode           the mode it is
+//   void refresh(role, now)                   re-apply `role` (nullopt = every bulb) now, with
+//                                             a quick transition: a bulb (re)joined or answers
+//                                             again, the network came up, a setting changed
+//   void start(now)                           optional: it became the running program
+//                                             (otherwise: refresh every bulb)
+//   void on(const T &)                        optional, any events: Tick and ProgramTick reach
+//                                             it only while it runs; settings, weather and the
+//                                             console's tuning always, so it's current whenever
+//                                             it starts
+//
+// `now` is nullopt until the clock's first Tick.
 class Program {
 public:
     explicit Program(ev::Post post) : post_(std::move(post)) {}
-    virtual ~Program() = default;
 
     Program(const Program &)            = delete;
     Program &operator=(const Program &) = delete;
 
-    // Became the running program: show it now. `now` is nullopt until the
-    // clock's first Tick.
-    virtual void start(const std::optional<ev::TimeReading> &now) { refresh(std::nullopt, now); }
-
-    // Re-apply `role` (nullopt = every bulb) now, with a quick transition: a
-    // bulb (re)joined or answers again, the network came up, a setting changed.
-    virtual void refresh(std::optional<ev::Role> role, const std::optional<ev::TimeReading> &now) = 0;
-
-    virtual void onTick(const ev::Tick &) {}               // 1 Hz, while running
-    virtual void onProgramTick(const ev::ProgramTick &) {} // update interval, while running
-    virtual void onConfig(const ev::ConfigChanged &) {}    // always, running or not
-    virtual void onCloudCover(const ev::CloudCoverUpdated &) {} // always, running or not
-    virtual void onConditions(const ev::ConditionsUpdated &) {} // always, running or not
-
 protected:
+    ~Program();
+
     // Calls f(role) for each bulb, or only for `only` if it's given (and a bulb).
     template <class F> static void forEachBulb(std::optional<ev::Role> only, F &&f)
     {
@@ -47,7 +46,7 @@ protected:
 
     void target(ev::Role role, const ev::LightState &state, ev::Transition level, ev::Transition color) const
     {
-        post_(ev::LightTarget{role, state, level, color});
+        post_(ev::LightTarget{{.role = role, .state = state, .level_transition = level, .color_transition = color}});
     }
     void target(ev::Role role, const ev::LightState &state, ev::Transition transition = {}) const
     {
@@ -57,5 +56,17 @@ protected:
 private:
     ev::Post post_;
 };
+
+// What ProgramHost needs of a program.
+template <class P>
+concept LightingProgram = std::derived_from<P, Program> && std::same_as<decltype(P::kMode), const ev::Mode> &&
+                          requires(P &p, std::optional<ev::Role> role, const std::optional<ev::TimeReading> &now) {
+                              p.refresh(role, now);
+                          };
+
+// Not inline: sunsim.core's object file has the one copy. (Inline, GCC 15
+// left the app, which destroys ProgramHost's tuple, linking to a destructor
+// nobody emitted - as with Event's members and Timer's destructor.)
+Program::~Program() = default;
 
 } // namespace sunsim::core

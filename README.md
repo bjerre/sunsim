@@ -363,7 +363,7 @@ generated `role_manifest.h`.
   - `math/` - `daylight.cppm`, `solar.cppm`, `sky.cppm` (the cloud cover,
     live or forecast; `Weather`, what's known and still fresh),
     `day_info.cppm`: the pure math.
-  - `core.cppm` - `CoreModules` and `wireCore()`, every core-to-core edge.
+  - `core.cppm` - `CoreModules` and `wireCore()`, which attaches them to the bus.
 - `components/sunsim_weather/` (`sunsim::weather`, module `sunsim.weather`)
   - reading the weather services' replies as they stream in, pure C++
   (host-tested): `json.cppm` (`JsonScanner`), `readers.cppm` (Open-Meteo's

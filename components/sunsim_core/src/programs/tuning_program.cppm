@@ -15,13 +15,14 @@ export namespace sunsim::core {
 // then never goes below while on.
 class TuningProgram final : public Program {
 public:
+    static constexpr ev::Mode kMode = ev::Mode::Tuning;
     using Program::Program;
 
-    void start(const std::optional<ev::TimeReading> &now) override;
-    void refresh(std::optional<ev::Role> role, const std::optional<ev::TimeReading> &now) override;
-    void onConfig(const ev::ConfigChanged &e) override;
+    void start(const std::optional<ev::TimeReading> &now);
+    void refresh(std::optional<ev::Role> role, const std::optional<ev::TimeReading> &now);
+    void on(const ev::ConfigChanged &e);
 
-    void onTune(const ev::TuneLights &e);
+    void on(const ev::TuneLights &e);
 
     // The levels set with `tune` since the last take, and forgets them.
     [[nodiscard]] ev::PerRole<std::optional<uint8_t>> takeTuned() noexcept { return std::exchange(tuned_, {}); }
@@ -50,13 +51,13 @@ void TuningProgram::refresh(std::optional<ev::Role> role, const std::optional<ev
     forEachBulb(role, [&](ev::Role r) { emit(r); });
 }
 
-void TuningProgram::onConfig(const ev::ConfigChanged &e)
+void TuningProgram::on(const ev::ConfigChanged &e)
 {
     min_levels_ = e.min_levels;
     kelvin_     = e.config.amber_kelvin;
 }
 
-void TuningProgram::onTune(const ev::TuneLights &e)
+void TuningProgram::on(const ev::TuneLights &e)
 {
     if (e.kelvin) {
         kelvin_ = *e.kelvin;

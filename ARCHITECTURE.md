@@ -256,43 +256,33 @@ classDiagram
         -PerRole~Flow~ discovery_
         -PerRole~Flow~ keep_alive_
         +manifestOf(entries) Manifest$
-        +onRolesLoaded / onNetworkUp / onAnnounced()
-        +onEndpointFound / onPingResult / onAck()
-        +onPairRequested / onUnpairRequested()
-        +onTick(Tick)
+        +on(RolesLoaded / NetworkUp / DeviceAnnounced)
+        +on(EndpointFound / PingResult / AckReceived)
+        +on(PairRequested / UnpairRequested / ...)
+        +on(Tick)
         -findEndpoint(Role) Flow
         -keepAlive(Role) Flow
     }
     class ModeController {
         -Inbox~ButtonPressed~ presses_
         -Flow flow_
-        +onPress(ButtonPressed)
-        +onTick(Tick)
+        +on(ButtonPressed)
+        +on(Tick)
         -run() Flow
     }
     class ProgramHost {
+        -tuple~Daylight, Off, RedAlert, Tuning~ programs_ : in Mode order
         -Mode mode_
         -optional~TimeReading~ time_
-        +onModeChanged(ModeChanged)
-        +onConfig(ConfigChanged)
-        +onTick(Tick)
-        +onProgramTick(ProgramTick)
-        +onRefresh(RefreshLights)
-        +onCloudCover(CloudCoverUpdated)
-        +onConditions(ConditionsUpdated)
-        +onTune(TuneLights)
-        +onTuneSave(TuneSave)
+        +on(ModeChanged / Tick / ProgramTick / RefreshLights / NetworkUp)
+        +on(ConfigChanged / CloudCoverUpdated / ConditionsUpdated)
+        +on(TuneLights / TuneSave)
+        -running(f) / toEvery(e) / toRunning(e)
     }
     class Program {
-        <<abstract>>
-        +start(now)
-        +refresh(role, now)*
-        +onTick(Tick)
-        +onProgramTick(ProgramTick)
-        +onConfig(ConfigChanged)
-        +onCloudCover(CloudCoverUpdated)
-        +onConditions(ConditionsUpdated)
+        <<base>>
         #target(role, LightState, transitions)
+        #forEachBulb(role, f)$
     }
     class DaylightProgram {
         -DaylightSchedule schedule_
@@ -306,7 +296,7 @@ classDiagram
         -MinLevels min_levels_
         -PerRole~optional~ tuned_
         -double kelvin_
-        +onTune(TuneLights)
+        +on(TuneLights)
         +takeTuned()
     }
     class OffProgram
@@ -336,19 +326,19 @@ classDiagram
     class Overlays {
         -Weather weather_
         -PerRole~Light~ lights_ : base target, pulse
-        +onTarget(LightTarget)
-        +onTick(Tick)
-        +onConditions / onAlerts / onConfig / onModeChanged()
+        +on(LightTarget)
+        +on(Tick)
+        +on(ConditionsUpdated / AlertsUpdated / ConfigChanged / ModeChanged)
     }
     class LightOutput {
         -PerRole~Bulb~ bulbs_
-        +onRoleAssigned / onRoleCleared()
-        +onReachability(ReachabilityChanged)
-        +onTarget(OutputTarget)
+        +on(RoleAssigned / RoleCleared)
+        +on(ReachabilityChanged)
+        +on(OutputTarget)
     }
     class StatusModel {
         -StatusSnapshot snap_
-        +onConfig / onModeChanged / onDevices / onTick()
+        +on(ConfigChanged / ModeChanged / DevicesUpdated / Tick)
     }
 
     CoreModules *-- DeviceRegistry
@@ -373,9 +363,10 @@ classDiagram
     Overlays *-- Weather : precipitation, alerts
 ```
 
-The modules share nothing: each only knows the events it handles and what
-it posts. `CoreModules` holds them, and `wireCore()` (`core.cppm`) connects
-every core-to-core edge, shared by the firmware and the host tests.
+The modules share nothing: each only knows the events it handles (its
+`on(const T &)` overloads) and what it posts. `CoreModules` holds them, and
+`wireCore()` (`core.cppm`) attaches them to the bus, the same in the
+firmware and the host tests.
 
 ### Platform and the app (`sunsim::platform`, `main/main.cpp`)
 
@@ -391,16 +382,15 @@ classDiagram
         -StatusSlot status_
         -CoreModules core_
         +run()
-        -wirePlatform()
         -appTask()$
     }
     class ZigbeeAdapter {
         -atomic~uint16~ button_short_
         +start() / waitUntilReady()
         +lock() / unlock()$
-        +onSetLight / onDiscover / onBind / onPing()
-        +onOpenNetwork / onFactoryReset()
-        +onRoleAssigned / onRoleCleared()
+        +on(SetLight / Discover / Bind / Ping)
+        +on(OpenNetwork / FactoryReset)
+        +on(RoleAssigned / RoleCleared)
         -handleSignal / handleZclAction()
         -handleApsIndication() bool
     }
@@ -414,9 +404,9 @@ classDiagram
         -ProgramConfig config_
         -unique_ptr~FastDayClock~ fast_day_
         +start()
-        +onHeartbeat()
-        +onConfig(ConfigChanged)
-        +onSetFastDay(SetFastDay)
+        +on(Heartbeat)
+        +on(ConfigChanged)
+        +on(SetFastDay)
         -read() TimeReading
     }
     class InternetSync {
@@ -424,8 +414,8 @@ classDiagram
         -atomic sync window
         -per-job last_try, last_ok
         +start() waits for the boot sync
-        +onConfig(ConfigChanged)
-        +onSyncRequested(SyncRequested)
+        +on(ConfigChanged)
+        +on(SyncRequested)
         -run(everything) the due jobs, one session
         -syncClock() bool
         -fetchCloudCover() bool
@@ -446,8 +436,8 @@ classDiagram
         -ProgramConfig config_
         -Peaks peaks_
         +loadAll()
-        +onSetConfig / onSetIntensity()
-        +onPersistRoles / onFactoryReset()
+        +on(SetConfig / SetIntensity / SetMinLevel)
+        +on(PersistRoles / FactoryReset)
     }
     class StatusSlot {
         -mutex
@@ -602,23 +592,25 @@ flowchart LR
 
 ### Programs
 
-Every mode is a `core::Program`: it decides what each bulb should show and
-posts `LightTarget`s, nothing else. `ProgramHost` owns them and runs the
-one the `Mode` selects.
+Every mode is a program (deriving from `core::Program`, for posting): it
+decides what each bulb should show and posts `LightTarget`s, nothing else.
+`ProgramHost` holds one of each in a `std::tuple` in `Mode` order (checked
+at compile time, with each program's `kMode`) and runs the one the `Mode`
+selects. No virtuals: the host calls what a program has, and an event
+reaches a program only if it has `on()` for it.
 
-| Hook | Called on | Daylight | Off | Red alert | Tuning |
+| Member | Called on | Daylight | Off | Red alert | Tuning |
 |---|---|---|---|---|---|
-| `start(now)` | `ModeChanged` | refresh all | refresh all | bright, refresh all | every bulb at its minimum, amber |
+| `start(now)` (optional) | `ModeChanged` | refresh all | refresh all | bright, refresh all | every bulb at its minimum, amber |
 | `refresh(role, now)` | `RefreshLights`, `NetworkUp`, `ConfigChanged` | sun curve now, 2 s | off | red at the current level | the tuned / minimum level |
-| `onTick` | `Tick` | — | — | flip bright/dim, 0.9 s fade | — |
-| `onProgramTick` | `ProgramTick` | sun curve, ramped over the interval | — | — | — |
-| `onConfig` | `ConfigChanged` (every program, running or not) | schedule, peaks, minimums | — | — | minimums, amber colour |
-| `onCloudCover` | `CloudCoverUpdated` (every program) | the forecast | — | — | — |
-| `onConditions` | `ConditionsUpdated` (every program) | the live cloud cover | — | — | — |
+| `on(Tick)` | while running | the time, for the weather's freshness | — | flip bright/dim, 0.9 s fade | — |
+| `on(ProgramTick)` | while running | sun curve, ramped over the interval | — | — | — |
+| `on(ConfigChanged)` | always | schedule, peaks, minimums | — | — | minimums, amber colour |
+| `on(CloudCoverUpdated)`, `on(ConditionsUpdated)` | always | the forecast, the live cloud cover | — | — | — |
+| `on(TuneLights)` | always | — | — | — | the tuned levels and colour |
 
-The tuning program also takes `TuneLights` (through `ProgramHost`); on
-`TuneSave`, `ProgramHost` takes its tuned levels and posts them as
-`SetMinLevel`, so programs still post only `LightTarget`s.
+On `TuneSave`, `ProgramHost` takes the tuning program's levels and posts
+them as `SetMinLevel`, so programs still post only `LightTarget`s.
 
 Only the running program gets ticks and refreshes, so no program checks
 the mode.
@@ -678,7 +670,7 @@ ev::Flow DeviceRegistry::findEndpoint(ev::Role role)
 | Piece | What it is |
 |---|---|
 | `Flow` | a coroutine owned by its module; starts at once; reassigning or destroying it cancels it wherever it waits |
-| `Timer` | `co_await timer.until(t)` / `after(15s)`; the module's `onTick` drives it, and timestamped events move it forward |
+| `Timer` | `co_await timer.until(t)` / `after(15s)`; the module's `on(Tick)` drives it, and timestamped events move it forward |
 | `Inbox<T>` | `co_await inbox.next(filter, deadline)`: the next `T` the flow wants, or `nullopt` at the deadline; the module's handler calls `deliver()` |
 
 The flows: `ModeController::run` (single vs double press by timing),
@@ -828,33 +820,41 @@ Pairing a device (console `pair` or the role manifest) is in DESIGN.md §2.
 ## 8. Wiring
 
 ```cpp
-// sunsim_core (core.cppm): every core-to-core edge, shared by firmware and tests.
+// A module handles an event by having an overload for it:
+class LightOutput {
+public:
+    void on(const ev::RoleAssigned &e);
+    void on(const ev::OutputTarget &e);
+    // ...
+};
+
+// sunsim_core (core.cppm), shared by firmware and tests:
 void wireCore(ev::EventBus &bus, CoreModules &m)
 {
-    bus.on<Tick>([&](const Tick &e) { m.mode.onTick(e); m.registry.onTick(e); m.programs.onTick(e); m.status.onTick(e); });
-    bus.on<ButtonPressed>([&](const ButtonPressed &e) { m.registry.onButtonPressed(e); m.mode.onPress(e); });
-    bus.on<LightTarget>([&](const LightTarget &e) { m.overlays.onTarget(e); });
-    bus.on<OutputTarget>([&](const OutputTarget &e) { m.output.onTarget(e); });
-    // ...
+    bus.attach(m.mode, m.registry, m.programs, m.overlays, m.output, m.status);
 }
 
-// main (main.cpp): the platform edges.
-void App::wirePlatform()
-{
-    bus_.on<SetLight>([this](const SetLight &e) { zigbee_.onSetLight(e); });
-    bus_.on<PersistRoles>([this](const PersistRoles &e) { settings_.onPersistRoles(e); });
-    bus_.on<StatusChanged>([this](const StatusChanged &e) { status_.set(*e.snapshot); });
-    // ...
-}
+// main (main.cpp): the platform modules.
+bus_.attach(settings_, clock_, internet_, zigbee_, status_);
 ```
 
-Listeners are added while wiring, before anything is processed, and run in
-the order they were added.
+`attach()` walks the `Payload` variant at compile time and subscribes the
+module to each `T` it has exactly `void on(const T &)` for (the
+`HandlerOf` concept). A handler that would take an event only through a
+conversion - by value, or as a base class - doesn't compile
+(`TakesByConversion`), so a mistyped handler can't go silently unwired.
+Event names for tracing come from the types too (`kEventNames`).
+
+Listeners are added before anything is processed, and an event's run in the
+order they were attached. What a listener posts is delivered on a later
+pass, so that order only matters for effects outside the bus: on
+`FactoryReset`, `SettingsStore` erases the roles before `ZigbeeAdapter`'s
+reset reboots.
 
 ## 9. Testing
 
 `test/host/` builds `sunsim.ev`, `sunsim.core` and `sunsim.weather` with plain CMake on the
-PC (no ESP-IDF; exceptions and RTTI off like the firmware), wires them with
+PC (no ESP-IDF; exceptions and RTTI off like the firmware), attaches them with
 the same `wireCore()`, and asserts on everything posted in response to the
 events each test posts:
 

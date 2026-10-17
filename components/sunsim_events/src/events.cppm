@@ -1,6 +1,7 @@
 // Every event in the system, in one variant. A module never calls another
-// module: it posts one of these, and the wiring (wireCore / main's
-// wirePlatform) routes it. See ARCHITECTURE.md §7 for who posts what.
+// module: it posts one of these, and the bus delivers it to every module
+// with an `on()` for it (EventBus::attach). See ARCHITECTURE.md §7 for who
+// posts what.
 
 export module sunsim.ev:events;
 
@@ -171,13 +172,14 @@ struct ModeChanged {             // switch to another program
 struct RefreshLights {           // the running program re-applies now, with its quick transition
     std::optional<Role> role;    // nullopt = every light
 };
-struct LightTarget {             // what a bulb should show, from the running program
+struct LightChange {             // a bulb, what it's to show, and how quickly to get there
     Role       role{};
     LightState state{};
     Transition level_transition{};
     Transition color_transition{};
 };
-struct OutputTarget : LightTarget {}; // what it does show: Overlays' pick, for LightOutput
+struct LightTarget : LightChange {};  // what a bulb should show, from the running program
+struct OutputTarget : LightChange {}; // what it does show: Overlays' pick, for LightOutput
 struct SetLight {                // one bulb's ZCL commands, sent in field order
     uint16_t                                  short_addr = 0;
     uint8_t                                   endpoint   = 0;
@@ -211,22 +213,6 @@ using Payload = std::variant<Heartbeat, Tick, ProgramTick, SetFastDay,          
                              ModeChanged, RefreshLights, LightTarget, OutputTarget, SetLight,        //
                              StatusChanged>;
 
-// Names for tracing, in Payload order.
-inline constexpr const char *kEventNames[] = {
-    "Heartbeat", "Tick", "ProgramTick", "SetFastDay",
-    "ConfigChanged", "SetConfig", "SetIntensity", "SetMinLevel", "CloudCoverUpdated",
-    "ConditionsUpdated", "AlertsUpdated",
-    "RolesLoaded", "PersistRoles",
-    "NetworkUp", "DeviceAnnounced", "EndpointFound", "BindResult", "PingResult",
-    "AckReceived", "ButtonPressed",
-    "PairRequested", "PairCancelled", "UnpairRequested", "OpenNetwork", "FactoryReset",
-    "SyncRequested", "ModeRequested", "TuneLights", "TuneSave",
-    "RoleAssigned", "RoleCleared", "Discover", "Bind", "Ping", "ReachabilityChanged", "DevicesUpdated",
-    "ModeChanged", "RefreshLights", "LightTarget", "OutputTarget", "SetLight",
-    "StatusChanged",
-};
-static_assert(std::size(kEventNames) == std::variant_size_v<Payload>, "kEventNames out of sync with Payload");
-
 namespace detail {
 template <class T, class... Ts> constexpr std::size_t indexIn(const std::variant<Ts...> *) noexcept
 {
@@ -243,6 +229,27 @@ inline constexpr std::size_t kTypeId = detail::indexIn<T>(static_cast<const Payl
 template <class T>
 concept EventPayload = kTypeId<T> < std::variant_size_v<Payload>;
 
+namespace detail {
+// T's unqualified name, read off the compiler's name for this function:
+// "... [with T = sunsim::ev::Tick@sunsim.ev; ...]" -> "Tick".
+template <class T> consteval std::string_view typeName() noexcept
+{
+    std::string_view name = __PRETTY_FUNCTION__;
+    name.remove_prefix(name.find("T = ") + 4);
+    name = name.substr(0, name.find_first_of(";]@"));
+    if (const auto scope = name.rfind("::"); scope != std::string_view::npos) {
+        name.remove_prefix(scope + 2);
+    }
+    return name;
+}
+} // namespace detail
+
+// Every payload's name, by type id: for tracing.
+inline constexpr auto kEventNames = []<std::size_t... I>(std::index_sequence<I...>) {
+    return std::array{detail::typeName<std::variant_alternative_t<I, Payload>>()...};
+}(std::make_index_sequence<std::variant_size_v<Payload>>{});
+static_assert(kEventNames[kTypeId<Tick>] == "Tick" && kEventNames[kTypeId<StatusChanged>] == "StatusChanged");
+
 struct Event {
     Payload data;
 
@@ -253,7 +260,7 @@ struct Event {
     }
 
     [[nodiscard]] std::size_t type() const noexcept { return data.index(); }
-    [[nodiscard]] const char *name() const noexcept { return kEventNames[data.index()]; }
+    [[nodiscard]] std::string_view name() const noexcept { return kEventNames[data.index()]; }
     template <EventPayload T> [[nodiscard]] const T &as() const { return *std::get_if<T>(&data); }
 
     Event(const Event &);

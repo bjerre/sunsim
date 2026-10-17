@@ -4,8 +4,8 @@
 // task, so nothing here locks.
 //
 //   class Registry {
-//       void onReply(const Reply &r) { replies_.deliver(r); }
-//       void onTick(const Tick &t)   { timer_.tick(t.at); }
+//       void on(const Reply &r) { replies_.deliver(r); }
+//       void on(const Tick &t)  { timer_.tick(t.at); }
 //
 //       Flow ask(Role role) {
 //           for (;;) {

@@ -14,13 +14,13 @@ class StatusModel {
 public:
     explicit StatusModel(ev::Post post);
 
-    void onConfig(const ev::ConfigChanged &e);
-    void onModeChanged(const ev::ModeChanged &e);
-    void onDevices(const ev::DevicesUpdated &e);
-    void onTick(const ev::Tick &e);
-    void onCloudCover(const ev::CloudCoverUpdated &e) { weather_.onForecast(e); }
-    void onConditions(const ev::ConditionsUpdated &e) { weather_.onConditions(e); }
-    void onAlerts(const ev::AlertsUpdated &e) { weather_.onAlerts(e); }
+    void on(const ev::ConfigChanged &e);
+    void on(const ev::ModeChanged &e);
+    void on(const ev::DevicesUpdated &e);
+    void on(const ev::Tick &e);
+    void on(const ev::CloudCoverUpdated &e) { weather_.onForecast(e); }
+    void on(const ev::ConditionsUpdated &e) { weather_.onConditions(e); }
+    void on(const ev::AlertsUpdated &e) { weather_.onAlerts(e); }
 
 private:
     void publish();
@@ -36,19 +36,19 @@ namespace sunsim::core {
 
 StatusModel::StatusModel(ev::Post post) : post_(std::move(post)) {}
 
-void StatusModel::onConfig(const ev::ConfigChanged &e)
+void StatusModel::on(const ev::ConfigChanged &e)
 {
     snap_.config     = e.config;
     snap_.peaks      = e.peaks;
     snap_.min_levels = e.min_levels;
 }
 
-void StatusModel::onModeChanged(const ev::ModeChanged &e)
+void StatusModel::on(const ev::ModeChanged &e)
 {
     snap_.mode = e.mode;
 }
 
-void StatusModel::onDevices(const ev::DevicesUpdated &e)
+void StatusModel::on(const ev::DevicesUpdated &e)
 {
     snap_.devices = e.devices;
     snap_.records = e.records;
@@ -56,7 +56,7 @@ void StatusModel::onDevices(const ev::DevicesUpdated &e)
     publish();
 }
 
-void StatusModel::onTick(const ev::Tick &e)
+void StatusModel::on(const ev::Tick &e)
 {
     // Published once the registry's DevicesUpdated for this tick arrives
     // (it posts one every Tick), so device links reflect this second, not the last.

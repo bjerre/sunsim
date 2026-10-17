@@ -30,11 +30,11 @@ public:
     // Posts RolesLoaded and ConfigChanged with what's stored.
     void loadAll();
 
-    void onSetConfig(const ev::SetConfig &e);
-    void onSetIntensity(const ev::SetIntensity &e);
-    void onSetMinLevel(const ev::SetMinLevel &e);
-    void onPersistRoles(const ev::PersistRoles &e);
-    void onFactoryReset();
+    void on(const ev::SetConfig &e);
+    void on(const ev::SetIntensity &e);
+    void on(const ev::SetMinLevel &e);
+    void on(const ev::PersistRoles &e);
+    void on(const ev::FactoryReset &);
 
 private:
     void publish();
@@ -322,7 +322,7 @@ void SettingsStore::loadAll()
     publish();
 }
 
-void SettingsStore::onSetConfig(const ev::SetConfig &e)
+void SettingsStore::on(const ev::SetConfig &e)
 {
     config_ = e.config;
 
@@ -349,7 +349,7 @@ void SettingsStore::onSetConfig(const ev::SetConfig &e)
     publish();
 }
 
-void SettingsStore::onSetIntensity(const ev::SetIntensity &e)
+void SettingsStore::on(const ev::SetIntensity &e)
 {
     const uint8_t percent = e.percent < 1 ? 1 : (e.percent > 100 ? 100 : e.percent);
 
@@ -365,7 +365,7 @@ void SettingsStore::onSetIntensity(const ev::SetIntensity &e)
     publish();
 }
 
-void SettingsStore::onSetMinLevel(const ev::SetMinLevel &e)
+void SettingsStore::on(const ev::SetMinLevel &e)
 {
     const uint8_t level = std::clamp<uint8_t>(e.level, 1, ev::kMaxLevel);
 
@@ -381,7 +381,7 @@ void SettingsStore::onSetMinLevel(const ev::SetMinLevel &e)
     publish();
 }
 
-void SettingsStore::onPersistRoles(const ev::PersistRoles &e)
+void SettingsStore::on(const ev::PersistRoles &e)
 {
     Nvs       nvs{NVS_READWRITE};
     NvsWriter w{nvs, "roles"};
@@ -401,10 +401,10 @@ void SettingsStore::onPersistRoles(const ev::PersistRoles &e)
     w.commit();
 }
 
-void SettingsStore::onFactoryReset()
+void SettingsStore::on(const ev::FactoryReset &)
 {
     ESP_LOGW(kTag, "Clearing all roles");
-    onPersistRoles(ev::PersistRoles{}); // all records invalid -> keys erased
+    on(ev::PersistRoles{}); // all records invalid -> keys erased
 }
 
 } // namespace sunsim::platform

@@ -35,7 +35,7 @@ ev::ProgramConfig defaultProgram()
     return c;
 }
 
-// Owns the event bus and every module, wires them, and runs the app task:
+// Owns the event bus and every module, attaches them, and runs the app task:
 // the single consumer of the bus. See ARCHITECTURE.md.
 class App {
 public:
@@ -49,7 +49,6 @@ public:
     void run();
 
 private:
-    void wirePlatform();
     static void appTask(void *arg);
 
     ev::EventBus            bus_;
@@ -69,48 +68,10 @@ App::App()
       core_(bus_.post(), kManifest)
 {
     core::wireCore(bus_, core_);
-    wirePlatform();
-}
-
-// Edges between the platform and the rest; core::wireCore has the others.
-void App::wirePlatform()
-{
-    using namespace ev;
-
-    // Clock
-    bus_.on<Heartbeat>([this](const Heartbeat &) { clock_.onHeartbeat(); });
-    bus_.on<ConfigChanged>([this](const ConfigChanged &e) {
-        clock_.onConfig(e);
-        internet_.onConfig(e);
-    });
-    bus_.on<SetFastDay>([this](const SetFastDay &e) { clock_.onSetFastDay(e); });
-
-    // Internet
-    bus_.on<SyncRequested>([this](const SyncRequested &e) { internet_.onSyncRequested(e); });
-
-    // Settings
-    bus_.on<SetConfig>([this](const SetConfig &e) { settings_.onSetConfig(e); });
-    bus_.on<SetIntensity>([this](const SetIntensity &e) { settings_.onSetIntensity(e); });
-    bus_.on<SetMinLevel>([this](const SetMinLevel &e) { settings_.onSetMinLevel(e); });
-    bus_.on<PersistRoles>([this](const PersistRoles &e) { settings_.onPersistRoles(e); });
-
-    // Radio
-    bus_.on<SetLight>([this](const SetLight &e) { zigbee_.onSetLight(e); });
-    bus_.on<Discover>([this](const Discover &e) { zigbee_.onDiscover(e); });
-    bus_.on<Bind>([this](const Bind &e) { zigbee_.onBind(e); });
-    bus_.on<Ping>([this](const Ping &e) { zigbee_.onPing(e); });
-    bus_.on<OpenNetwork>([this](const OpenNetwork &e) { zigbee_.onOpenNetwork(e); });
-    bus_.on<RoleAssigned>([this](const RoleAssigned &e) { zigbee_.onRoleAssigned(e); });
-    bus_.on<RoleCleared>([this](const RoleCleared &e) { zigbee_.onRoleCleared(e); });
-
-    // Erase the stored roles first: the radio's reset reboots and never returns.
-    bus_.on<FactoryReset>([this](const FactoryReset &) {
-        settings_.onFactoryReset();
-        zigbee_.onFactoryReset();
-    });
-
-    // Status, for the console and display tasks
-    bus_.on<StatusChanged>([this](const StatusChanged &e) { status_.set(*e.snapshot); });
+    // The platform modules, each to the events it handles. Settings before
+    // the radio: on FactoryReset the stored roles are erased first, as the
+    // radio's reset reboots and never returns.
+    bus_.attach(settings_, clock_, internet_, zigbee_, status_);
 }
 
 void App::run()

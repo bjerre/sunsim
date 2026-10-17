@@ -15,7 +15,7 @@ import :fast_day_clock;
 
 export namespace sunsim::platform {
 
-// Time for the whole app. A 1 Hz esp_timer posts Heartbeat; onHeartbeat()
+// Time for the whole app. A 1 Hz esp_timer posts Heartbeat; on(const ev::Heartbeat &)
 // (app task) reads the clock and posts Tick, plus ProgramTick every update
 // interval: 60 s, or 1 s in the debug fast-day mode, whose synthetic clock
 // loops the configured active window. Fast-day is switched at runtime
@@ -31,9 +31,9 @@ public:
 
     void start();
 
-    void onHeartbeat();
-    void onConfig(const ev::ConfigChanged &e);
-    void onSetFastDay(const ev::SetFastDay &e);
+    void on(const ev::Heartbeat &);
+    void on(const ev::ConfigChanged &e);
+    void on(const ev::SetFastDay &e);
 
 private:
     [[nodiscard]] ev::TimeReading read() const;
@@ -117,7 +117,7 @@ ev::TimeReading Clock::read() const
     return t;
 }
 
-void Clock::onHeartbeat()
+void Clock::on(const ev::Heartbeat &)
 {
     const ev::TimeReading time = read();
     post_(ev::Tick{.at = ev::BootClock::now(), .time = time});
@@ -130,12 +130,12 @@ void Clock::onHeartbeat()
     }
 }
 
-void Clock::onConfig(const ev::ConfigChanged &e)
+void Clock::on(const ev::ConfigChanged &e)
 {
     config_ = e.config;
 }
 
-void Clock::onSetFastDay(const ev::SetFastDay &e)
+void Clock::on(const ev::SetFastDay &e)
 {
     const bool was_on = fast_day_ != nullptr;
     if (e.on) {

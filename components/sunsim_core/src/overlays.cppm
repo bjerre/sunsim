@@ -42,12 +42,12 @@ class Overlays {
 public:
     explicit Overlays(ev::Post post);
 
-    void onTarget(const ev::LightTarget &e);
-    void onTick(const ev::Tick &e);
-    void onModeChanged(const ev::ModeChanged &e) { mode_ = e.mode; }
-    void onConfig(const ev::ConfigChanged &e);
-    void onConditions(const ev::ConditionsUpdated &e) { weather_.onConditions(e); }
-    void onAlerts(const ev::AlertsUpdated &e) { weather_.onAlerts(e); }
+    void on(const ev::LightTarget &e);
+    void on(const ev::Tick &e);
+    void on(const ev::ModeChanged &e) { mode_ = e.mode; }
+    void on(const ev::ConfigChanged &e);
+    void on(const ev::ConditionsUpdated &e) { weather_.onConditions(e); }
+    void on(const ev::AlertsUpdated &e) { weather_.onAlerts(e); }
 
 private:
     struct Light {
@@ -149,14 +149,14 @@ std::optional<Pulse> weatherPulse(ev::Role role, bool lit, ev::Mode mode, const 
 
 Overlays::Overlays(ev::Post post) : post_(std::move(post)) {}
 
-void Overlays::onConfig(const ev::ConfigChanged &e)
+void Overlays::on(const ev::ConfigChanged &e)
 {
     config_     = e.config;
     peaks_      = e.peaks;
     min_levels_ = e.min_levels;
 }
 
-void Overlays::onTarget(const ev::LightTarget &e)
+void Overlays::on(const ev::LightTarget &e)
 {
     if (!ev::isBulb(e.role)) {
         return;
@@ -168,7 +168,7 @@ void Overlays::onTarget(const ev::LightTarget &e)
     }
 }
 
-void Overlays::onTick(const ev::Tick &e)
+void Overlays::on(const ev::Tick &e)
 {
     ++ticks_;
     const ev::AlertLevel                alert = weather_.alertLevel(e.at);
@@ -199,30 +199,26 @@ void Overlays::show(ev::Role role, const Pulse &pulse, bool bright)
     const uint8_t top    = std::max(min_levels_[role], static_cast<uint8_t>(std::max(1L, std::lround(peak))));
     const uint8_t bottom = std::clamp(static_cast<uint8_t>(std::lround(top * kDimFraction)), min_levels_[role], top);
 
-    ev::OutputTarget out;
-    out.role             = role;
-    out.state            = {.on         = true,
-                            .level      = bright ? top : bottom,
-                            .color      = ev::ColorMode::HueSat,
-                            .hue        = zigbeeHue(pulse.shade.hue_deg),
-                            .saturation = pulse.shade.saturation};
-    out.level_transition = ev::Transition{static_cast<uint16_t>(pulse.fade_seconds * 10 - 1)}; // nearly the whole fade
-    out.color_transition = kColorTransition;
-    post_(out);
+    post_(ev::OutputTarget{{
+        .role             = role,
+        .state            = {.on         = true,
+                             .level      = bright ? top : bottom,
+                             .color      = ev::ColorMode::HueSat,
+                             .hue        = zigbeeHue(pulse.shade.hue_deg),
+                             .saturation = pulse.shade.saturation},
+        .level_transition = ev::Transition{static_cast<uint16_t>(pulse.fade_seconds * 10 - 1)}, // nearly the whole fade
+        .color_transition = kColorTransition,
+    }});
 }
 
 void Overlays::release(ev::Role role)
 {
     Light &light = lights_[role];
     light.pulse.reset();
-    ev::OutputTarget out;
-    if (light.base) {
-        static_cast<ev::LightTarget &>(out) = *light.base;
-    }
-    out.role             = role;
-    out.level_transition = kReleaseTransition;
-    out.color_transition = kReleaseTransition;
-    post_(out);
+    // Back to the program's latest (off, if it hasn't sent one), quickly.
+    ev::LightChange back = light.base.value_or(ev::LightTarget{{.role = role}});
+    back.level_transition = back.color_transition = kReleaseTransition;
+    post_(ev::OutputTarget{back});
 }
 
 } // namespace sunsim::core

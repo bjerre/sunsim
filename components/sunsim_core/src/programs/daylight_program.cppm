@@ -21,14 +21,15 @@ export namespace sunsim::core {
 // is held off.
 class DaylightProgram final : public Program {
 public:
+    static constexpr ev::Mode kMode = ev::Mode::Daylight;
     using Program::Program;
 
-    void refresh(std::optional<ev::Role> role, const std::optional<ev::TimeReading> &now) override;
-    void onTick(const ev::Tick &e) override { now_ = e.at; }
-    void onProgramTick(const ev::ProgramTick &e) override;
-    void onConfig(const ev::ConfigChanged &e) override;
-    void onCloudCover(const ev::CloudCoverUpdated &e) override { weather_.onForecast(e); }
-    void onConditions(const ev::ConditionsUpdated &e) override { weather_.onConditions(e); }
+    void refresh(std::optional<ev::Role> role, const std::optional<ev::TimeReading> &now);
+    void on(const ev::Tick &e) { now_ = e.at; }
+    void on(const ev::ProgramTick &e);
+    void on(const ev::ConfigChanged &e);
+    void on(const ev::CloudCoverUpdated &e) { weather_.onForecast(e); }
+    void on(const ev::ConditionsUpdated &e) { weather_.onConditions(e); }
 
 private:
     void emit(ev::Role role, const ev::TimeReading &time, ev::Transition transition);
@@ -70,12 +71,12 @@ void DaylightProgram::refresh(std::optional<ev::Role> role, const std::optional<
     forEachBulb(role, [&](ev::Role r) { emit(r, *now, kSnapTransition); });
 }
 
-void DaylightProgram::onProgramTick(const ev::ProgramTick &e)
+void DaylightProgram::on(const ev::ProgramTick &e)
 {
     forEachBulb(std::nullopt, [&](ev::Role r) { emit(r, e.time, e.transition); });
 }
 
-void DaylightProgram::onConfig(const ev::ConfigChanged &e)
+void DaylightProgram::on(const ev::ConfigChanged &e)
 {
     schedule_.setConfig(e.config);
     peaks_      = e.peaks;

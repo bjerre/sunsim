@@ -48,8 +48,8 @@ public:
     // Starts the task and waits for its first sync (the boot sync).
     void start();
 
-    void onConfig(const ev::ConfigChanged &e);
-    void onSyncRequested(const ev::SyncRequested &e);
+    void on(const ev::ConfigChanged &e);
+    void on(const ev::SyncRequested &e);
 
 private:
     struct Daily {};
@@ -199,13 +199,13 @@ void InternetSync::start()
     xSemaphoreTake(boot_done_, portMAX_DELAY);
 }
 
-void InternetSync::onConfig(const ev::ConfigChanged &e)
+void InternetSync::on(const ev::ConfigChanged &e)
 {
     window_start_ = minutesOf(e.config.sync_start_hour);
     window_end_   = minutesOf(e.config.sync_end_hour);
 }
 
-void InternetSync::onSyncRequested(const ev::SyncRequested &)
+void InternetSync::on(const ev::SyncRequested &)
 {
     if (task_ != nullptr) {
         xTaskNotifyGive(task_);

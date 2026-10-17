@@ -12,11 +12,12 @@ export namespace sunsim::core {
 // bright.
 class RedAlertProgram final : public Program {
 public:
+    static constexpr ev::Mode kMode = ev::Mode::RedAlert;
     using Program::Program;
 
-    void start(const std::optional<ev::TimeReading> &now) override;
-    void refresh(std::optional<ev::Role> role, const std::optional<ev::TimeReading> &now) override;
-    void onTick(const ev::Tick &e) override;
+    void start(const std::optional<ev::TimeReading> &now);
+    void refresh(std::optional<ev::Role> role, const std::optional<ev::TimeReading> &now);
+    void on(const ev::Tick &e);
 
 private:
     void emit(std::optional<ev::Role> role);
@@ -46,7 +47,7 @@ void RedAlertProgram::refresh(std::optional<ev::Role> role, const std::optional<
     emit(role);
 }
 
-void RedAlertProgram::onTick(const ev::Tick &)
+void RedAlertProgram::on(const ev::Tick &)
 {
     bright_ = !bright_;
     emit(std::nullopt);

@@ -100,6 +100,22 @@ struct Harness {
     }
 };
 
+// attach() subscribes a module to exactly the payloads it has `on(const T &)`
+// for; a handler that would take one only through a conversion doesn't compile.
+struct ExactModule {
+    void on(const Tick &) {}
+};
+struct ByBaseModule {
+    void on(const LightChange &) {}
+};
+struct ByValueModule {
+    void on(Tick) {}
+};
+static_assert(HandlerOf<ExactModule, Tick> && !HandlerOf<ExactModule, ProgramTick>);
+static_assert(!HandlerOf<ByBaseModule, LightTarget> && TakesByConversion<ByBaseModule, LightTarget>);
+static_assert(!HandlerOf<ByValueModule, Tick> && TakesByConversion<ByValueModule, Tick>);
+static_assert(kEventNames[kTypeId<OutputTarget>] == "OutputTarget");
+
 void test(const char *name, const std::function<void()> &body)
 {
     const int before = g_failures;
