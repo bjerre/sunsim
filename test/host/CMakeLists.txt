@@ -2,15 +2,22 @@
 # no ESP-IDF. Built with the firmware's C++ settings (no exceptions, no RTTI).
 # C++ modules need the Ninja generator (ESP-IDF's export.sh puts one on PATH).
 # The test framework, boost-ext/ut, comes from vcpkg (vcpkg.json), found
-# through VCPKG_ROOT:
+# through VCPKG_ROOT (default ~/vcpkg). Each test is a CTest test too, so
+# `ctest` and VS Code's Testing panel (CMake Tools, CMakePresets.json) list
+# them one by one:
 #
-#   cmake -S test/host -B build-host -G Ninja && cmake --build build-host && ./build-host/sunsim_tests
+#   cmake --preset host && cmake --build --preset host && ctest --preset host
+#   ./build-host/sunsim_tests ["<test name>"]
 cmake_minimum_required(VERSION 3.28)
 if(NOT CMAKE_TOOLCHAIN_FILE)
-    if(NOT DEFINED ENV{VCPKG_ROOT})
-        message(FATAL_ERROR "Set VCPKG_ROOT to a vcpkg checkout: the host tests get boost-ext/ut from it")
+    set(vcpkg $ENV{VCPKG_ROOT})
+    if(NOT vcpkg)
+        set(vcpkg $ENV{HOME}/vcpkg)
     endif()
-    set(CMAKE_TOOLCHAIN_FILE $ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake)
+    if(NOT EXISTS ${vcpkg}/scripts/buildsystems/vcpkg.cmake)
+        message(FATAL_ERROR "No vcpkg at ${vcpkg}: set VCPKG_ROOT to a vcpkg checkout (the host tests get boost-ext/ut from it)")
+    endif()
+    set(CMAKE_TOOLCHAIN_FILE ${vcpkg}/scripts/buildsystems/vcpkg.cmake)
 endif()
 project(sunsim_host_tests CXX)
 
@@ -61,3 +68,14 @@ add_executable(sunsim_tests main.cpp devices_tests.cpp modes_tests.cpp daylight_
                             events_tests.cpp)
 target_sources(sunsim_tests PRIVATE FILE_SET CXX_MODULES FILES harness.cppm)
 target_link_libraries(sunsim_tests PRIVATE sunsim_core sunsim_weather boost_ut Threads::Threads)
+
+# A CTest test per ut test, named as it is: after each build,
+# discover_tests.cmake asks sunsim_tests for the names and writes the CTest
+# file that's included here.
+enable_testing()
+set(DISCOVERED ${CMAKE_CURRENT_BINARY_DIR}/sunsim_tests_discovered.cmake)
+add_custom_command(TARGET sunsim_tests POST_BUILD BYPRODUCTS ${DISCOVERED}
+                   COMMAND ${CMAKE_COMMAND} -D EXE=$<TARGET_FILE:sunsim_tests> -D OUT=${DISCOVERED} -P
+                           ${CMAKE_CURRENT_SOURCE_DIR}/discover_tests.cmake
+                   COMMENT "Finding the tests in sunsim_tests")
+set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES ${DISCOVERED})

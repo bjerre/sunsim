@@ -8,7 +8,7 @@
 #              with export.sh's Python and refuses another.
 # SUNSIM_PORT  the board's serial port (default: the only /dev/ttyACM*).
 # VCPKG_ROOT   the vcpkg checkout the host tests get boost-ext/ut from
-#              (default ~/vcpkg).
+#              (default ~/vcpkg; see test/host/CMakeLists.txt).
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -125,9 +125,8 @@ EOF
 }
 
 host_tests() {
-    export VCPKG_ROOT=${VCPKG_ROOT:-$HOME/vcpkg}
     if [[ ! -f $ROOT/build-host/build.ninja ]]; then
-        cmake -S "$ROOT/test/host" -B "$ROOT/build-host" -G Ninja >/dev/null
+        cmake --preset host -S "$ROOT/test/host" >/dev/null
     fi
     cmake --build "$ROOT/build-host"
     "$ROOT/build-host/sunsim_tests" | grep -Ev '^[IWE] \(' # results, not the core's logging

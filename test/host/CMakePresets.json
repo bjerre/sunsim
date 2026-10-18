@@ -1,0 +1,13 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "host",
+      "displayName": "Host tests",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../../build-host"
+    }
+  ],
+  "buildPresets": [{ "name": "host", "configurePreset": "host" }],
+  "testPresets": [{ "name": "host", "configurePreset": "host", "output": { "outputOnFailure": true } }]
+}

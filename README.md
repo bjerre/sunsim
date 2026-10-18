@@ -402,15 +402,21 @@ as in the firmware and driven by events:
 
 ```
 ./sunsim test
-# or by hand:
-cmake -S test/host -B build-host -G Ninja && cmake --build build-host && ./build-host/sunsim_tests
+# or by hand, from test/host:
+cmake --preset host && cmake --build --preset host && ctest --preset host
+../../build-host/sunsim_tests "<test name>"   # one test; --list for the names
 ```
+
+Each test is a CTest test of its own (`discover_tests.cmake` asks the
+binary for the names after each build), so VS Code's Testing panel lists
+them, through CMake Tools: `.vscode/settings.json` points it at
+`test/host`, whose `CMakePresets.json` builds into `build-host/`. The
+firmware isn't built through CMake Tools (`./sunsim build`).
 
 C++ modules need Ninja and GCC 15 (ESP-IDF's `export.sh` puts its Ninja on
 `PATH`). The test framework, [boost-ext/ut](https://github.com/boost-ext/ut),
 comes from vcpkg (`test/host/vcpkg.json`, pinned by its `builtin-baseline`):
-set `VCPKG_ROOT` to a vcpkg checkout (`./sunsim test` defaults to
-`~/vcpkg`). Once:
+`VCPKG_ROOT`, or `~/vcpkg` if that's unset. Once:
 
 ```
 git clone https://github.com/microsoft/vcpkg ~/vcpkg && ~/vcpkg/bootstrap-vcpkg.sh -disableMetrics
