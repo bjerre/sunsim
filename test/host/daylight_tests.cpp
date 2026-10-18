@@ -10,8 +10,7 @@ using namespace sunsim::ev;
 using namespace sunsim::testing;
 using namespace std::chrono_literals;
 
-void daylightTests()
-{
+const suite<"daylight"> daylightTests = [] {
     "clock not set -> lights held off"_test = [] {
         Harness h;
         TimeReading unset = noon();
@@ -234,4 +233,4 @@ void daylightTests()
         const TimeReading night = at(13h + 30min); // after sunset
         expect(westLevel(h, night) == 0);
     };
-}
+};

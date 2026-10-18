@@ -2,6 +2,9 @@
     "idf.currentSetup": "/home/bjerre/.espressif/v6.1/esp-idf",
     "cmake.sourceDirectory": "${workspaceFolder}/test/host",
     "cmake.configureOnOpen": true,
+    "cmake.ctest.failurePatterns": [
+        { "regexp": "in: (.*?):(\\d+) - (test condition: .*)" }
+    ],
     "cmake.configureEnvironment": {
         "IDF_PATH": "/home/bjerre/.espressif/v6.1/esp-idf"
     },

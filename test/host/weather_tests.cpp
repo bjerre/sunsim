@@ -11,8 +11,7 @@ using namespace sunsim::ev;
 using namespace sunsim::testing;
 using namespace std::chrono_literals;
 
-void weatherTests()
-{
+const suite<"weather"> weatherTests = [] {
     // The program's base targets, then the weather's: the harness ticks on.
     const auto weatherRig = [](Harness &h, TimeReading time) {
         h.tick(1, time);
@@ -319,4 +318,4 @@ void weatherTests()
         off.weather_enabled = false;
         expect(!core::weatherPulse(kWallC, true, Mode::Daylight, off, sky, both));
     };
-}
+};

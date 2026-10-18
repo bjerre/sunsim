@@ -28,8 +28,7 @@ static_assert(!HandlerOf<ByValueModule, Tick> && TakesByConversion<ByValueModule
 static_assert(kEventNames[kTypeId<OutputTarget>] == "OutputTarget");
 } // namespace
 
-void eventsTests()
-{
+const suite<"events"> eventsTests = [] {
     "the bus delivers every event posted from many threads, in each poster's order"_test = [] {
         EventBus         bus;
         std::vector<int> seen[2];
@@ -95,4 +94,4 @@ void eventsTests()
         }
         expect(keys.size() == 15);
     };
-}
+};

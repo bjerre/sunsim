@@ -404,7 +404,7 @@ as in the firmware and driven by events:
 ./sunsim test
 # or by hand, from test/host:
 cmake --preset host && cmake --build --preset host && ctest --preset host
-../../build-host/sunsim_tests "<test name>"   # one test; --list for the names
+../../build-host/sunsim_tests "<test name>"   # one test; --help for ut's options
 ```
 
 Each test is a CTest test of its own (`discover_tests.cmake` asks the

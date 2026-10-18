@@ -10,8 +10,7 @@ using namespace sunsim::ev;
 using namespace sunsim::testing;
 using namespace std::chrono_literals;
 
-void modesTests()
-{
+const suite<"modes"> modesTests = [] {
     "double press -> red alert pulses; single press -> daylight resumes"_test = [] {
         Harness h;
         h.tick();
@@ -169,4 +168,4 @@ void modesTests()
         const auto modes = h.all<ModeChanged>();
         expect(modes.size() == 1 && modes[0].mode == Mode::Daylight); // daylight, sky and all
     };
-}
+};

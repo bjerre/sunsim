@@ -13,11 +13,13 @@ export namespace sunsim::testing {
 using namespace sunsim::ev;
 using namespace std::chrono_literals;
 
-// From boost.ut: a test is `"what it shows"_test = [] { ... };`, run where
-// it's assigned; expect(cond) records a failure, says where, and the test
-// carries on. eq(a, b) and `that % a == b` also print both values.
+// From boost.ut: each file's tests are a suite (`const suite<"area"> ... =
+// [] { ... };`, run by main()), and a test is `"what it shows"_test = [] {
+// ... };`. expect(cond) records a failure, says where, and the test carries
+// on; eq(a, b) and `that % a == b` also print both values.
 using boost::ut::eq;
 using boost::ut::expect;
+using boost::ut::suite;
 using boost::ut::that;
 using boost::ut::operator""_test;
 

@@ -10,8 +10,7 @@ using namespace sunsim::ev;
 using namespace sunsim::testing;
 using namespace std::chrono_literals;
 
-void devicesTests()
-{
+const suite<"devices"> devicesTests = [] {
     "pairing assigns the armed role, persists, discovers, then lights it"_test = [] {
         Harness h;
         h.tick(); // the program needs a time to compute targets
@@ -293,4 +292,4 @@ void devicesTests()
         };
         static_assert(topologyOf(layered).zone_of[kWork] == ZoneId{0}); // one-way rules first: fine
     };
-}
+};
