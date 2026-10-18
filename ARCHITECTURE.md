@@ -926,7 +926,9 @@ events each test posts:
 One file per area (`devices_tests.cpp`, `modes_tests.cpp`,
 `daylight_tests.cpp`, `weather_tests.cpp`, `events_tests.cpp`), sharing the
 module `sunsim.test` (`harness.cppm`: the `Harness`, a fixed Tuesday to run
-on, the runner) and `check.h` (`CHECK`, a macro, so a header).
+on, and boost-ext/ut's `"name"_test` and `expect()`, re-exported). ut comes
+from vcpkg (`test/host/vcpkg.json`); it's macro-free, so it's a module like
+the rest (`boost.ut`, built from the `ut.cppm` vcpkg installs).
 
 Covered: console pairing end to end; a paired device is never re-claimed by
 `pair`; unknown devices ignored; double press -> red pulses -> single press

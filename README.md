@@ -341,7 +341,7 @@ Each component is one C++ module (`import sunsim.ev;` and so on, plus
 one piece of math), declaration and definitions together, and a
 component's main `.cppm` re-exports the partitions (one exception:
 `InternetSync`'s definitions are in `internet_sync.cpp`, see ARCHITECTURE.md
-§12). The only header left is the tests' `check.h`; logging is `ev::log::info(tag, "{}", ...)`, std::format
+§12). There are no headers of our own left; logging is `ev::log::info(tag, "{}", ...)`, std::format
 strings checked at compile time.
 
 - `components/sunsim_events/` (`sunsim::ev`, module `sunsim.ev`) - the
@@ -407,4 +407,14 @@ cmake -S test/host -B build-host -G Ninja && cmake --build build-host && ./build
 ```
 
 C++ modules need Ninja and GCC 15 (ESP-IDF's `export.sh` puts its Ninja on
-`PATH`).
+`PATH`). The test framework, [boost-ext/ut](https://github.com/boost-ext/ut),
+comes from vcpkg (`test/host/vcpkg.json`, pinned by its `builtin-baseline`):
+set `VCPKG_ROOT` to a vcpkg checkout (`./sunsim test` defaults to
+`~/vcpkg`). Once:
+
+```
+git clone https://github.com/microsoft/vcpkg ~/vcpkg && ~/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+```
+
+ut is macro-free, so it's imported like everything else: the module
+`sunsim.test` (`harness.cppm`) re-exports its `"name"_test` and `expect()`.

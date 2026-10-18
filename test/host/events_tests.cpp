@@ -1,7 +1,5 @@
 // The event vocabulary: the bus, attach()'s handler matching, the settings table.
 
-#include "check.h"
-
 import std.compat;
 import sunsim.ev;
 import sunsim.core;
@@ -32,7 +30,7 @@ static_assert(kEventNames[kTypeId<OutputTarget>] == "OutputTarget");
 
 void eventsTests()
 {
-    test("the bus delivers every event posted from many threads, in each poster's order", [] {
+    "the bus delivers every event posted from many threads, in each poster's order"_test = [] {
         EventBus         bus;
         std::vector<int> seen[2];
         bus.on<AckReceived>([&](const AckReceived &a) { seen[a.status].push_back(a.short_addr); });
@@ -53,11 +51,11 @@ void eventsTests()
         }
         posters.clear(); // join
         for (const auto &s : seen) {
-            CHECK(s.size() == kPerThread && std::ranges::is_sorted(s));
+            expect(s.size() == kPerThread && std::ranges::is_sorted(s));
         }
-    });
+    };
 
-    test("settings: typed, shown and stored from one table", [] {
+    "settings: typed, shown and stored from one table"_test = [] {
         ProgramConfig c;
         const auto    is = [&](std::string_view name, std::string_view text) {
             return show(*findSetting(name), c) == text;
@@ -65,36 +63,36 @@ void eventsTests()
         const auto takes = [&](std::string_view name, std::string_view text) {
             return set(*findSetting(name), c, text).has_value();
         };
-        CHECK(is("hours", "08:00-19:00") && is("days", "mon-fri") && is("fade", "10 min"));
-        CHECK(is("sunshift", "25%") && is("ambersweep", "3 deg") && is("amber", "on"));
+        expect(is("hours", "08:00-19:00") && is("days", "mon-fri") && is("fade", "10 min"));
+        expect(is("sunshift", "25%") && is("ambersweep", "3 deg") && is("amber", "on"));
 
-        CHECK((takes("hours", "07:30-24:00") && c.active == DaySpan{7h + 30min, 24h}));
-        CHECK(takes("days", "sat,mon") && is("days", "mon,sat"));
-        CHECK(takes("clouds", "off") && !c.clouds_enabled);
+        expect((takes("hours", "07:30-24:00") && c.active == DaySpan{7h + 30min, 24h}));
+        expect(takes("days", "sat,mon") && is("days", "mon,sat"));
+        expect(takes("clouds", "off") && !c.clouds_enabled);
 
         const ProgramConfig before = c;
-        CHECK(!takes("hours", "19:00-08:00"));    // backwards
-        CHECK(!takes("hours", "8-19"));
-        CHECK(!takes("sunshift", "101"));
-        CHECK(!takes("sunshift", ""));
-        CHECK(!takes("ambersweep", "31"));
-        CHECK(!takes("fade", "-1"));
-        CHECK(!takes("amber", "yes"));
-        CHECK(!takes("days", "mon,funday"));
-        CHECK(before.active == c.active && before.sun_shift_percent == c.sun_shift_percent); // nothing changed
-        CHECK(!findSetting("precip") && !findSetting("alerts")); // declared in the zones instead
+        expect(!takes("hours", "19:00-08:00"));    // backwards
+        expect(!takes("hours", "8-19"));
+        expect(!takes("sunshift", "101"));
+        expect(!takes("sunshift", ""));
+        expect(!takes("ambersweep", "31"));
+        expect(!takes("fade", "-1"));
+        expect(!takes("amber", "yes"));
+        expect(!takes("days", "mon,funday"));
+        expect(before.active == c.active && before.sun_shift_percent == c.sun_shift_percent); // nothing changed
+        expect(!findSetting("precip") && !findSetting("alerts")); // declared in the zones instead
 
         const auto error = set(*findSetting("sunshift"), c, "lots");
-        CHECK(!error && error.error() == "sunshift takes 0-100");
-        CHECK(!findSetting("color"));
+        expect(!error && error.error() == "sunshift takes 0-100");
+        expect(!findSetting("color"));
 
         // The keys the device already has values under.
         const auto keys = settingKeys();
         for (const std::string_view key : {"act.start", "act.end", "act.fade", "act.days", "work.start", "work.end",
                                            "sun.shift", "sun.amber", "sun.sweep", "sky.on", "sky.dim", "sky.cool",
                                            "sync.start", "sync.end", "wx.on"}) {
-            CHECK(std::ranges::contains(keys, key));
+            expect(std::ranges::contains(keys, key));
         }
-        CHECK(keys.size() == 15);
-    });
+        expect(keys.size() == 15);
+    };
 }

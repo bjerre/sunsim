@@ -1,9 +1,10 @@
 // What every host test uses: the core, attached like the firmware's, with a
-// log of everything posted; a fixed day to run it on; and the test runner.
-// (CHECK, a macro, is in check.h.)
+// log of everything posted; a fixed day to run it on; and boost.ut's
+// "name"_test and expect().
 export module sunsim.test;
 
 import std.compat;
+import boost.ut;
 import sunsim.ev;
 import sunsim.core;
 
@@ -12,12 +13,13 @@ export namespace sunsim::testing {
 using namespace sunsim::ev;
 using namespace std::chrono_literals;
 
-// Runs one test, printing PASS or FAIL with its name.
-void test(const char *name, const std::function<void()> &body);
-// A failed CHECK (see check.h).
-void fail(const char *file, int line, const char *condition);
-// How many CHECKs have failed so far.
-[[nodiscard]] int failures() noexcept;
+// From boost.ut: a test is `"what it shows"_test = [] { ... };`, run where
+// it's assigned; expect(cond) records a failure, says where, and the test
+// carries on. eq(a, b) and `that % a == b` also print both values.
+using boost::ut::eq;
+using boost::ut::expect;
+using boost::ut::that;
+using boost::ut::operator""_test;
 
 constexpr Role kWallA{Group::Wall, 0}; // the east end
 constexpr Role kWallB{Group::Wall, 1};
@@ -120,32 +122,6 @@ inline CloudCover tuesdayForecast()
     f.percent[13] = 60;
     f.percent[36] = 90;
     return f;
-}
-
-} // namespace sunsim::testing
-
-namespace sunsim::testing {
-
-namespace {
-int g_failures = 0;
-} // namespace
-
-void test(const char *name, const std::function<void()> &body)
-{
-    const int before = g_failures;
-    body();
-    std::printf("%s %s\n", g_failures == before ? "PASS" : "FAIL", name);
-}
-
-void fail(const char *file, int line, const char *condition)
-{
-    std::printf("    FAIL %s:%d: %s\n", file, line, condition);
-    ++g_failures;
-}
-
-int failures() noexcept
-{
-    return g_failures;
 }
 
 } // namespace sunsim::testing

@@ -1,9 +1,17 @@
 # Host tests for the pure layers (sunsim_events, sunsim_core, sunsim_weather): plain CMake,
 # no ESP-IDF. Built with the firmware's C++ settings (no exceptions, no RTTI).
-# C++ modules need the Ninja generator (ESP-IDF's export.sh puts one on PATH):
+# C++ modules need the Ninja generator (ESP-IDF's export.sh puts one on PATH).
+# The test framework, boost-ext/ut, comes from vcpkg (vcpkg.json), found
+# through VCPKG_ROOT:
 #
 #   cmake -S test/host -B build-host -G Ninja && cmake --build build-host && ./build-host/sunsim_tests
 cmake_minimum_required(VERSION 3.28)
+if(NOT CMAKE_TOOLCHAIN_FILE)
+    if(NOT DEFINED ENV{VCPKG_ROOT})
+        message(FATAL_ERROR "Set VCPKG_ROOT to a vcpkg checkout: the host tests get boost-ext/ut from it")
+    endif()
+    set(CMAKE_TOOLCHAIN_FILE $ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake)
+endif()
 project(sunsim_host_tests CXX)
 
 set(CMAKE_CXX_STANDARD 26) # the firmware builds as gnu++26 (ESP-IDF 6.1)
@@ -32,10 +40,24 @@ add_library(sunsim_weather STATIC)
 target_sources(sunsim_weather PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${WEATHER} FILES ${WEATHER_MODULES})
 target_link_libraries(sunsim_weather PUBLIC sunsim_events)
 
+# boost-ext/ut's module, boost.ut. vcpkg installs ut.cppm beside ut.hpp but
+# doesn't build it; built here against the same std module as the rest.
+# (Copied into the build tree for clangd, as import_std.cmake does; ut.cppm
+# includes "ut.hpp", so that comes too.)
+find_package(ut CONFIG REQUIRED)
+get_target_property(UT_INCLUDE Boost::ut INTERFACE_INCLUDE_DIRECTORIES)
+foreach(file ut.cppm ut.hpp)
+    configure_file(${UT_INCLUDE}/boost/${file} ${CMAKE_CURRENT_BINARY_DIR}/ut/${file} COPYONLY)
+endforeach()
+add_library(boost_ut STATIC)
+target_sources(boost_ut PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT_BINARY_DIR}/ut FILES
+                                                    ${CMAKE_CURRENT_BINARY_DIR}/ut/ut.cppm)
+target_link_libraries(boost_ut PUBLIC sunsim_events)
+
 find_package(Threads REQUIRED)
 # One file per area (devices, modes, daylight, weather, events), sharing the
-# module sunsim.test (harness.cppm) and check.h.
+# module sunsim.test (harness.cppm).
 add_executable(sunsim_tests main.cpp devices_tests.cpp modes_tests.cpp daylight_tests.cpp weather_tests.cpp
                             events_tests.cpp)
 target_sources(sunsim_tests PRIVATE FILE_SET CXX_MODULES FILES harness.cppm)
-target_link_libraries(sunsim_tests PRIVATE sunsim_core sunsim_weather Threads::Threads)
+target_link_libraries(sunsim_tests PRIVATE sunsim_core sunsim_weather boost_ut Threads::Threads)

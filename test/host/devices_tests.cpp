@@ -1,7 +1,5 @@
 // Pairing, discovery, liveness and the role layout: DeviceRegistry and LightOutput.
 
-#include "check.h"
-
 import std.compat;
 import sunsim.ev;
 import sunsim.core;
@@ -14,104 +12,104 @@ using namespace std::chrono_literals;
 
 void devicesTests()
 {
-    test("pairing assigns the armed role, persists, discovers, then lights it", [] {
+    "pairing assigns the armed role, persists, discovers, then lights it"_test = [] {
         Harness h;
         h.tick(); // the program needs a time to compute targets
         h.post(PairRequested{kWallC});
-        CHECK(h.all<OpenNetwork>().size() == 1);
+        expect(h.all<OpenNetwork>().size() == 1);
 
         h.post(DeviceAnnounced{.ext_addr = 0xAA, .short_addr = 0x1234});
         const auto assigned = h.all<RoleAssigned>();
-        CHECK(assigned.size() == 1 && assigned[0].role == kWallC && assigned[0].record.ext_addr == 0xAA);
-        CHECK(!h.all<PersistRoles>().empty());
+        expect(assigned.size() == 1 && assigned[0].role == kWallC && assigned[0].record.ext_addr == 0xAA);
+        expect(!h.all<PersistRoles>().empty());
         const auto discover = h.all<Discover>();
-        CHECK(discover.size() == 1 && discover[0].role == kWallC && discover[0].short_addr == 0x1234);
+        expect(discover.size() == 1 && discover[0].role == kWallC && discover[0].short_addr == 0x1234);
 
         h.clearLog();
         h.post(EndpointFound{.role = kWallC, .endpoint = 11});
         const auto lights = h.all<SetLight>();
-        CHECK(lights.size() == 1 && lights[0].short_addr == 0x1234 && lights[0].endpoint == 11);
-        CHECK(lights.size() == 1 && lights[0].power && *lights[0].power); // first command switches it on
-    });
+        expect(lights.size() == 1 && lights[0].short_addr == 0x1234 && lights[0].endpoint == 11);
+        expect(lights.size() == 1 && lights[0].power && *lights[0].power); // first command switches it on
+    };
 
-    test("a device that already holds a role is never claimed by `pair`", [] {
+    "a device that already holds a role is never claimed by `pair`"_test = [] {
         Harness h;
         h.pairBulb(kWallA, 0xA1, 0x0001);
         h.post(PairRequested{kWallC});
         h.clearLog();
         h.post(DeviceAnnounced{.ext_addr = 0xA1, .short_addr = 0x0002}); // WallA power-cycles
         const auto assigned = h.all<RoleAssigned>();
-        CHECK(assigned.size() == 1 && assigned[0].role == kWallA && assigned[0].record.short_addr == 0x0002);
-        CHECK(h.all<RoleAssigned>().size() == 1); // WallC not assigned
-    });
+        expect(assigned.size() == 1 && assigned[0].role == kWallA && assigned[0].record.short_addr == 0x0002);
+        expect(h.all<RoleAssigned>().size() == 1); // WallC not assigned
+    };
 
-    test("unknown devices are ignored when nothing is armed", [] {
+    "unknown devices are ignored when nothing is armed"_test = [] {
         Harness h;
         h.post(DeviceAnnounced{.ext_addr = 0xBEEF, .short_addr = 0x0005});
-        CHECK(h.all<RoleAssigned>().empty());
-        CHECK(h.all<PersistRoles>().empty());
-    });
+        expect(h.all<RoleAssigned>().empty());
+        expect(h.all<PersistRoles>().empty());
+    };
 
-    test("liveness: acks -> online; 150 s of silence -> silent", [] {
+    "liveness: acks -> online; 150 s of silence -> silent"_test = [] {
         Harness h;
         h.tick();
         h.pairBulb(kWork, 0xB2, 0x0042);
         h.post(AckReceived{.short_addr = 0x0042, .rssi = -48});
         h.tick();
         auto snaps = h.all<StatusChanged>();
-        CHECK(!snaps.empty() && snaps.back().snapshot->devices[kWork].link == DeviceLink::Online);
-        CHECK(!snaps.empty() && snaps.back().snapshot->devices[kWork].rssi == -48);
+        expect(!snaps.empty() && snaps.back().snapshot->devices[kWork].link == DeviceLink::Online);
+        expect(!snaps.empty() && snaps.back().snapshot->devices[kWork].rssi == -48);
 
         h.clearLog();
         h.tick(160);
         snaps = h.all<StatusChanged>();
-        CHECK(!snaps.empty() && snaps.back().snapshot->devices[kWork].link == DeviceLink::Silent);
-        CHECK(h.all<Ping>().size() >= 2); // pinged every 60 s meanwhile
-    });
+        expect(!snaps.empty() && snaps.back().snapshot->devices[kWork].link == DeviceLink::Silent);
+        expect(h.all<Ping>().size() >= 2); // pinged every 60 s meanwhile
+    };
 
-    test("endpoint discovery is retried every 15 s until found", [] {
+    "endpoint discovery is retried every 15 s until found"_test = [] {
         Harness h;
         h.post(PairRequested{kWallB});
         h.post(DeviceAnnounced{.ext_addr = 0xC3, .short_addr = 0x0003});
         h.post(EndpointFound{.role = kWallB, .endpoint = 0}); // no reply
         h.clearLog();
         h.tick(30);
-        CHECK(h.all<Discover>().size() == 2);
-    });
+        expect(h.all<Discover>().size() == 2);
+    };
 
-    test("unpairing a role mid-discovery stops its retries", [] {
+    "unpairing a role mid-discovery stops its retries"_test = [] {
         Harness h;
         h.post(PairRequested{kWallB});
         h.post(DeviceAnnounced{.ext_addr = 0xC3, .short_addr = 0x0003}); // no EndpointFound
         h.post(UnpairRequested{kWallB});
         h.clearLog();
         h.tick(45);
-        CHECK(h.all<Discover>().empty());
-        CHECK(h.all<Ping>().empty());
-    });
+        expect(h.all<Discover>().empty());
+        expect(h.all<Ping>().empty());
+    };
 
-    test("a ping that gets no answer at all counts as failed", [] {
+    "a ping that gets no answer at all counts as failed"_test = [] {
         Harness h;
         h.tick();
         h.pairBulb(kWork, 0xB2, 0x0002);
         h.clearLog();
         h.tick(90); // pinged at 15 s and 75 s, never answered; silent since pairing
         const auto changes = h.all<ReachabilityChanged>();
-        CHECK(changes.size() == 1 && changes[0].role == kWork && !changes[0].reachable);
-    });
+        expect(changes.size() == 1 && changes[0].role == kWork && !changes[0].reachable);
+    };
 
-    test("button pairing binds it once its endpoint is found", [] {
+    "button pairing binds it once its endpoint is found"_test = [] {
         Harness h;
         h.post(PairRequested{kButton});
         h.post(DeviceAnnounced{.ext_addr = 0x18690AFFFE12620EULL, .short_addr = 0x2FED});
         h.clearLog();
         h.post(EndpointFound{.role = kButton, .endpoint = 1});
         const auto binds = h.all<Bind>();
-        CHECK(binds.size() == 1 && binds[0].short_addr == 0x2FED && binds[0].endpoint == 1);
-        CHECK(h.all<SetLight>().empty()); // never treated as a bulb
-    });
+        expect(binds.size() == 1 && binds[0].short_addr == 0x2FED && binds[0].endpoint == 1);
+        expect(h.all<SetLight>().empty()); // never treated as a bulb
+    };
 
-    test("a missing bulb is paused, the others keep going, and it resumes when it answers", [] {
+    "a missing bulb is paused, the others keep going, and it resumes when it answers"_test = [] {
         Harness h;
         h.tick();
         h.pairBulb(kWallA, 0xA1, 0x0001);
@@ -123,17 +121,17 @@ void devicesTests()
         h.post(AckReceived{.short_addr = 0x0001, .rssi = -50});
         h.tick(1); // 15 s after pairing: WallA's first ping
         auto pings = h.all<Ping>();
-        CHECK(pings.size() == 1 && pings[0].role == kWallA);
+        expect(pings.size() == 1 && pings[0].role == kWallA);
         // WallA's ping is lost too, but it acked recently: still reachable.
         h.post(PingResult{.role = kWallA, .ok = false});
 
         h.tick(42); // Work's turn: slot 5 of 7, 5/7 of the minute later
         pings = h.all<Ping>();
-        CHECK(pings.size() == 2 && pings[1].role == kWork);
+        expect(pings.size() == 2 && pings[1].role == kWork);
         // Work's ping fails and it was never heard after pairing... except
         // at pairing itself, so it needs 60 s of silence first.
         h.post(PingResult{.role = kWork, .ok = false});
-        CHECK(h.all<ReachabilityChanged>().empty());
+        expect(h.all<ReachabilityChanged>().empty());
 
         h.tick(30);
         h.post(AckReceived{.short_addr = 0x0001, .rssi = -50}); // WallA keeps answering
@@ -141,7 +139,7 @@ void devicesTests()
         h.post(AckReceived{.short_addr = 0x0001, .rssi = -50});
         h.post(PingResult{.role = kWork, .ok = false});
         auto changes = h.all<ReachabilityChanged>();
-        CHECK(changes.size() == 1 && changes[0].role == kWork && !changes[0].reachable);
+        expect(changes.size() == 1 && changes[0].role == kWork && !changes[0].reachable);
 
         h.clearLog();
         const TimeReading later = at(14h); // the curve has moved on since the last update
@@ -151,78 +149,78 @@ void devicesTests()
             to_work |= l.short_addr == 0x0002;
             to_wall |= l.short_addr == 0x0001;
         }
-        CHECK(!to_work); // paused
-        CHECK(to_wall);  // others unaffected (level/color moved since last time)
+        expect(!to_work); // paused
+        expect(to_wall);  // others unaffected (level/color moved since last time)
 
         h.clearLog();
         h.tick(15);
-        CHECK(h.all<Ping>().size() >= 1); // unreachable bulbs are checked every 15 s
+        expect(h.all<Ping>().size() >= 1); // unreachable bulbs are checked every 15 s
 
         h.clearLog();
         h.post(PingResult{.role = kWork, .ok = true}); // powered back on
         changes = h.all<ReachabilityChanged>();
-        CHECK(changes.size() == 1 && changes[0].reachable);
+        expect(changes.size() == 1 && changes[0].reachable);
         bool resumed_on = false;
         for (const auto &l : h.all<SetLight>()) {
             resumed_on |= l.short_addr == 0x0002 && l.power && *l.power;
         }
-        CHECK(resumed_on); // re-applied in full at once
-    });
+        expect(resumed_on); // re-applied in full at once
+    };
 
-    test("only changed values are re-sent", [] {
+    "only changed values are re-sent"_test = [] {
         Harness h;
         h.tick();
         h.pairBulb(kWallB, 0xC3, 0x0003);
         h.post(ProgramTick{.time = noon(), .transition = 60s});
         h.clearLog();
         h.post(ProgramTick{.time = noon(), .transition = 60s}); // same time -> same target
-        CHECK(h.all<SetLight>().empty());
-    });
+        expect(h.all<SetLight>().empty());
+    };
 
-    test("unpair all clears every role and persists", [] {
+    "unpair all clears every role and persists"_test = [] {
         Harness h;
         h.pairBulb(kWallA, 0xA1, 0x0001);
         h.clearLog();
         h.post(UnpairRequested{});
-        CHECK(h.all<RoleCleared>().size() == ev::kRoleCount);
+        expect(h.all<RoleCleared>().size() == ev::kRoleCount);
         const auto persisted = h.all<PersistRoles>();
-        CHECK(persisted.size() == 1 && !(*persisted[0].records)[kWallA].valid);
-    });
+        expect(persisted.size() == 1 && !(*persisted[0].records)[kWallA].valid);
+    };
 
-    test("the layout: five wall lights east to west, then work and button", [] {
+    "the layout: five wall lights east to west, then work and button"_test = [] {
         static_assert(kRoleCount == 7 && kLightCount == 6);
         static_assert(members(Group::Wall).size() == 5);
         static_assert(roleName(kWallA) == "WallA" && roleName(kWallE) == "WallE");
         static_assert(roleName(kWork) == "Work" && roleName(kButton) == "Button");
         static_assert(parseRole("wallc") == kWallC && !parseRole("WallF"));
         static_assert(slot(kWork) == 5 && kRoles[slot(kWallC)] == kWallC);
-        CHECK(std::ranges::equal(lights(), std::span{kRoles}.first(6)));
+        expect(std::ranges::equal(lights(), std::span{kRoles}.first(6)));
         static_assert(kindOf(kWallA) == Kind::ColorBulb && kindOf(kButton) == Kind::Button);
         static_assert(isLight(kWork) && !isLight(kButton) && isButton(kButton) && !isButton(kWork));
 
         const auto wall = parseSelection("wall");
-        CHECK(wall && selects(*wall, kWallE) && !selects(*wall, kWork));
+        expect(wall && selects(*wall, kWallE) && !selects(*wall, kWork));
         const auto work = parseSelection("WORK");
-        CHECK(work && selects(*work, kWork) && !selects(*work, kWallA));
+        expect(work && selects(*work, kWork) && !selects(*work, kWallA));
         const auto all = parseSelection("all");
-        CHECK(all && std::ranges::all_of(kRoles, [&](Role r) { return selects(*all, r); }));
-        CHECK(!parseSelection("lamp"));
-    });
+        expect(all && std::ranges::all_of(kRoles, [&](Role r) { return selects(*all, r); }));
+        expect(!parseSelection("lamp"));
+    };
 
-    test("unpairing a group clears just its roles", [] {
+    "unpairing a group clears just its roles"_test = [] {
         Harness h;
         h.pairBulb(kWallA, 0xA1, 0x0001);
         h.pairBulb(kWallE, 0xA5, 0x0005);
         h.pairBulb(kWork, 0xB2, 0x0002);
         h.clearLog();
         h.post(UnpairRequested{Group::Wall});
-        CHECK(h.all<RoleCleared>().size() == members(Group::Wall).size());
+        expect(h.all<RoleCleared>().size() == members(Group::Wall).size());
         const auto persisted = h.all<PersistRoles>();
-        CHECK(persisted.size() == 1 && !(*persisted[0].records)[kWallA].valid && !(*persisted[0].records)[kWallE].valid &&
+        expect(persisted.size() == 1 && !(*persisted[0].records)[kWallA].valid && !(*persisted[0].records)[kWallE].valid &&
               (*persisted[0].records)[kWork].valid);
-    });
+    };
 
-    test("addresses are checked against the layout by name; a known one joins as its role", [] {
+    "addresses are checked against the layout by name; a known one joins as its role"_test = [] {
         constexpr auto addresses =
             addressesOf(std::array{Address{"WallE", 0xE5}, Address{"work", 0xB2}, Address{"WallB", 0}});
         static_assert(addresses[kWallE] == 0xE5 && addresses[kWork] == 0xB2);
@@ -237,10 +235,10 @@ void devicesTests()
         bus.post()(NetworkUp{});
         bus.post()(DeviceAnnounced{.ext_addr = 0xE5, .short_addr = 0x0005});
         bus.drain();
-        CHECK(assigned.size() == 1 && assigned[0].role == kWallE);
-    });
+        expect(assigned.size() == 1 && assigned[0].role == kWallE);
+    };
 
-    test("each kind of light gets only the commands it takes", [] {
+    "each kind of light gets only the commands it takes"_test = [] {
         const LightState amber{.on = true, .level = 80, .color = Xy{0.55f, 0.41f}};
         const LightState red{.on = true, .level = 200, .color = HueSat{0, 254}};
         const auto       to = [](const LightState &state) {
@@ -249,20 +247,20 @@ void devicesTests()
 
         // A color bulb: everything, then only what moves.
         const auto color = core::commandsFor(std::nullopt, to(amber), caps(Kind::ColorBulb));
-        CHECK(color && color->power == true && color->level == 80 && colorOf<Xy>(*color));
+        expect(color && color->power == true && color->level == 80 && colorOf<Xy>(*color));
         const auto dimmer = core::commandsFor(amber, to({.on = true, .level = 60, .color = amber.color}),
                                               caps(Kind::ColorBulb));
-        CHECK(dimmer && !dimmer->power && dimmer->level == 60 && !dimmer->color);
+        expect(dimmer && !dimmer->power && dimmer->level == 60 && !dimmer->color);
 
         // A plug: only on and off.
         const auto on = core::commandsFor(std::nullopt, to(amber), caps(Kind::Plug));
-        CHECK(on && on->power == true && !on->level && !on->color);
-        CHECK(!core::commandsFor(amber, to(red), caps(Kind::Plug))); // still on: nothing to send
+        expect(on && on->power == true && !on->level && !on->color);
+        expect(!core::commandsFor(amber, to(red), caps(Kind::Plug))); // still on: nothing to send
         const auto off = core::commandsFor(amber, to(LightState{}), caps(Kind::Plug));
-        CHECK(off && off->power == false);
-    });
+        expect(off && off->power == false);
+    };
 
-    test("zones: every light in one, with its look; buttons control theirs", [] {
+    "zones: every light in one, with its look; buttons control theirs"_test = [] {
         static_assert(kZoneCount == 1 && kZoneOf[kWallA] == kZoneIds[0] && kZoneOf[kButton] == kZoneIds[0]);
         static_assert(kControlsOf[kButton] && !kControlsOf[kWork]);
         static_assert(contains(kWeatherLights.precip, kWallC) && contains(kWeatherLights.alerts, kWallB) &&
@@ -294,5 +292,5 @@ void devicesTests()
                      .gate   = {nine_to_five.closesOnly(), nine_to_five.opensOnly(), Always{}}},
         };
         static_assert(topologyOf(layered).zone_of[kWork] == ZoneId{0}); // one-way rules first: fine
-    });
+    };
 }
