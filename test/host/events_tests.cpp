@@ -94,4 +94,43 @@ const suite<"events"> eventsTests = [] {
         }
         expect(keys.size() == 15);
     };
+
+    "the send queue keeps one command per light, the newer merged over the older"_test = [] {
+        SendQueue q;
+        q.push(SetLight{.role = kWallA, .power = true, .level = 50, .color = Mireds{300},
+                        .level_transition = 1s, .color_transition = 1s});
+        q.push(SetLight{.role = kWallA, .level = 60, .level_transition = 60s});
+        expect(q.size() == 1uz);
+        const auto a = q.pop();
+        expect(a && a->power == true && a->level == 60 && a->level_transition == 60s);
+        expect(a && colorOf<Mireds>(*a) && colorOf<Mireds>(*a)->value == 300 && a->color_transition == 1s);
+        expect(!q.pop() && q.size() == 0uz);
+
+        // Off says it all: the level and color go again with the next On.
+        q.push(SetLight{.role = kWallA, .power = true, .level = 50, .color = Mireds{300}});
+        q.push(SetLight{.role = kWallA, .power = false});
+        const auto off = q.pop();
+        expect(off && off->power == false && !off->level && !off->color);
+
+        // On after a waiting Off: the On, with everything it brings.
+        q.push(SetLight{.role = kWallA, .power = false});
+        q.push(SetLight{.role = kWallA, .power = true, .level = 40, .color = Xy{0.3f, 0.3f}});
+        const auto on = q.pop();
+        expect(on && on->power == true && on->level == 40 && colorOf<Xy>(*on));
+    };
+
+    "the send queue takes the lights in turn, and reports the most waiting"_test = [] {
+        SendQueue q;
+        for (const Role role : {kWallA, kWallB, kWallC}) {
+            q.push(SetLight{.role = role, .level = 10});
+        }
+        expect(q.pop()->role == kWallA);
+        q.push(SetLight{.role = kWallA, .level = 20}); // back of the line, after B and C
+        expect(q.pop()->role == kWallB);
+        expect(q.pop()->role == kWallC);
+        expect(q.pop()->role == kWallA);
+        expect(!q.pop());
+        expect(q.takeHighWater() == 3uz);
+        expect(q.takeHighWater() == 0uz); // since the last report: none
+    };
 };

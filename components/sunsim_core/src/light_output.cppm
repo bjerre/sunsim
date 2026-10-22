@@ -7,7 +7,7 @@ export namespace sunsim::core {
 
 // The commands that take a light with `caps` from `sent` (nullopt: unknown,
 // send everything) to `to`: only what changed and the light takes (a plug:
-// On/Off alone); nullopt if that's nothing. Its address is left for the
+// On/Off alone); nullopt if that's nothing. Its role and address are left for the
 // caller.
 [[nodiscard]] std::optional<ev::SetLight> commandsFor(const std::optional<ev::LightState> &sent,
                                                       const ev::LightChange &to, ev::Caps caps) noexcept;
@@ -115,6 +115,7 @@ void LightOutput::on(const ev::OutputTarget &e)
         return;
     }
     if (auto s = commandsFor(l.sent, e, ev::caps(e.role))) {
+        s->role       = e.role;
         s->short_addr = l.short_addr;
         s->endpoint   = l.endpoint;
         post_(*s);

@@ -27,7 +27,8 @@ const suite<"devices"> devicesTests = [] {
         h.clearLog();
         h.post(EndpointFound{.role = kWallC, .endpoint = 11});
         const auto lights = h.all<SetLight>();
-        expect(lights.size() == 1 && lights[0].short_addr == 0x1234 && lights[0].endpoint == 11);
+        expect(lights.size() == 1 && lights[0].role == kWallC && lights[0].short_addr == 0x1234 &&
+               lights[0].endpoint == 11); // its role too: the send queue keeps one per light
         expect(lights.size() == 1 && lights[0].power && *lights[0].power); // first command switches it on
     };
 

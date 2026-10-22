@@ -8,6 +8,7 @@ export import :events;
 export import :flow;
 export import :installation;
 export import :log;
+export import :send_queue;
 export import :settings;
 export import :topology;
 export import :types;
