@@ -509,7 +509,8 @@ classDiagram
 
 `ZigbeeAdapter` is the only code that includes esp-zigbee. It knows no
 roles except the button's short address, which the APS hook needs at once
-(below); `SetLight` already carries the bulb's address.
+(below); `SetLight` already carries the bulb's address, and its role only
+keys the send queue (one pending command per light; see §4).
 
 ## 4. Threads
 
@@ -552,6 +553,13 @@ flowchart LR
   fast-day clock can follow `ConfigChanged` without a lock, and a Tick
   handled late still says when it was. A second, one-shot esp_timer posts
   `Wake` at the soonest `WakeAt` asked for.
+- `ZigbeeAdapter`'s own esp_timers - the commissioning retry and the send
+  drain - take the Zigbee lock, so they never run alongside the app task's
+  batch. Bulb commands go out through a `SendQueue` (`send_queue.cppm`):
+  one pending `SetLight` per light, a newer one merged over it, sent in
+  turn 25 ms per ZCL command apart, so a minute's burst (every light at
+  once) is spread out instead of overflowing the stack's buffers. One
+  arriving with nothing waiting goes at once.
 - **Two deliberate shortcuts** across threads, both small:
   1. The APS hook (Zigbee task) must decide *at once* whether to consume a
      frame. `ZigbeeAdapter` keeps the button's short address in an
@@ -875,7 +883,7 @@ Pairing a device (console `pair` or its address in `kAddresses`) is in DESIGN.md
 | `RefreshLights` | role, or every light | DeviceRegistry |
 | `LightTarget` | role, `LightState`, level and color transitions | the running program |
 | `OutputTarget` | the same: what the bulb does show | Overlays |
-| `SetLight` | short addr, endpoint, optional power / level / `Color`, transitions | LightOutput |
+| `SetLight` | role, short addr, endpoint, optional power / level / `Color`, transitions | LightOutput |
 | `StatusChanged` | `shared_ptr<const StatusSnapshot>` | StatusModel, 1 Hz |
 
 ## 8. Wiring

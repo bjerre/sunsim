@@ -12,6 +12,7 @@ set(modules "src/ev.cppm"
             "src/flow.cppm"
             "src/installation.cppm"
             "src/log.cppm"
+            "src/send_queue.cppm"
             "src/settings.cppm"
             "src/topology.cppm"
             "src/types.cppm")
