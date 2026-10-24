@@ -3,9 +3,11 @@
 # export.sh` first), and any console command straight to the board. See
 # `./sunsim help`.
 #
-# SUNSIM_IDF   the ESP-IDF checkout (default ~/.espressif/v6.1/esp-idf). Its
-#              export.sh, not the activate_idf script: build/ was configured
-#              with export.sh's Python and refuses another.
+# SUNSIM_IDF   the ESP-IDF checkout (default ~/.espressif/v6.1/esp-idf).
+#              Loaded with the installer's (eim's) activate_idf script when
+#              there is one, else with the checkout's export.sh. (build/
+#              keeps the Python it was configured with: switching between
+#              the two means deleting build/.)
 # SUNSIM_PORT  the board's serial port (default: the only /dev/ttyACM*).
 # VCPKG_ROOT   the vcpkg checkout the host tests get boost-ext/ut from
 #              (default ~/vcpkg; see test/host/CMakeLists.txt).
@@ -13,6 +15,8 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 IDF=${SUNSIM_IDF:-$HOME/.espressif/v6.1/esp-idf}
+# eim's: export.sh doesn't find the Python environment eim installs.
+IDF_ACTIVATE=$HOME/.espressif/tools/activate_idf_$(basename "$(dirname "$IDF")").sh
 
 usage() {
     cat <<'EOF'
@@ -55,13 +59,29 @@ idf_env() {
     if [[ ${IDF_PATH:-} == "$IDF" ]] && command -v idf.py >/dev/null; then
         return # already loaded
     fi
-    if [[ ! -f $IDF/export.sh ]]; then
+    local env=$IDF/export.sh
+    if [[ -f $IDF_ACTIVATE ]]; then
+        # Sourced from a script, it takes itself for executed and exits; -e
+        # just prints the variables (PATH: only its tools' directories).
+        env=$IDF_ACTIVATE
+        local line
+        while IFS= read -r line; do
+            case $line in
+            PATH=*) PATH=${line#PATH=}:$PATH ;;
+            SYSTEM_PATH=*) ;;
+            *=*) export "${line?}" ;;
+            esac
+        done < <(bash "$env" -e)
+        export PATH
+    elif [[ -f $env ]]; then
+        # shellcheck disable=SC1090
+        source "$env" >/dev/null 2>&1 || true
+    else
         echo "sunsim: no ESP-IDF at $IDF (set SUNSIM_IDF)" >&2
         exit 1
     fi
-    # shellcheck disable=SC1091
-    source "$IDF/export.sh" >/dev/null 2>&1 || {
-        echo "sunsim: $IDF/export.sh failed; run it by hand to see why" >&2
+    command -v idf.py >/dev/null || {
+        echo "sunsim: $env didn't put idf.py on PATH; run it by hand to see why" >&2
         exit 1
     }
 }
