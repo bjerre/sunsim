@@ -29,9 +29,10 @@ export namespace sunsim::core {
 // All of the pure application logic. Platform code (radio, storage, clock,
 // console, display) talks to it only through events on the bus.
 struct CoreModules {
-    CoreModules(const ev::Post &post, ev::Addresses addresses)
-        : mode(post), registry(post, addresses), sky(post), programs(post), overlays(post), output(post), sends(post),
-          status(post)
+    // `groups`: the Zigbee groups the bulbs are in, for SendQueue.
+    CoreModules(const ev::Post &post, ev::Addresses addresses, std::vector<LightGroup> groups = {})
+        : mode(post), registry(post, addresses), sky(post), programs(post), overlays(post), output(post),
+          sends(post, std::move(groups)), status(post)
     {
     }
 

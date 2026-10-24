@@ -107,6 +107,8 @@ private:
     static ZigbeeAdapter *s_self;
 };
 
+static_assert(ev::Radio<ZigbeeAdapter>);
+
 } // namespace sunsim::platform
 
 namespace sunsim::platform {

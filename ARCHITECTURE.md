@@ -993,6 +993,7 @@ Each is commented where it is; undo them as GCC's modules mature.
 | `DaySpan`, `Mireds`, `Xy`, `HueSat` (`types.cppm`), `ZoneId` (`topology.cppm`) | `operator==` spelled out, not defaulted | GCC crashes compiling a file that imports them and compares them |
 | `InternetSync` (`internet_sync.cppm` / `.cpp`) | definitions in a module implementation unit; the thread behind a `Task` | `std::jthread` and the C++20 semaphores in a `.cppm` crash GCC writing the module interface |
 | `Clock` (`clock.cppm` / `.cpp`) | definitions in a module implementation unit | with them in the partition (its wake list), GCC crashes writing `sunsim.platform`'s interface |
+| `SimClock` (`sim/src/sim_clock.cppm` / `.cpp`) | definitions in a module implementation unit | the same crash, writing `sunsim.sim`'s interface |
 | `kEventNames` (`events.cppm`) | names parsed from `__PRETTY_FUNCTION__` | no reflection until C++26 |
 
 The FreeRTOS tasks (Zigbee, app, display) stay FreeRTOS tasks: as
