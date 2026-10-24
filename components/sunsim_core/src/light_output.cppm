@@ -115,6 +115,7 @@ void LightOutput::on(const ev::OutputTarget &e)
         return;
     }
     if (auto s = commandsFor(l.sent, e, ev::caps(e.role))) {
+        s->role       = e.role;
         s->short_addr = l.short_addr;
         s->endpoint   = l.endpoint;
         post_(*s);

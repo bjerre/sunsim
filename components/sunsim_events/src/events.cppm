@@ -211,7 +211,8 @@ struct LightChange {             // a bulb, what it's to show, and how quickly t
 };
 struct LightTarget : LightChange {};  // what a bulb should show, from the running program
 struct OutputTarget : LightChange {}; // what it does show: Overlays' pick, for LightOutput
-struct SetLight {                // one bulb's ZCL commands, sent in field order
+struct SetLight {                // one bulb's ZCL commands, sent in field order (SendQueue)
+    Role                   role{};
     uint16_t               short_addr = 0;
     uint8_t                endpoint   = 0;
     std::optional<bool>    power;   // On goes first, Off last
@@ -219,6 +220,23 @@ struct SetLight {                // one bulb's ZCL commands, sent in field order
     std::optional<Color>   color;
     Transition             level_transition{};
     Transition             color_transition{};
+};
+struct SendsWaiting {};          // SendQueue has commands waiting: the ZigbeeAdapter gives it a SendSlot soon
+struct SendSlot {                // the ZigbeeAdapter has room for one command now
+    Instant at{};
+};
+struct Destination {             // a light's endpoint, or a Zigbee group's lights
+    uint16_t address  = 0;       // a short address, or a group id
+    uint8_t  endpoint = 0;       // unused for a group
+    bool     group    = false;
+};
+struct SendLight {               // one ZCL command (SendQueue -> ZigbeeAdapter)
+    Destination            to{};
+    std::optional<bool>    power; // exactly one of these three
+    std::optional<uint8_t> level;
+    std::optional<Color>   color;
+    Transition             transition{};
+    uint8_t                backlog = 0; // lights with commands waiting, this one's included
 };
 
 // ---- Status ---------------------------------------------------------------
@@ -262,6 +280,7 @@ using Payload = std::variant<Heartbeat, WakeAt, Wake, Tick, ProgramTick, SetFast
                              RoleAssigned, RoleCleared, Discover, Bind, Ping, ReachabilityChanged,    //
                              DevicesUpdated,                                                          //
                              ModeChanged, RefreshLights, LightTarget, OutputTarget, SetLight,        //
+                             SendsWaiting, SendSlot, SendLight,                                       //
                              StatusChanged>;
 
 namespace detail {

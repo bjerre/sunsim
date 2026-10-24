@@ -62,10 +62,10 @@ target_sources(boost_ut PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT_BI
 target_link_libraries(boost_ut PUBLIC sunsim_events)
 
 find_package(Threads REQUIRED)
-# One file per area (devices, modes, daylight, weather, events), sharing the
+# One file per area (devices, modes, daylight, weather, events, sends), sharing the
 # module sunsim.test (harness.cppm).
 add_executable(sunsim_tests main.cpp devices_tests.cpp modes_tests.cpp daylight_tests.cpp weather_tests.cpp
-                            events_tests.cpp)
+                            events_tests.cpp sends_tests.cpp)
 target_sources(sunsim_tests PRIVATE FILE_SET CXX_MODULES FILES harness.cppm)
 target_link_libraries(sunsim_tests PRIVATE sunsim_core sunsim_weather boost_ut Threads::Threads)
 

@@ -108,11 +108,35 @@ Every command goes out the moment it's posted, so a ProgramTick, red alert
 or a weather pulse sends every light's commands in the same few
 milliseconds: fine at 6 lights, past the stack's buffers at 25 (GitHub #14).
 
-- [ ] One pending `SetLight` per light in `ZigbeeAdapter`, a newer one
-      merged over it; sent round-robin at a fixed rate (~25 ms apart).
-- [ ] Log the queue's high-water mark with the send-failure report.
+- [x] One pending `SetLight` per light, a newer one merged over it; sent
+      round-robin, a command per `SendSlot` (core `SendQueue`; the
+      ZigbeeAdapter gives a slot every 25 ms while any are waiting).
+- [x] Log the queue's high-water mark with the send-failure report.
+- [ ] Build the firmware (the platform side hasn't been compiled yet).
 - [ ] Try it on the board with every light paired, in red alert and
       `weather simulate warning`.
+
+Needs the board.
+
+## Zigbee groups for the lights that show the same
+
+`SendQueue` already sends one command to a group when every light in it
+waits for exactly that command (host tests: red alert, a weather alert on
+two wall lights, a light out of reach, the broadcast budget). Nothing
+gives it groups yet, so every command still goes out unicast.
+
+- [ ] Derive the candidate groups from `kTopology` at compile time: every
+      light, each zone and layout group, each zone's alert and precip
+      lights, and each of those without the alert lights, the precip
+      lights or both. Drop duplicates and any of fewer than two lights;
+      fixed ids from a base. `static_assert` a cap on groups per light.
+- [ ] Provisioning: on discovery, Groups cluster *Add Group* for each of a
+      bulb's groups; *Remove All Groups* first when the table's hash in
+      NVS has changed. Check the bulb's group capacity.
+- [ ] `SendQueue` uses only a group whose members all confirmed joining
+      (a `GroupJoined` event), not the groups it's given.
+- [ ] Check on the board that `EZB_ADDR_MODE_GROUP` sends reach the bulbs
+      together.
 
 Needs the board.
 

@@ -10,9 +10,10 @@ import sunsim.ev;
 
 namespace sunsim::platform {
 
-// A Zigbee light endpoint identified by its short address, addressed
-// directly (no binding table involved) from sunsim's light-control
-// endpoint. Cheap, copyable value type - a BulbEndpoint is just an address.
+// A Zigbee light endpoint identified by its short address, or a Zigbee
+// group's lights by its id, addressed directly (no binding table involved)
+// from sunsim's light-control endpoint. Cheap, copyable value type - a
+// BulbEndpoint is just an address.
 // Each command returns the stack's result for queuing it (not delivery);
 // EZB_ERR_NONE when it was accepted for sending.
 class BulbEndpoint {
@@ -20,6 +21,13 @@ public:
     constexpr BulbEndpoint(uint16_t short_addr, uint8_t endpoint, uint8_t source_endpoint) noexcept
         : short_addr_(short_addr), endpoint_(endpoint), source_endpoint_(source_endpoint)
     {
+    }
+    // Every light in the group: one broadcast, unacknowledged.
+    [[nodiscard]] static constexpr BulbEndpoint group(uint16_t group_id, uint8_t source_endpoint) noexcept
+    {
+        BulbEndpoint bulb{group_id, 0, source_endpoint};
+        bulb.group_ = true;
+        return bulb;
     }
 
     ezb_err_t turnOn() const;
@@ -38,6 +46,7 @@ private:
     uint16_t short_addr_;
     uint8_t  endpoint_;
     uint8_t  source_endpoint_;
+    bool     group_ = false;
 };
 
 } // namespace sunsim::platform
@@ -46,11 +55,22 @@ namespace sunsim::platform {
 
 namespace {
 
-ezb_zcl_cluster_cmd_ctrl_t makeCmdCtrl(uint16_t short_addr, uint8_t dst_ep, uint8_t src_ep)
+// A group command's broadcast: to every device whose radio is always on
+// (the mains-powered ones, the bulbs among them), each keeping it if it's
+// in the group.
+constexpr uint16_t kRxOnWhenIdle = 0xFFFD;
+
+ezb_zcl_cluster_cmd_ctrl_t makeCmdCtrl(uint16_t address, bool group, uint8_t dst_ep, uint8_t src_ep)
 {
     ezb_zcl_cluster_cmd_ctrl_t ctrl{};
-    ctrl.dst_addr.addr_mode    = EZB_ADDR_MODE_SHORT;
-    ctrl.dst_addr.u.short_addr = short_addr;
+    if (group) {
+        ctrl.dst_addr.addr_mode          = EZB_ADDR_MODE_GROUP;
+        ctrl.dst_addr.u.group_addr.group = address;
+        ctrl.dst_addr.u.group_addr.bcast = kRxOnWhenIdle;
+    } else {
+        ctrl.dst_addr.addr_mode    = EZB_ADDR_MODE_SHORT;
+        ctrl.dst_addr.u.short_addr = address;
+    }
     ctrl.dst_ep                = dst_ep;
     ctrl.src_ep                = src_ep;
     return ctrl;
@@ -63,20 +83,20 @@ ezb_zcl_cluster_cmd_ctrl_t makeCmdCtrl(uint16_t short_addr, uint8_t dst_ep, uint
 
 ezb_err_t BulbEndpoint::turnOn() const
 {
-    ezb_zcl_on_off_cmd_t cmd{.cmd_ctrl = makeCmdCtrl(short_addr_, endpoint_, source_endpoint_)};
+    ezb_zcl_on_off_cmd_t cmd{.cmd_ctrl = makeCmdCtrl(short_addr_, group_, endpoint_, source_endpoint_)};
     return ezb_zcl_on_off_on_cmd_req(&cmd);
 }
 
 ezb_err_t BulbEndpoint::turnOff() const
 {
-    ezb_zcl_on_off_cmd_t cmd{.cmd_ctrl = makeCmdCtrl(short_addr_, endpoint_, source_endpoint_)};
+    ezb_zcl_on_off_cmd_t cmd{.cmd_ctrl = makeCmdCtrl(short_addr_, group_, endpoint_, source_endpoint_)};
     return ezb_zcl_on_off_off_cmd_req(&cmd);
 }
 
 ezb_err_t BulbEndpoint::setLevel(uint8_t level_0_254, ev::Transition transition) const
 {
     ezb_zcl_level_move_to_level_with_on_off_cmd_t cmd{
-        .cmd_ctrl = makeCmdCtrl(short_addr_, endpoint_, source_endpoint_), .payload = {}};
+        .cmd_ctrl = makeCmdCtrl(short_addr_, group_, endpoint_, source_endpoint_), .payload = {}};
     cmd.payload.level           = level_0_254;
     cmd.payload.transition_time = transition.count();
     return ezb_zcl_level_move_to_level_with_on_off_cmd_req(&cmd);
@@ -85,7 +105,7 @@ ezb_err_t BulbEndpoint::setLevel(uint8_t level_0_254, ev::Transition transition)
 ezb_err_t BulbEndpoint::setColorTemperature(uint16_t mireds, ev::Transition transition) const
 {
     ezb_zcl_color_control_move_to_color_temperature_cmd_t cmd{
-        .cmd_ctrl = makeCmdCtrl(short_addr_, endpoint_, source_endpoint_), .payload = {}};
+        .cmd_ctrl = makeCmdCtrl(short_addr_, group_, endpoint_, source_endpoint_), .payload = {}};
     cmd.payload.color_temperature_mireds = mireds;
     cmd.payload.transition_time          = transition.count();
     return ezb_zcl_color_control_move_to_color_temperature_cmd_req(&cmd);
@@ -94,7 +114,7 @@ ezb_err_t BulbEndpoint::setColorTemperature(uint16_t mireds, ev::Transition tran
 ezb_err_t BulbEndpoint::setHueSaturation(uint8_t hue, uint8_t saturation, ev::Transition transition) const
 {
     ezb_zcl_color_control_move_to_hue_and_saturation_cmd_t cmd{
-        .cmd_ctrl = makeCmdCtrl(short_addr_, endpoint_, source_endpoint_), .payload = {}};
+        .cmd_ctrl = makeCmdCtrl(short_addr_, group_, endpoint_, source_endpoint_), .payload = {}};
     cmd.payload.hue             = hue;
     cmd.payload.saturation      = saturation;
     cmd.payload.transition_time = transition.count();
@@ -109,7 +129,7 @@ ezb_err_t BulbEndpoint::setColorXY(double x, double y, ev::Transition transition
         return static_cast<uint16_t>(scaled < 0 ? 0 : (scaled > 0xFEFF ? 0xFEFF : scaled));
     };
     ezb_zcl_color_control_move_to_color_cmd_t cmd{
-        .cmd_ctrl = makeCmdCtrl(short_addr_, endpoint_, source_endpoint_), .payload = {}};
+        .cmd_ctrl = makeCmdCtrl(short_addr_, group_, endpoint_, source_endpoint_), .payload = {}};
     cmd.payload.color_x         = encode(x);
     cmd.payload.color_y         = encode(y);
     cmd.payload.transition_time = transition.count();
