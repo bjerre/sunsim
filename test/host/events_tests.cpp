@@ -29,6 +29,18 @@ static_assert(kEventNames[kTypeId<OutputTarget>] == "OutputTarget");
 } // namespace
 
 const suite<"events"> eventsTests = [] {
+    "the portable runtime processes a batch without waiting"_test = [] {
+        core::CoreRuntime runtime({});
+        std::size_t       ticks = 0;
+        runtime.bus().on<Tick>([&](const Tick &) { ++ticks; });
+
+        runtime.post()(Tick{});
+        expect(runtime.process());
+        expect(ticks == 1);
+        runtime.drain(); // core listeners may have posted events for the next pass
+        expect(!runtime.process());
+    };
+
     "the bus delivers every event posted from many threads, in each poster's order"_test = [] {
         EventBus         bus;
         std::vector<int> seen[2];

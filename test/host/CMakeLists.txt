@@ -28,7 +28,8 @@ add_compile_options(-Wall -Wextra -fno-exceptions -fno-rtti)
 set(ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../..)
 include(${ROOT}/cmake/import_std.cmake)
 
-# The modules sunsim.ev, sunsim.core and sunsim.weather, as the firmware's components build them.
+# The modules sunsim.ev, sunsim.core, sunsim.weather and sunsim.presentation,
+# as the firmware's components build them.
 set(EVENTS ${ROOT}/components/sunsim_events)
 file(GLOB EVENTS_MODULES CONFIGURE_DEPENDS ${EVENTS}/src/*.cppm)
 add_library(sunsim_events STATIC)
@@ -46,6 +47,13 @@ file(GLOB WEATHER_MODULES CONFIGURE_DEPENDS ${WEATHER}/*.cppm)
 add_library(sunsim_weather STATIC)
 target_sources(sunsim_weather PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${WEATHER} FILES ${WEATHER_MODULES})
 target_link_libraries(sunsim_weather PUBLIC sunsim_events)
+
+set(PRESENTATION ${ROOT}/components/sunsim_presentation/src)
+file(GLOB PRESENTATION_MODULES CONFIGURE_DEPENDS ${PRESENTATION}/*.cppm)
+add_library(sunsim_presentation STATIC)
+target_sources(sunsim_presentation PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${PRESENTATION}
+                                          FILES ${PRESENTATION_MODULES})
+target_link_libraries(sunsim_presentation PUBLIC sunsim_events)
 
 # boost-ext/ut's module, boost.ut. vcpkg installs ut.cppm beside ut.hpp but
 # doesn't build it; built here against the same std module as the rest.
@@ -65,9 +73,9 @@ find_package(Threads REQUIRED)
 # One file per area (devices, modes, daylight, weather, events), sharing the
 # module sunsim.test (harness.cppm).
 add_executable(sunsim_tests main.cpp devices_tests.cpp modes_tests.cpp daylight_tests.cpp weather_tests.cpp
-                            events_tests.cpp)
+                            events_tests.cpp presentation_tests.cpp)
 target_sources(sunsim_tests PRIVATE FILE_SET CXX_MODULES FILES harness.cppm)
-target_link_libraries(sunsim_tests PRIVATE sunsim_core sunsim_weather boost_ut Threads::Threads)
+target_link_libraries(sunsim_tests PRIVATE sunsim_core sunsim_weather sunsim_presentation boost_ut Threads::Threads)
 
 # A CTest test per ut test, named as it is: after each build,
 # discover_tests.cmake asks sunsim_tests for the names and writes the CTest

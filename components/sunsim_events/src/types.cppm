@@ -10,6 +10,7 @@ module;
 export module sunsim.ev:types;
 
 import std.compat;
+export import :layout;
 
 export namespace sunsim::ev {
 
@@ -71,55 +72,6 @@ inline constexpr Weekdays kMondayToFriday{0b0111110};
 inline constexpr Weekdays kEveryDay{0b1111111};
 
 // ---- Roles ----------------------------------------------------------------
-
-// What a device does. Each group can hold any number of devices.
-enum class Group : uint8_t { Wall, Work, Button };
-
-// What a device is, and so what it can do (caps()).
-enum class Kind : uint8_t {
-    ColorBulb, // on/off, level, color (temperature, xy and hue/saturation)
-    Plug,      // on/off, for whatever's plugged into it
-    Button,    // presses: its On/Off client, bound to us
-};
-
-// What a device takes from us. A light takes at least On/Off; a button
-// takes nothing (it sends).
-struct Caps {
-    bool power = false; // On/Off
-    bool level = false; // Level Control
-    bool color = false; // Color Control
-};
-
-[[nodiscard]] constexpr Caps caps(Kind kind) noexcept
-{
-    switch (kind) {
-    case Kind::ColorBulb:
-        return {.power = true, .level = true, .color = true};
-    case Kind::Plug:
-        return {.power = true};
-    case Kind::Button:
-        break;
-    }
-    return {};
-}
-
-// N devices of one kind with one job.
-struct GroupSpec {
-    Group            group;
-    std::string_view name;
-    Kind             kind;
-    uint8_t          count;
-};
-
-// The installation: what each group is and how many it has, in Group
-// order. A group's members are lettered (WallA, WallB, ...); a group of one
-// is just its name (Work, Button). Wall lights are lettered east to west:
-// their order along the wall drives the sun-direction dimming.
-inline constexpr std::array kLayout{
-    GroupSpec{Group::Wall, "Wall", Kind::ColorBulb, 5},
-    GroupSpec{Group::Work, "Work", Kind::ColorBulb, 1},
-    GroupSpec{Group::Button, "Button", Kind::Button, 1},
-};
 
 // One device's job: its group, and which member of it. Assigned at pairing
 // time (console `pair`, or its address in installation.cppm), never by join
@@ -429,13 +381,6 @@ inline constexpr uint8_t kMaxAmberSweepDeg = 30;
 
 // Per-light peak intensity, 1-100 (% of full brightness). Buttons unused.
 using Peaks = PerRole<uint8_t>;
-inline constexpr Peaks kDefaultPeaks = [] {
-    Peaks peaks{};
-    for (const Role role : kRoles) {
-        peaks[role] = role.group == Group::Work ? 90 : 100;
-    }
-    return peaks;
-}();
 
 // Per-light minimum level, 1-254 (raw Zigbee level): the lowest a light is
 // sent while on, so it stays visibly lit down to sunset. Bulbs differ in

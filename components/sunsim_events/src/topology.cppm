@@ -118,6 +118,7 @@ using Look = std::variant<SunCurve, WorkCurve>;
 struct Shows {
     std::string_view lights; // a group ("Wall") or one light ("Work"), any case
     Look             look;
+    uint8_t          peak = 100; // default brightness as a percent of full output
 };
 
 // ---- Gates: when the lights may be on ---------------------------------------
@@ -218,6 +219,7 @@ struct WeatherLights {
 struct Topology {
     PerRole<std::optional<ZoneId>>   zone_of{};     // a light's zone, or the zone a button controls
     PerRole<Look>                    look_of{};     // lights
+    PerRole<uint8_t>                 peak_of{};     // default brightness, percent
     PerRole<std::optional<Controls>> controls_of{}; // buttons that control a zone
     WeatherLights                    weather{};
 };
@@ -232,6 +234,9 @@ template <std::ranges::input_range Zones> [[nodiscard]] consteval Topology topol
 {
     Topology      t{};
     PerRole<bool> shown{};
+    for (const Role role : kRoles) {
+        t.peak_of[role] = 100;
+    }
     uint8_t       index = 0;
     for (const ZoneSpec &zone : zones) {
         const ZoneId id{index++};
@@ -255,6 +260,9 @@ template <std::ranges::input_range Zones> [[nodiscard]] consteval Topology topol
             fail("a zone can't run daylight (every zone starts in it)");
         }
         for (const Shows &s : zone.lights) {
+            if (s.peak < 1 || s.peak > 100) {
+                fail("a light's peak isn't between 1 and 100 percent");
+            }
             const auto selection = parseSelection(s.lights);
             if (!selection) {
                 fail("a zone's lights name something the layout doesn't have");
@@ -271,6 +279,7 @@ template <std::ranges::input_range Zones> [[nodiscard]] consteval Topology topol
                 }
                 shown[role]     = true;
                 t.look_of[role] = s.look;
+                t.peak_of[role] = s.peak;
                 t.zone_of[role] = id;
             }
         }

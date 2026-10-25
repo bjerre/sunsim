@@ -5,6 +5,7 @@
 export module sunsim.ev:installation;
 
 import std.compat;
+export import :layout;
 import :topology;
 import :types;
 
@@ -27,7 +28,8 @@ inline constexpr List<Address, kRoleCount> kAddresses{
 inline constexpr std::array kZones{
     ZoneSpec{
         .name   = "office",
-        .lights = {{"Wall", SunCurve{}}, {"Work", WorkCurve{}}},
+        .lights = {{.lights = "Wall", .look = SunCurve{}},
+                   {.lights = "Work", .look = WorkCurve{}, .peak = 90}},
         // The active hours (`config hours`, `days`, `fade`).
         .gate     = {Window{.hours = &ProgramConfig::active, .days = &ProgramConfig::active_days,
                             .fade = &ProgramConfig::fade}},
@@ -43,6 +45,7 @@ inline constexpr Addresses kAddressOf = addressesOf(kAddresses);
 inline constexpr Topology                         kTopology      = topologyOf(kZones);
 inline constexpr PerRole<std::optional<ZoneId>>   kZoneOf        = kTopology.zone_of;
 inline constexpr PerRole<Look>                    kLookOf        = kTopology.look_of;
+inline constexpr Peaks                            kDefaultPeaks  = kTopology.peak_of;
 inline constexpr PerRole<std::optional<Controls>> kControlsOf    = kTopology.controls_of;
 inline constexpr WeatherLights                    kWeatherLights = kTopology.weather;
 

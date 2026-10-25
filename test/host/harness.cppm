@@ -1,6 +1,5 @@
-// What every host test uses: the core, attached like the firmware's, with a
-// log of everything posted; a fixed day to run it on; and boost.ut's
-// "name"_test and expect().
+// What every host test uses: the portable runtime, with a log of everything
+// posted; a fixed day to run it on; and boost.ut's "name"_test and expect().
 export module sunsim.test;
 
 import std.compat;
@@ -47,14 +46,13 @@ TimeReading noon()
 
 // The core, wired like the firmware, plus a log of every event posted.
 struct Harness {
-    EventBus                 bus;
-    core::CoreModules        core{bus.post(), {}};
+    core::CoreRuntime        runtime{Addresses{}};
+    EventBus                &bus = runtime.bus();
     std::vector<Event>       log;
     Instant                  now{};
 
     Harness()
     {
-        core::wireCore(bus, core);
         // Record everything posted, including platform-bound events.
         recordAll(std::make_index_sequence<std::variant_size_v<Payload>>{});
         post(NetworkUp{}); // at time 0, so "15 s after the network is up" is 15 s in

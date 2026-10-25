@@ -10,3 +10,7 @@ sdkconfig.old
 .claude/
 build-host/
 .cache/
+*.gcm*
+*.o.d
+*.ii.lz4
+/sunsim_build2_smoke*

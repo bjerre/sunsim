@@ -54,6 +54,21 @@ script loads ESP-IDF's environment itself, so it works from any terminal:
 ./sunsim idf menuconfig  # any idf.py command
 ```
 
+The portable event, core, weather and presentation modules have a `build2`
+target, currently validated with GCC 15 and libstdc++'s `std.compat` module.
+The firmware still uses ESP-IDF's CMake build; the existing full host test
+suite remains available through `./sunsim test`. On the first build,
+configure the firmware-compatible compiler flags and build the portable
+target:
+
+```
+b config.cxx.coptions=-fno-exceptions config.cxx.coptions+=-fno-rtti 'alias{portable}'
+```
+
+After that, `b 'alias{portable}'` rebuilds it incrementally, and
+`./sunsim_build2_smoke` runs the smoke test. The initial configuration is
+saved by build2; `b clean` removes generated module artifacts.
+
 It finds the board as the only `/dev/ttyACM*` (or set `SUNSIM_PORT`), and
 uses `~/.espressif/v6.1/esp-idf` (or set `SUNSIM_IDF`). `cmd` doesn't reset
 the board, and can't run while `monitor` holds the port.
@@ -373,11 +388,15 @@ strings checked at compile time.
   - `math/` - `daylight.cppm` (what each look shows), `solar.cppm`,
     `sky.cppm` (the forecast's cloud cover by hour), `day_info.cppm`: the
     pure math.
-  - `core.cppm` - `CoreModules` and `wireCore()`, which attaches them to the bus.
+  - `core.cppm` - `CoreModules`, `CoreRuntime` (the portable bus/core event
+    pump), and `wireCore()`.
 - `components/sunsim_weather/` (`sunsim::weather`, module `sunsim.weather`)
   - reading the weather services' replies as they stream in, pure C++
   (host-tested): `json.cppm` (`JsonScanner`), `readers.cppm` (Open-Meteo's
   forecast and conditions, NWS's alerts; WMO codes, alert tiers).
+- `components/sunsim_presentation/` (`sunsim::presentation`, module
+  `sunsim.presentation`) - pure display data for the LVGL renderer and the
+  future browser renderer; `StatusDisplayData` is built from a `StatusSnapshot`.
 - `components/sunsim_platform/` (`sunsim::platform`, module
   `sunsim.platform`) - everything ESP-IDF; `bulb_endpoint`,
   `fast_day_clock`, `format` and `wifi` are internal partitions, not exported:

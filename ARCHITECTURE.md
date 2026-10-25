@@ -27,7 +27,7 @@ component `REQUIRES` enforce the layering: a `core` file that includes
 ```mermaid
 flowchart TB
     subgraph app["main/ — namespace sunsim"]
-        App["App: owns the bus and every module,<br/>wires the platform edges, runs the app task"]
+        App["App: owns CoreRuntime and platform modules,<br/>wires platform edges and runs the task"]
     end
     subgraph platform["components/sunsim_platform — module sunsim.platform"]
         ZA[ZigbeeAdapter]
@@ -38,7 +38,7 @@ flowchart TB
         DI[StatusDisplay]
     end
     subgraph core["components/sunsim_core — module sunsim.core (pure C++, host-tested)"]
-        CM["CoreModules + wireCore()"]
+        CM["CoreRuntime<br/>EventBus + wired CoreModules"]
         DR[DeviceRegistry]
         MC[ModeController]
         PH["ProgramHost<br/>Daylight / Off / RedAlert / Tuning"]
@@ -50,6 +50,9 @@ flowchart TB
     subgraph weather["components/sunsim_weather — module sunsim.weather (pure C++, host-tested)"]
         WR["JsonScanner, readers for<br/>Open-Meteo and NWS replies"]
     end
+    subgraph presentation["components/sunsim_presentation — module sunsim.presentation (pure C++, host-tested)"]
+        PV["StatusDisplayData<br/>snapshot to shared display data"]
+    end
     subgraph events["components/sunsim_events — module sunsim.ev"]
         EV["events + value types<br/>EventBus, Flow / Timer / Inbox"]
     end
@@ -57,6 +60,7 @@ flowchart TB
 
     app --> platform & core
     platform --> weather --> events
+    platform --> presentation --> events
     platform --> events
     core --> events
     platform --> IDF
@@ -65,9 +69,10 @@ flowchart TB
 | Namespace / module | Holds | Imports |
 |---|---|---|
 | `sunsim::ev` (`sunsim.ev`) | every event, the `Event` variant, `Post`, `EventBus`; coroutine flows (`Flow`, `Timer`, `Inbox`); value types (`Role` and the layout, `LightState`, `ProgramConfig`, `StatusSnapshot`, ...); the settings table (`kSettings`: each setting's name, kind, NVS key and help, with `set()` / `show()`) | `std` |
-| `sunsim::core` (`sunsim.core`) | `DeviceRegistry`, `ModeController`, `SkyModel`, `ProgramHost` and the programs, `Overlays`, `LightOutput`, `StatusModel`, the daylight/solar/sky math; `CoreModules` and `wireCore()` | `ev` |
+| `sunsim::core` (`sunsim.core`) | `DeviceRegistry`, `ModeController`, `SkyModel`, `ProgramHost` and the programs, `Overlays`, `LightOutput`, `StatusModel`, the daylight/solar/sky math; `CoreModules`, `CoreRuntime` and `wireCore()` | `ev` |
 | `sunsim::weather` (`sunsim.weather`) | `JsonScanner` (streaming), the Open-Meteo and NWS reply readers, WMO codes and NWS alert tiers | `ev` |
-| `sunsim::platform` (`sunsim.platform`) | `ZigbeeAdapter`, `Clock`, `InternetSync`, `SettingsStore`, the console, the status display, `StatusSlot` | `ev`, `weather`, ESP-IDF |
+| `sunsim::presentation` (`sunsim.presentation`) | `StatusDisplayData`, the pure transform from a status snapshot, shared by display renderers | `ev` |
+| `sunsim::platform` (`sunsim.platform`) | `ZigbeeAdapter`, `Clock`, `InternetSync`, `SettingsStore`, the console, the LVGL status renderer, `StatusSlot` | `ev`, `weather`, `presentation`, ESP-IDF |
 | `sunsim` (`main/main.cpp`) | `App`, `app_main` | all |
 
 `core` and `platform` never import each other; anything both need lives in
@@ -78,8 +83,10 @@ in `detail`.
 
 ### Value types (`sunsim::ev`, `types.cppm`)
 
-The installation is data: `kLayout` says what each group is (its `Kind`)
-and how many devices it has, and the roles, their names (`WallA`-`WallE`,
+The installation is data: `layout.cppm` says what each group is (its
+`Kind`) and how many devices it has; `installation.cppm` re-exports that
+partition alongside the room's addresses and zones. The roles, their names
+(`WallA`-`WallE`,
 `Work`, `Button`), their slots and `PerRole<T>` are all derived from it at
 compile time. A kind's `Caps` say what it takes (On/Off, level, color): `isLight()` is anything that takes On/Off (a bulb or a
 plug), and `LightOutput` sends each light only what it takes.
@@ -176,8 +183,9 @@ The rest of the room is data too, in `installation.cppm`, written in
 the devices' labels, checked into `kAddressOf` (the `DeviceRegistry`
 gets it): a name that isn't one role, a role listed twice or an address
 given twice doesn't compile. `kZones` groups the lights into zones: each
-zone gives its lights a look (a `Look` variant: `SunCurve`, `WorkCurve`),
-says when they may be on (its `Gate`: a list of rules, `Always` or
+zone gives its lights a look (a `Look` variant: `SunCurve`, `WorkCurve`)
+and a default peak intensity (overridden per light with `Shows::peak`),
+sets when they may be on (its `Gate`: a list of rules, `Always` or
 `Window`, where the first rule with an answer decides), which modes it can
 run, which buttons choose its mode (`Controls`: what a single, double and
 held press pick) and which of its lights the weather pulses (`Weather`).
@@ -280,6 +288,13 @@ classDiagram
         LightOutput output
         StatusModel status
     }
+    class CoreRuntime {
+        -EventBus bus_
+        -CoreModules core_
+        +bus() EventBus&
+        +process() bool
+        +drain()
+    }
     class DeviceRegistry {
         -DeviceRecords records_
         -PerRole~Liveness~ liveness_
@@ -376,6 +391,8 @@ classDiagram
         +on(ConfigChanged / ModeChanged / DevicesUpdated / Tick / SkyChanged)
     }
 
+    CoreRuntime *-- EventBus
+    CoreRuntime *-- CoreModules
     CoreModules *-- DeviceRegistry
     CoreModules *-- ModeController
     CoreModules *-- SkyModel
@@ -400,9 +417,11 @@ classDiagram
 ```
 
 The modules share nothing: each only knows the events it handles (its
-`on(const T &)` overloads) and what it posts. `CoreModules` holds them, and
-`wireCore()` (`core.cppm`) attaches them to the bus, the same in the
-firmware and the host tests.
+`on(const T &)` overloads) and what it posts. `CoreRuntime` owns the
+`EventBus` and `CoreModules`; `wireCore()` attaches them. Platform modules
+attach to the same bus separately. Firmware waits for events before calling
+the runtime's nonblocking `process()`; a browser scheduler can call
+`process()` when its event loop has work.
 
 ### Platform and the app (`sunsim::platform`, `main/main.cpp`)
 
@@ -410,15 +429,18 @@ firmware and the host tests.
 classDiagram
     direction LR
     class App {
-        -EventBus bus_
+        -CoreRuntime runtime_
         -SettingsStore settings_
         -Clock clock_
         -InternetSync internet_
         -ZigbeeAdapter zigbee_
         -StatusSlot status_
-        -CoreModules core_
         +run()
         -appTask()$
+    }
+    class CoreRuntime {
+        +process() bool
+        +bus() EventBus&
     }
     class ZigbeeAdapter {
         -atomic~uint16~ button_short_
@@ -498,8 +520,7 @@ classDiagram
     App *-- InternetSync
     App *-- SettingsStore
     App *-- StatusSlot
-    App *-- CoreModules
-    App *-- EventBus
+    App *-- CoreRuntime
     ZigbeeAdapter ..> BulbEndpoint : SetLight as ZCL
     InternetSync ..> WifiSession : one per sync
     Clock *-- FastDayClock : in fast-day mode
@@ -895,8 +916,9 @@ void wireCore(ev::EventBus &bus, CoreModules &m)
     bus.attach(m.mode, m.registry, m.programs, m.overlays, m.output, m.status);
 }
 
+// CoreRuntime owns the bus and core, and wires the core in its constructor.
 // main (main.cpp): the platform modules.
-bus_.attach(settings_, clock_, internet_, zigbee_, status_);
+runtime_.bus().attach(settings_, clock_, internet_, zigbee_, status_);
 ```
 
 `attach()` walks the `Payload` variant at compile time and subscribes the
@@ -914,9 +936,10 @@ reset reboots.
 
 ## 9. Testing
 
-`test/host/` builds `sunsim.ev`, `sunsim.core` and `sunsim.weather` with plain CMake on the
-PC (no ESP-IDF; exceptions and RTTI off like the firmware), attaches them with
-the same `wireCore()`, and asserts on everything posted in response to the
+`test/host/` builds `sunsim.ev`, `sunsim.core`, `sunsim.weather` and
+`sunsim.presentation` with plain CMake on the PC (no ESP-IDF; exceptions
+and RTTI off like the firmware), uses the same
+`CoreRuntime` and asserts on everything posted in response to the
 events each test posts:
 
 ```
