@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#101714" />
+    <title>Sunsim office</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">SUNSIM · PORTABLE CORE</p>
+          <h1>Office lighting lab</h1>
+        </div>
+        <div class="runtime"><span class="live-dot"></span><span id="runtime-label">Starting WebAssembly…</span></div>
+      </header>
+
+      <section class="workspace">
+        <section class="office panel" aria-label="Virtual office lights">
+          <div class="section-heading">
+            <div><p class="eyebrow">LIVE SIMULATION</p><h2>Office</h2></div>
+            <span class="badge" id="mode-badge">Starting</span>
+          </div>
+
+          <div class="room">
+            <div class="wall">
+              <div class="wall-label">WINDOW LIGHT · WALL A → E · EAST → WEST</div>
+              <div class="wall-lights" id="wall-lights"></div>
+            </div>
+            <div class="torchiere" id="work-light" aria-hidden="true">
+              <span class="torchiere-glow"></span><span class="torchiere-shade"></span>
+              <span class="torchiere-stem"></span><span class="torchiere-base"></span>
+            </div>
+            <div class="torchiere-caption"><strong>Room torchiere</strong><span id="torchiere-status">Waiting for program</span></div>
+            <div class="room-footer"><span>SIMULATED DEVICES</span><span id="device-count">0 / 7 online</span></div>
+          </div>
+          <p class="hint">The torchiere follows its separate weekday work-hours program. Choose a weekday between 08:30 and 17:30 to see it on.</p>
+          <div class="light-legend"><span><i class="legend-on"></i>On</span><span><i class="legend-off"></i>Off</span><span id="sky-label">Sky data unavailable</span></div>
+        </section>
+
+        <aside class="side-column">
+          <section class="window-panel panel" aria-label="South-facing window simulation">
+            <div class="section-heading compact">
+              <div><p class="eyebrow">SIMULATED OUTSIDE</p><h2>South-facing window</h2></div>
+              <span class="badge" id="sun-position-label">Finding sun…</span>
+            </div>
+            <div class="window-scene" id="window-view">
+              <span></span><span></span><span></span><span></span>
+              <span class="window-sun" id="window-sun" aria-hidden="true"></span>
+            </div>
+            <p class="hint">Sun position follows the simulated date, time, and location. Glass tint follows the WallA–E daylight colors.</p>
+          </section>
+
+          <section class="display panel" aria-label="Simulated ESP32 display">
+            <div class="section-heading compact">
+              <div><p class="eyebrow">DEVICE DISPLAY</p><h2>ESP32-C6-GEEK</h2></div>
+              <span class="display-led"></span>
+            </div>
+            <div class="lcd">
+              <div class="lcd-top"><span id="lcd-weekday">SIMULATED</span><span id="lcd-time">--:--</span></div>
+              <div class="lcd-mode" id="lcd-mode">Waiting for core</div>
+              <div class="lcd-rule"></div>
+              <div class="lcd-line"><span>DAYLIGHT</span><strong id="lcd-day">Waiting for time</strong></div>
+              <div class="lcd-line"><span>NEXT EVENT</span><strong id="lcd-next">time sync…</strong></div>
+              <div class="lcd-line"><span>SKY</span><strong id="lcd-sky">—</strong></div>
+              <div class="lcd-bottom"><span>LIGHTS</span><strong id="lcd-lights">0 / 6</strong></div>
+            </div>
+          </section>
+
+          <section class="controls panel" aria-label="Simulation controls">
+            <div class="section-heading compact">
+              <div><p class="eyebrow">EVENT INPUTS</p><h2>Virtual controls</h2></div>
+            </div>
+            <div class="control-group">
+              <label for="date-picker"><span>Simulated date</span></label>
+              <input id="date-picker" type="date" />
+              <p class="hint">Choose a day, then scrub time to replay the office schedule.</p>
+            </div>
+            <div class="control-group">
+              <label for="time-slider"><span id="time-label">Simulated time (UTC)</span><output id="time-value">12:00</output></label>
+              <input id="time-slider" type="range" min="0" max="1439" step="1" value="720" />
+              <div class="range-labels"><span>00:00</span><span>23:59</span></div>
+              <p class="hint" id="time-zone-info">UTC · default Greenwich coordinates</p>
+            </div>
+            <div class="control-group">
+              <span class="control-title">Sun location <output id="location-value">0.00°, 0.00°</output></span>
+              <button id="location-button" class="location-button" type="button">Use / refresh my location</button>
+              <p class="hint" id="location-info">The browser will ask to use your location on load. If allowed, coordinates are saved only in this browser.</p>
+            </div>
+            <div class="control-group">
+              <span class="control-title">Wall button</span>
+              <div class="button-row">
+                <button data-press="0" class="button-control"><span>●</span>Single</button>
+                <button data-press="1" class="button-control"><span>●●</span>Double</button>
+                <button data-press="2" class="button-control"><span>◉</span>Hold</button>
+              </div>
+              <p class="hint">Uses the same button event and mode controller as the device.</p>
+            </div>
+            <div class="control-group">
+              <label for="weather-select"><span>Weather sensor</span></label>
+              <select id="weather-select">
+                <option value="0">Clear</option>
+                <option value="1">Drizzle</option>
+                <option value="2">Rain</option>
+                <option value="3">Freezing rain</option>
+                <option value="4">Snow</option>
+                <option value="5">Thunderstorm</option>
+              </select>
+              <label class="sub-label" for="cloud-slider"><span>Cloud cover</span><output id="cloud-value">20%</output></label>
+              <input id="cloud-slider" type="range" min="0" max="100" value="20" />
+            </div>
+            <div class="control-group last">
+              <label for="alert-select"><span>Weather alert</span></label>
+              <select id="alert-select">
+                <option value="0">None</option>
+                <option value="1">Advisory</option>
+                <option value="2">Watch</option>
+                <option value="3">Warning</option>
+              </select>
+              <p class="hint">Inputs post ConditionsUpdated and AlertsUpdated through the shared event bus.</p>
+            </div>
+          </section>
+        </aside>
+      </section>
+      <footer><span>Core logic: C++ → WebAssembly</span><span id="event-status">Waiting for first event…</span></footer>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

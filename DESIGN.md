@@ -349,9 +349,10 @@ mireds    += (cool_mireds - mireds) · (cloudcool / 100) · c    default cloudco
 golden    *= 1 - c                                 no golden glow under a gray sky
 ```
 
-The work light is task lighting and ignores the sky. In fast-day mode the
-simulated day reads the forecast's first day, never the live reading, so
-the sped-up loop shows today's sky. `config clouds off` ignores both.
+The work light powers the room torchiere and ignores the sky. In fast-day
+mode the simulated day reads the forecast's first day, never the live
+reading, so the sped-up loop shows today's sky. `config clouds off`
+ignores both.
 
 ### Weather lights (`core::Overlays`, `overlays.cppm`)
 

@@ -131,12 +131,14 @@ replace it with names where a group is identified by its place in the table.
 Run the shared `CoreRuntime` in a browser with virtual devices and an
 interactive office view. Simulate device/event behavior, not the Zigbee radio.
 
-- [ ] Add a browser scheduler that calls `CoreRuntime::process()` without blocking.
-- [ ] Implement virtual devices that consume the real light, discovery, bind
+- [x] Build the portable module graph as WebAssembly with build2 and run its
+      smoke test with Emscripten's Node runtime.
+- [x] Add a browser scheduler that calls `CoreRuntime::process()` without blocking.
+- [x] Implement virtual devices that consume the real light, discovery, bind
       and ping events and post their normal result events.
-- [ ] Add browser inputs for button presses and supported sensors; route them
+- [x] Add browser inputs for button presses and supported sensors; route them
       through the virtual devices and the same event bus.
-- [ ] Render virtual bulb state in the office view and render
+- [x] Render virtual bulb state in the office view and render
       `StatusDisplayData` in a panel matching the ESP32-C6-GEEK display.
 
 ## Status display: more than one zone

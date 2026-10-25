@@ -3,11 +3,12 @@
 An ESP32-C6 Zigbee coordinator that drives 6 Zigbee bulbs through a daylight
 simulation and responds to one physical button controller:
 
-- **5 "wall" bulbs** fade through a warm-to-cool, dim-to-bright curve
-  between the real local sunrise and sunset, simulating daylight.
-- **1 "work" bulb** stays bright and shifts cool to warm across the work
-  hours (default 08:30-17:30: ~6000K in the morning to ~3000K by
-  17:30, then holds warm).
+- **5 "wall" bulbs** (WallA-E) simulate the changing light from the south-facing
+  window, fading through a warm-to-cool, dim-to-bright curve between sunrise
+  and sunset.
+- **1 "work" bulb** powers the room's torchiere; it stays bright and shifts
+  cool to warm across the work hours (default 08:30-17:30: ~6000K in the
+  morning to ~3000K by 17:30, then holds warm).
 - The wall bulbs sit east-to-west on the south wall (WallA east, WallE
   west): the one nearest the real sun's direction is brightest (`config sunshift`),
   and near sunrise/sunset they glow amber, deepest at the end nearest the
@@ -68,6 +69,39 @@ b config.cxx.coptions=-fno-exceptions config.cxx.coptions+=-fno-rtti 'alias{port
 After that, `b 'alias{portable}'` rebuilds it incrementally, and
 `./sunsim_build2_smoke` runs the smoke test. The initial configuration is
 saved by build2; `b clean` removes generated module artifacts.
+
+The same portable modules also build to WebAssembly with Emscripten. Load the
+SDK environment, then build and run the browser simulation:
+
+```
+. ~/emsdk/emsdk_env.sh
+SUNSIM_WASM=1 b config.cxx=em++ 'alias{wasm}'
+"$EMSDK_NODE" test/build2/wasm_smoke.mjs
+bun build web/app.ts --no-bundle --target browser --outfile web/app.js --check
+python3 -m http.server 8080
+```
+
+Keep `SUNSIM_WASM=1` set for incremental wasm builds; it selects the Emscripten
+header fallback and JavaScript module output. The browser UI is written in
+strict TypeScript (`web/app.ts`); Bun type-checks and transpiles it to the
+ignored `web/app.js` file served by the browser. Open
+`http://localhost:8080/web/` to run the shared C++ core in the browser with
+virtual lights, a south-facing window view whose sun position and glass tint
+follow the simulated sky, button inputs, simulated time and weather, and the
+shared status-display model. Python's built-in server is only for serving the
+static files; there is no Node.js/Bun runtime dependency in the browser.
+Emscripten still uses its bundled Node runtime while compiling and linking.
+The torchiere runs its separate weekday work-hours program (default
+08:30-17:30), so choose a weekday and a time in that range to see it on. On
+load, the browser asks for location permission; if granted, it uses the
+coordinates and browser local timezone and saves the coordinates in
+`localStorage` for the next visit. They stay in this browser and are not sent
+to a service. A saved location is used immediately while the browser checks
+for an updated fix. If permission is denied and no location was saved yet, the
+simulation uses the Greenwich/UTC demo clock. The calendar and time slider
+replay a chosen day in the active timezone. Use “Use / refresh my location” to
+retry; browser geolocation requires a secure context: use `localhost` on this
+computer, or HTTPS when serving it remotely.
 
 It finds the board as the only `/dev/ttyACM*` (or set `SUNSIM_PORT`), and
 uses `~/.espressif/v6.1/esp-idf` (or set `SUNSIM_IDF`). `cmd` doesn't reset
@@ -174,8 +208,8 @@ The board's LCD (Waveshare ESP32-C6-GEEK, 1.14" ST7789) shows:
 - the time, large, and the weekday ("sim" in fast-day mode)
 - the mode: `daylight`, `idle` (outside active hours), `off` or `RED ALERT`
 - today's day length, and the countdown to the next sunrise or sunset
-- one dot per device, grouped `D ●●●●●  W ●  B ●`: D = the daylight wall
-  (WallA-WallE, east to west), W = the work light, B = the button;
+- one dot per device, grouped `D ●●●●●  W ●  B ●`: D = the window-light
+  wall array (WallA-WallE, east to west), W = the torchiere, B = the button;
   green = responding, amber = paired but silent, gray = not paired
 
 The `status` console command prints the same information. Pins and
