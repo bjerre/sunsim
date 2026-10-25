@@ -88,13 +88,15 @@ const wallLights = element<HTMLDivElement>("#wall-lights");
 function makeLight(role: WallRole): HTMLDivElement {
   const item = document.createElement("div");
   item.className = "bulb-unit";
+  const uplight = document.createElement("span");
+  uplight.className = "wall-uplight";
   const bulb = document.createElement("span");
   bulb.className = "bulb";
   const name = document.createElement("span");
   name.textContent = role;
   const state = document.createElement("small");
   state.textContent = "OFF";
-  item.append(bulb, name, state);
+  item.append(uplight, bulb, name, state);
   return item;
 }
 
@@ -283,6 +285,15 @@ async function start(): Promise<void> {
       return [r, g, b].map((channel) => Math.round((channel + m) * 255)) as Rgb;
     }
 
+    function normalizedIntensity(level: number): number {
+      return Math.max(0, Math.min(1, level / 254));
+    }
+
+    function lightGlowOpacity(level: number): string {
+      const intensity = Math.max(0.16, level / 254);
+      return String(0.2 + intensity * 0.65);
+    }
+
     function temperatureColor(mireds: number): string {
       return `rgb(${temperatureRgb(mireds).join(" ")})`;
     }
@@ -343,8 +354,7 @@ async function start(): Promise<void> {
           const work = element<HTMLDivElement>("#work-light");
           const glow = element<HTMLSpanElement>("#work-light .torchiere-glow");
           const shade = element<HTMLSpanElement>("#work-light .torchiere-shade");
-          const intensity = Math.max(0.16, light.level / 254);
-          glow.style.opacity = light.on ? String(0.2 + intensity * 0.65) : "0";
+          glow.style.opacity = light.on ? lightGlowOpacity(light.level) : "0";
           glow.style.setProperty("--torchiere-color", `rgb(${color.join(" ")})`);
           shade.style.background = light.on ? `rgb(${color.join(" ")})` : "";
           work.style.filter = light.on ? `drop-shadow(0 0 10px rgb(${color.join(" ")} / 55%))` : "";
@@ -355,14 +365,18 @@ async function start(): Promise<void> {
         }
         const lightElement = bulbElements.get(light.role);
         if (!lightElement) continue;
+        const uplight = lightElement.querySelector<HTMLSpanElement>(".wall-uplight");
         const bulb = lightElement.querySelector<HTMLSpanElement>(".bulb");
         const label = lightElement.querySelector<HTMLElement>("small");
-        if (!bulb || !label) continue;
+        if (!uplight || !bulb || !label) continue;
         const color = light.color.mode === "mireds" ? temperatureColor(light.color.value)
           : light.color.mode === "hue" ? `hsl(${Math.round(light.color.hue * 360 / 254)} ${Math.round(light.color.saturation * 100 / 254)}% 58%)`
           : `rgb(${colorRgb(light.color).join(" ")})`;
-        const intensity = Math.max(0.16, light.level / 254);
+        const intensity = normalizedIntensity(light.level);
+        uplight.style.setProperty("--wall-uplight-color", color);
+        uplight.style.opacity = light.on ? String(0.15 + intensity * 0.8) : "0";
         bulb.style.background = light.on ? `radial-gradient(circle at 35% 30%, #fff8, ${color} 48%, #514738)` : "#29332b";
+        bulb.style.filter = light.on ? `brightness(${0.15 + intensity * 0.85})` : "";
         bulb.style.boxShadow = light.on ? `0 0 ${8 + intensity * 24}px ${color}aa, 0 0 ${20 + intensity * 32}px ${color}55` : "none";
         label.textContent = light.on ? `${Math.round(light.level / 254 * 100)}%` : "OFF";
         label.style.color = light.on ? color : "";

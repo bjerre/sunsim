@@ -29,10 +29,11 @@ h2 { margin: 0; font-size: 17px; font-weight: 600; }
 .wall { position: absolute; top: 49px; left: 8%; right: 8%; height: 167px; border: 1px solid #526054; border-bottom-color: #929078; background: linear-gradient(180deg,#384139,#29342b); box-shadow: 0 14px 28px #0002; }
 .wall-label { padding: 11px 14px; color: #91a095; font: 9px "DM Mono", monospace; letter-spacing: .12em; }
 .wall-lights { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); padding: 9px 16px 0; }
-.bulb-unit { min-width: 0; text-align: center; color: #c4cbbf; font: 10px "DM Mono", monospace; }
-.bulb { position: relative; display: block; width: 31px; height: 31px; margin: 0 auto 9px; border: 1px solid #879283; border-radius: 50% 50% 46% 46%; background: #29332b; transition: background .8s, box-shadow .8s, opacity .8s; }
+.bulb-unit { position: relative; z-index: 0; isolation: isolate; min-width: 0; text-align: center; color: #c4cbbf; font: 10px "DM Mono", monospace; }
+.wall-uplight { position: absolute; z-index: 0; top: -91px; left: 50%; width: 144px; height: 112px; transform: translateX(-50%); opacity: 0; border-radius: 50%; background: radial-gradient(ellipse at center bottom, var(--wall-uplight-color, #f0ce82) 0%, transparent 74%); filter: blur(8px); transition: opacity .5s, background .8s; pointer-events: none; }
+.bulb { position: relative; z-index: 1; display: block; width: 31px; height: 31px; margin: 0 auto 9px; border: 1px solid #879283; border-radius: 50% 50% 46% 46%; background: #29332b; transition: background .8s, box-shadow .8s, opacity .8s, filter .8s; }
 .bulb::after { content: ""; position: absolute; left: 10px; bottom: -5px; width: 9px; height: 7px; border-radius: 0 0 3px 3px; background: #8b9386; }
-.bulb-unit small { display: block; color: #9ba79b; margin-top: 4px; }
+.bulb-unit small { position: relative; z-index: 1; display: block; color: #9ba79b; margin-top: 4px; }
 .torchiere { position: absolute; z-index: 1; right: 18%; bottom: 43px; width: 54px; height: 190px; }
 .torchiere-glow { position: absolute; left: -76px; top: -74px; width: 206px; height: 130px; opacity: 0; background: var(--torchiere-color, #f0ce82); mask-image: radial-gradient(ellipse at center bottom, #000 0%, transparent 72%); filter: blur(10px); transition: opacity .5s; }
 .torchiere-shade { position: absolute; z-index: 1; left: 2px; top: 0; width: 50px; height: 19px; border-radius: 50% 50% 20% 20%; background: #a9a487; clip-path: polygon(0 8%, 100% 8%, 82% 100%, 18% 100%); }
