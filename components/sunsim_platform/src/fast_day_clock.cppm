@@ -1,6 +1,8 @@
 module sunsim.platform:fast_day_clock; // internal: not exported
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 import sunsim.ev;
 
 namespace sunsim::platform {

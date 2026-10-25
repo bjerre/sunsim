@@ -1,6 +1,8 @@
 export module sunsim.platform:status_slot;
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 import sunsim.ev;
 
 export namespace sunsim::platform {

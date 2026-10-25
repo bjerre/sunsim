@@ -5,7 +5,9 @@
 
 export module sunsim.ev:topology;
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 import :types;
 
 export namespace sunsim::ev {

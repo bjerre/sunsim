@@ -8,7 +8,9 @@ module;
 
 module sunsim.platform;
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 import sunsim.ev;
 import sunsim.weather;
 import :wifi;

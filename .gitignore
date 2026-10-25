@@ -11,6 +11,9 @@ sdkconfig.old
 build-host/
 .cache/
 *.gcm*
+*.pcm
+*.pcm.d
 *.o.d
 *.ii.lz4
 /sunsim_build2_smoke*
+/web/app.js

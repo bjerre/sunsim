@@ -2,7 +2,9 @@
 // partition per class (and for the math), all re-exported here.
 export module sunsim.core;
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 import sunsim.ev;
 
 export import :day_info;

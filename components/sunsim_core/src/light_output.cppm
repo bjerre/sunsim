@@ -1,6 +1,8 @@
 export module sunsim.core:light_output;
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 import sunsim.ev;
 
 export namespace sunsim::core {

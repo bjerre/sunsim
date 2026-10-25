@@ -1,6 +1,15 @@
+module;
+#if defined(__EMSCRIPTEN__)
+#include <array>
+#include <cerrno>
+#include <cstdlib>
+#endif
+
 export module sunsim.weather:json;
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 
 export namespace sunsim::weather {
 
@@ -63,12 +72,64 @@ namespace sunsim::weather {
 
 std::optional<double> JsonScanner::Scalar::number() const noexcept
 {
+#if defined(__EMSCRIPTEN__)
+    if (is_string || text.empty() || text.size() > kMaxText || text.front() == '+') {
+        return std::nullopt;
+    }
+
+    // Match the decimal syntax of from_chars() before strtod(), which accepts
+    // a wider language (for example hexadecimal values and leading whitespace).
+    std::size_t i = text.front() == '-' ? 1 : 0;
+    const std::size_t integer = i;
+    while (i < text.size() && text[i] >= '0' && text[i] <= '9') {
+        ++i;
+    }
+    bool has_digits = i != integer;
+    if (i < text.size() && text[i] == '.') {
+        ++i;
+        const std::size_t fraction = i;
+        while (i < text.size() && text[i] >= '0' && text[i] <= '9') {
+            ++i;
+        }
+        has_digits = has_digits || i != fraction;
+    }
+    if (!has_digits) {
+        return std::nullopt;
+    }
+    if (i < text.size() && (text[i] == 'e' || text[i] == 'E')) {
+        ++i;
+        if (i < text.size() && (text[i] == '+' || text[i] == '-')) {
+            ++i;
+        }
+        const std::size_t exponent = i;
+        while (i < text.size() && text[i] >= '0' && text[i] <= '9') {
+            ++i;
+        }
+        if (i == exponent) {
+            return std::nullopt;
+        }
+    }
+    if (i != text.size()) {
+        return std::nullopt;
+    }
+
+    std::array<char, kMaxText + 1> buffer{};
+    std::copy(text.begin(), text.end(), buffer.begin());
+    char *end = nullptr;
+    errno = 0;
+    const double value = std::strtod(buffer.data(), &end);
+    if (errno == ERANGE || end != buffer.data() + text.size()) {
+        return std::nullopt;
+    }
+    return value;
+#else
     double value = 0.0;
     const auto [end, err] = std::from_chars(text.data(), text.data() + text.size(), value);
     if (is_string || err != std::errc{} || end != text.data() + text.size()) {
         return std::nullopt;
     }
     return value;
+#endif
 }
 
 JsonScanner::JsonScanner(OnScalar on_scalar, OnObjectEnd on_object_end)

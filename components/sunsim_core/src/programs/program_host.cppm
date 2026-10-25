@@ -1,6 +1,8 @@
 export module sunsim.core:program_host;
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 import sunsim.ev;
 import :daylight_program;
 import :off_program;

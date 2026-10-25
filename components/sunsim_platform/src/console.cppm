@@ -6,7 +6,9 @@ module;
 
 export module sunsim.platform:console;
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 import sunsim.ev;
 import :status_slot;
 import :format;

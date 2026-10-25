@@ -1,4 +1,6 @@
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 import sunsim.core;
 import sunsim.ev;
 import sunsim.presentation;

@@ -1,6 +1,8 @@
 export module sunsim.core:day_info;
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 import sunsim.ev;
 import :solar;
 

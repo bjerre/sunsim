@@ -9,7 +9,9 @@ module;
 
 export module sunsim.ev:types;
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 export import :layout;
 
 export namespace sunsim::ev {

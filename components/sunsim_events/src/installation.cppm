@@ -4,7 +4,9 @@
 
 export module sunsim.ev:installation;
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 export import :layout;
 import :topology;
 import :types;

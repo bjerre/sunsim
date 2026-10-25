@@ -3,7 +3,9 @@
 
 export module sunsim.ev:layout;
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 
 export namespace sunsim::ev {
 

@@ -16,7 +16,9 @@ module;
 
 export module sunsim.platform:status_display;
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 import sunsim.ev;
 import sunsim.presentation;
 import :status_slot;

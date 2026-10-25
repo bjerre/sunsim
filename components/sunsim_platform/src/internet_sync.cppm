@@ -4,7 +4,9 @@
 // module's interface, used or not).
 export module sunsim.platform:internet_sync;
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 import sunsim.ev;
 
 export namespace sunsim::platform {

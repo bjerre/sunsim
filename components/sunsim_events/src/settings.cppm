@@ -5,7 +5,9 @@
 
 export module sunsim.ev:settings;
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 import :types;
 
 export namespace sunsim::ev {
@@ -140,9 +142,32 @@ constexpr std::array<std::string_view, 7> kDayNames = {"sun", "mon", "tue", "wed
 // A whole number, all of `text`.
 std::optional<long> wholeNumber(std::string_view text) noexcept
 {
-    long value = 0;
-    const auto [end, err] = std::from_chars(text.data(), text.data() + text.size(), value);
-    return err == std::errc{} && end == text.data() + text.size() ? std::optional{value} : std::nullopt;
+    bool negative = false;
+    if (!text.empty() && text.front() == '-') {
+        negative = true;
+        text.remove_prefix(1);
+    }
+    if (text.empty()) {
+        return std::nullopt;
+    }
+
+    const auto limit = static_cast<unsigned long>(std::numeric_limits<long>::max()) + static_cast<unsigned long>(negative);
+    unsigned long magnitude = 0;
+    for (const char c : text) {
+        if (c < '0' || c > '9') {
+            return std::nullopt;
+        }
+        const auto digit = static_cast<unsigned long>(c - '0');
+        if (magnitude > (limit - digit) / 10) {
+            return std::nullopt;
+        }
+        magnitude = magnitude * 10 + digit;
+    }
+    if (negative && magnitude == limit) {
+        return std::numeric_limits<long>::min();
+    }
+    const long value = static_cast<long>(magnitude);
+    return negative ? -value : value;
 }
 
 // "HH:MM" as a time after midnight (24:00 allowed).

@@ -5,7 +5,9 @@
 
 export module sunsim.ev:events;
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 import :installation;
 import :topology;
 import :types;

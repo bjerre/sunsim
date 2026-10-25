@@ -1,7 +1,9 @@
 // Text formatting shared by the console and the status display.
 module sunsim.platform:format; // internal: not exported
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 import sunsim.ev;
 import sunsim.presentation;
 

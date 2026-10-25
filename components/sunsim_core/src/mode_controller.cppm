@@ -1,6 +1,8 @@
 export module sunsim.core:mode_controller;
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 import sunsim.ev;
 
 export namespace sunsim::core {

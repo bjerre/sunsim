@@ -86,6 +86,8 @@ const suite<"events"> eventsTests = [] {
         expect(!takes("hours", "8-19"));
         expect(!takes("sunshift", "101"));
         expect(!takes("sunshift", ""));
+        expect(!takes("sunshift", "+1"));
+        expect(!takes("sunshift", "999999999999999999999999999999999999"));
         expect(!takes("ambersweep", "31"));
         expect(!takes("fade", "-1"));
         expect(!takes("amber", "yes"));
