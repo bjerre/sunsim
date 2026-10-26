@@ -7,6 +7,7 @@ const webRoot = fileURLToPath(new URL("./web", import.meta.url));
 
 export default defineConfig({
   root: webRoot,
+  base: process.env.VITE_BASE_PATH ?? "/",
   plugins: [svelte()],
   server: {
     fs: {

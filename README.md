@@ -102,6 +102,12 @@ Open the Vite URL (normally `http://localhost:5173/`) to run the shared C++ core
 in the browser. Bun and Svelte are build-time tools; neither Bun nor Node.js is
 required in the browser. Emscripten still uses its bundled Node runtime while
 compiling and linking.
+The GitHub Actions workflow builds and publishes a static demo to
+`https://bjerre.github.io/sunsim/` when changes are pushed to `main` or
+`feature/browser-simulation`. For the first deployment, set the repository's
+Pages source to GitHub Actions under Settings → Pages. The demo runs entirely
+in the browser and does not control physical devices; location coordinates
+remain in that browser's local storage.
 The torchiere runs its separate weekday work-hours program (default
 08:30-17:30), so choose a weekday and a time in that range to see it on. On
 load, the browser asks for location permission; if granted, it uses the
