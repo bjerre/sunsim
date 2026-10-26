@@ -40,8 +40,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y "$RUNNER_TEMP/$package"
 
+      # Emscripten's first -dumpmachine may print a sanity-check line that
+      # build2 mistakes for the target triple. Prime it before detection.
+      - name: Prime Emscripten target detection
+        run: em++ -dumpmachine
+
       - name: Build WebAssembly simulator
-        run: EMSDK_QUIET=1 SUNSIM_WASM=1 b config.cxx=em++ 'alias{wasm}'
+        run: SUNSIM_WASM=1 b config.cxx=em++ 'alias{wasm}'
 
       - name: Test WebAssembly simulator
         run: node test/build2/wasm_smoke.mjs
