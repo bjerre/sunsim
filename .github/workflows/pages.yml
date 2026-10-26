@@ -41,7 +41,7 @@ jobs:
           sudo apt-get install -y "$RUNNER_TEMP/$package"
 
       - name: Build WebAssembly simulator
-        run: SUNSIM_WASM=1 b config.cxx=em++ 'alias{wasm}'
+        run: EMSDK_QUIET=1 SUNSIM_WASM=1 b config.cxx=em++ 'alias{wasm}'
 
       - name: Test WebAssembly simulator
         run: node test/build2/wasm_smoke.mjs
