@@ -41,6 +41,35 @@ h2 { margin: 0; font-size: 17px; font-weight: 600; }
 .torchiere-base { position: absolute; left: 6px; bottom: 0; width: 42px; height: 8px; border-radius: 50%; background: #999681; }
 .torchiere-caption { position: absolute; right: 8%; bottom: 252px; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; color: #d7ded3; font-size: 11px; }
 .torchiere-caption span { color: #aaa899; font-size: 9px; }
+.bookcase-scene { position: absolute; z-index: 2; left: 7%; bottom: 46px; width: 108px; height: 143px; border: 5px solid #705d48; border-bottom-width: 8px; border-radius: 3px 3px 1px 1px; background: linear-gradient(90deg, #4b3d31, #685541 48%, #483a2e); box-shadow: inset 4px 0 7px #17140f88, 3px 4px 8px #0004; }
+.bookcase-shelf { position: absolute; left: -2px; right: -2px; height: 7px; border: 1px solid #94795b; background: #78634a; box-shadow: 0 3px 4px #17140f66; }
+.shelf-top { top: 47px; }
+.shelf-bottom { top: 91px; }
+.plant-glow { position: absolute; top: 8px; left: 9px; width: 78px; height: 45px; opacity: 0; background: radial-gradient(ellipse at center, #bc8ff4aa, transparent 72%); filter: blur(7px); transition: opacity .5s; }
+.grow-lamp { position: absolute; z-index: 3; top: 10px; left: 14px; width: 70px; height: 4px; border-radius: 3px; background: #45404e; transition: background .4s, box-shadow .4s; }
+.plant-leaf { position: absolute; z-index: 1; top: 23px; width: 21px; height: 32px; border-radius: 100% 0 100% 0; background: #668958; transform-origin: bottom center; transition: background .4s, filter .4s; }
+.leaf-one { left: 35px; transform: rotate(-35deg); }
+.leaf-two { left: 48px; top: 18px; transform: rotate(8deg) scale(.9); }
+.leaf-three { left: 53px; transform: rotate(42deg) scale(.8); }
+.leaf-four { left: 25px; top: 28px; transform: rotate(-62deg) scale(.75); }
+.plant-pot { position: absolute; z-index: 2; top: 41px; left: 37px; width: 27px; height: 16px; border-radius: 2px 2px 8px 8px; background: #b06e52; }
+.bookcase-scene[data-on="true"] .plant-glow { opacity: 1; }
+.bookcase-scene[data-on="true"] .grow-lamp { background: #d3afff; box-shadow: 0 0 9px #bd8cf4; }
+.bookcase-scene[data-on="true"] .plant-leaf { background: #91ad70; filter: drop-shadow(0 0 5px #b98ff2aa); }
+.bookcase-caption, .desk-caption { position: absolute; bottom: -12px; left: -8px; width: 128px; display: flex; flex-direction: column; gap: 3px; color: #d7ded3; font-size: 9px; white-space: nowrap; }
+.bookcase-caption small, .desk-caption small { color: #aaa899; font: 8px "DM Mono", monospace; }
+.desk-scene { position: absolute; z-index: 2; left: 30%; bottom: 46px; width: 190px; height: 153px; }
+.desk-downlight-beam { position: absolute; z-index: 0; top: 41px; left: 112px; width: 75px; height: 69px; opacity: 0; background: radial-gradient(ellipse at 50% 0%, #f0ce82aa 0%, #f0ce8244 34%, transparent 76%); filter: blur(5px); transition: opacity .5s; }
+.desk-lamp-post { position: absolute; z-index: 2; left: 147px; bottom: 49px; width: 4px; height: 63px; border-radius: 3px; background: #9b9b87; }
+.desk-lamp-arm { position: absolute; z-index: 2; left: 120px; top: 40px; width: 34px; height: 4px; border-radius: 3px; background: #a4a18a; transform: rotate(34deg); transform-origin: right center; }
+.desk-lamp-head { position: absolute; z-index: 3; left: 105px; top: 28px; width: 36px; height: 15px; border-radius: 50% 50% 2px 2px; background: #878b77; clip-path: polygon(20% 0, 100% 0, 78% 100%, 0 100%); transition: background .4s, filter .4s; }
+.desk-surface { position: absolute; z-index: 1; left: 12px; bottom: 42px; width: 165px; height: 8px; border-radius: 2px; background: #9b7957; box-shadow: 0 4px 7px #0004; }
+.desk-leg { position: absolute; z-index: 0; bottom: 4px; width: 5px; height: 40px; background: #70583f; }
+.leg-left { left: 28px; }
+.leg-right { left: 157px; }
+.desk-scene[data-on="true"] .desk-downlight-beam { opacity: .9; }
+.desk-scene[data-on="true"] .desk-lamp-head { background: #f0ce82; filter: drop-shadow(0 0 8px #f0ce82aa); }
+.desk-caption { left: 17px; bottom: -12px; width: 165px; }
 .window-panel { padding: 19px; }
 .window-scene { --window-tint: #8faeaa; --window-brightness: 1; position: relative; display: grid; width: 100%; height: clamp(180px, 24vw, 250px); grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; overflow: hidden; border: 7px solid #6b7569; background: #98b4ae; box-shadow: 0 4px 14px #0003; filter: brightness(var(--window-brightness)); transition: filter .8s; }
 .window-scene span:not(.window-sun) { border: 3px solid #6b7569; background-color: var(--window-tint); background-image: linear-gradient(145deg,#fff3,#17251f33); transition: background-color .8s; }
@@ -84,4 +113,4 @@ input[type="date"] { width: 100%; padding: 9px 10px; border: 1px solid #3a4b3d; 
 .sub-label { margin-top: 13px; }
 footer { margin-top: 18px; color: #718176; font: 10px "DM Mono", monospace; }
 @media (max-width: 850px) { .workspace { grid-template-columns: 1fr; } .side-column { grid-template-columns: 1fr 1fr; align-items: start; } .room { min-height: 490px; } }
-@media (max-width: 600px) { .shell { padding: 22px 14px; } .topbar { align-items: flex-start; gap: 12px; flex-direction: column; } .side-column { grid-template-columns: 1fr; } .room { min-height: 460px; } .wall { left: 5%; right: 5%; } .torchiere { right: 14%; } .torchiere-caption { right: 5%; } .light-legend { align-items: flex-start; gap: 10px; flex-wrap: wrap; } footer { align-items: flex-start; gap: 8px; flex-direction: column; } }
+@media (max-width: 600px) { .shell { padding: 22px 14px; } .topbar { align-items: flex-start; gap: 12px; flex-direction: column; } .side-column { grid-template-columns: 1fr; } .room { min-height: 460px; } .wall { left: 5%; right: 5%; } .bookcase-scene { left: 4%; transform: scale(.78); transform-origin: left bottom; } .desk-scene { left: 29%; transform: scale(.8); transform-origin: left bottom; } .torchiere { right: 8%; } .torchiere-caption { right: 5%; } .light-legend { align-items: flex-start; gap: 10px; flex-wrap: wrap; } footer { align-items: flex-start; gap: 8px; flex-direction: column; } }

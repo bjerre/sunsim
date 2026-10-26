@@ -1,7 +1,8 @@
 # sunsim
 
-An ESP32-C6 Zigbee coordinator that drives 6 Zigbee bulbs through a daylight
-simulation and responds to one physical button controller:
+An ESP32-C6 Zigbee coordinator that drives six bulbs and two schedule-only
+smart plugs through a daylight simulation, and responds to one physical
+button controller:
 
 - **5 "wall" bulbs** (WallA-E) simulate the changing light from the south-facing
   window, fading through a warm-to-cool, dim-to-bright curve between sunrise
@@ -9,6 +10,12 @@ simulation and responds to one physical button controller:
 - **1 "work" bulb** powers the room's torchiere; it stays bright and shifts
   cool to warm across the work hours (default 08:30-17:30: ~6000K in the
   morning to ~3000K by 17:30, then holds warm).
+- **Desk plug** switches the desk's downward-facing light on from 08:00-19:00
+  every day.
+- **Grow plug** switches on the plant grow light on the bookcase beside the
+  desk from 03:45-08:45 every day.
+- These two plugs follow independent on/off schedules; they are not dimmed
+  and are unaffected by the office button's modes.
 - The wall bulbs sit east-to-west on the south wall (WallA east, WallE
   west): the one nearest the real sun's direction is brightest (`config sunshift`),
   and near sunrise/sunset they glow amber, deepest at the end nearest the
@@ -25,12 +32,12 @@ simulation and responds to one physical button controller:
   in daylight or off mode. Which lights pulse is the office zone's
   `.weather` in `installation.cppm`; `config weather on|off` and the
   `weather` command.
-- All bulbs only run inside an **active window** (default Mon-Fri,
-  08:00-19:00, 10 min fade at each edge) and are off outside it.
+- The wall and torchiere bulbs only run inside an **active window** (default
+  Mon-Fri, 08:00-19:00, 10 min fade at each edge) and are off outside it.
 - **1 button controller** (any simple single-button Zigbee switch):
   - single press -> resume the daylight program
-  - long press (Off) -> all lights off until pressed again
-  - double press -> a "red alert" strobe effect on all the bulbs
+  - long press (Off) -> office lights off until pressed again
+  - double press -> a "red alert" strobe effect on the office bulbs
 
 sunsim forms and is the coordinator of its own small Zigbee network - it
 does not join an existing hub's network. Built on
@@ -71,26 +78,30 @@ After that, `b 'alias{portable}'` rebuilds it incrementally, and
 saved by build2; `b clean` removes generated module artifacts.
 
 The same portable modules also build to WebAssembly with Emscripten. Load the
-SDK environment, then build and run the browser simulation:
+SDK environment, install the browser tooling once, then build and run the
+Svelte browser simulation:
 
 ```
 . ~/emsdk/emsdk_env.sh
 SUNSIM_WASM=1 b config.cxx=em++ 'alias{wasm}'
 "$EMSDK_NODE" test/build2/wasm_smoke.mjs
-bun build web/app.ts --no-bundle --target browser --outfile web/app.js --check
-python3 -m http.server 8080
+bun install
+bun run check
+bun run dev -- --host 0.0.0.0
 ```
 
 Keep `SUNSIM_WASM=1` set for incremental wasm builds; it selects the Emscripten
-header fallback and JavaScript module output. The browser UI is written in
-strict TypeScript (`web/app.ts`); Bun type-checks and transpiles it to the
-ignored `web/app.js` file served by the browser. Open
-`http://localhost:8080/web/` to run the shared C++ core in the browser with
-virtual lights, a south-facing window view whose sun position and glass tint
-follow the simulated sky, button inputs, simulated time and weather, and the
-shared status-display model. Python's built-in server is only for serving the
-static files; there is no Node.js/Bun runtime dependency in the browser.
-Emscripten still uses its bundled Node runtime while compiling and linking.
+header fallback and JavaScript module output. `web/src/App.svelte` coordinates
+the page lifecycle, while the office, window, device display, and controls are
+separate Svelte panes that can be composed or embedded independently.
+`web/simulator.ts` remains a framework-independent TypeScript controller that
+owns the WASM instance and publishes typed state and actions. Vite builds and
+serves the Svelte UI; `bun run build` produces static files in `web/dist/`.
+The browser WASM target is separate from the native smoke-test executable.
+Open the Vite URL (normally `http://localhost:5173/`) to run the shared C++ core
+in the browser. Bun and Svelte are build-time tools; neither Bun nor Node.js is
+required in the browser. Emscripten still uses its bundled Node runtime while
+compiling and linking.
 The torchiere runs its separate weekday work-hours program (default
 08:30-17:30), so choose a weekday and a time in that range to see it on. On
 load, the browser asks for location permission; if granted, it uses the
@@ -208,8 +219,9 @@ The board's LCD (Waveshare ESP32-C6-GEEK, 1.14" ST7789) shows:
 - the time, large, and the weekday ("sim" in fast-day mode)
 - the mode: `daylight`, `idle` (outside active hours), `off` or `RED ALERT`
 - today's day length, and the countdown to the next sunrise or sunset
-- one dot per device, grouped `D ●●●●●  W ●  B ●`: D = the window-light
-  wall array (WallA-WallE, east to west), W = the torchiere, B = the button;
+- one dot per device, grouped `D ●●●●●  W ●  L ●  G ●  B ●`: D = the
+  window-light wall array (WallA-WallE, east to west), W = the torchiere,
+  L = the desk downlight plug, G = the bookcase grow-light plug, B = the button;
   green = responding, amber = paired but silent, gray = not paired
 
 The `status` console command prints the same information. Pins and
@@ -267,11 +279,10 @@ bulbs' sunrise/sunset calculation - see
 
 ## Pairing
 
-Roles (`WallA`-`WallE` east to west along the wall, `Work`, `Button`; the
-kind and count of each group are `ev::kLayout` in `types.cppm`, the one
-place to change for more or fewer wall lights, or a plug) are assigned from the serial
-console (`idf.py monitor`, over the same USB cable used for flashing), one
-device at a time:
+Roles (`WallA`-`WallE` east to west along the wall, `Work`, `Desk`, `Grow`,
+`Button`; the kind and count of each group are `ev::kLayout` in
+`layout.cppm`) are assigned from the serial console (`idf.py monitor`, over
+the same USB cable used for flashing), one device at a time:
 
 ```
 sunsim> pair WallA        # arms WallA and opens the network for 180s
@@ -318,7 +329,7 @@ Tested with a SONOFF SNZB-01-style button, which says which press it was:
 |--------|--------------|------------------------|
 | single | `Toggle`     | resume daylight program |
 | double | `On`         | red alert (TNG pulse)  |
-| hold   | `Off`        | all lights off         |
+| hold   | `Off`        | office lights off      |
 
 These buttons send to sunsim's endpoint 1 regardless of the binding, where
 the stack has no On/Off server and would drop them, so frames from the
@@ -345,7 +356,7 @@ every mode before a button is paired:
 ```
 sunsim> press double   # red alert
 sunsim> press single   # resume the daylight program
-sunsim> press hold     # all lights off
+sunsim> press hold     # office lights off
 ```
 
 ## Debug fast-day mode

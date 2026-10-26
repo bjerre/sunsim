@@ -8,5 +8,5 @@
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["app.ts", "wasm.d.ts"]
+  "include": ["src/**/*.ts", "src/**/*.svelte", "presentation.ts", "simulator.ts", "wasm.d.ts"]
 }

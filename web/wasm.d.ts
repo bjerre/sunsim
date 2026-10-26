@@ -18,7 +18,7 @@ interface SunsimModule {
   _sunsim_state(): number;
 }
 
-declare module "*sunsim_build2_smoke.js" {
+declare module "*sunsim_web_simulator.js" {
   const createSunsim: () => Promise<SunsimModule>;
   export default createSunsim;
 }

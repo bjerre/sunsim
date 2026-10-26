@@ -1,4 +1,5 @@
 build/
+build-esp32c6/
 managed_components/
 sdkconfig
 sdkconfig.old
@@ -16,4 +17,8 @@ build-host/
 *.o.d
 *.ii.lz4
 /sunsim_build2_smoke*
+/sunsim_web_simulator*
+/node_modules/
+/web/dist/
 /web/app.js
+/web/simulator.js
