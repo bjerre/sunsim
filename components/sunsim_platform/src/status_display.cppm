@@ -29,8 +29,8 @@ export namespace sunsim::platform {
 // the "Status display" menuconfig): current time, day length, countdown to
 // the next sunrise/sunset, mode, the sky (an alert, else rain or snow, else
 // cloud cover), and one dot per device for its link state,
-// grouped: "D ●●●●●  W ●  B ●" (the daylight wall east to west, the work
-// light, the button).
+// grouped: "D ●●●●● W ● L ● G ● B ●" (the daylight wall east to west, the
+// torchiere, desk downlight, grow light, and button).
 // Redraws once a second from the latest StatusSnapshot - the same data as
 // the `status` console command. No-op unless CONFIG_SUNSIM_DISPLAY.
 void startStatusDisplay(const StatusSlot &status);
@@ -76,9 +76,9 @@ struct Context {
 // The device dots: one row, each group's letter followed by a dot per
 // member in order (the wall's east to west).
 constexpr int kDotSize   = 10;
-constexpr int kDotPitch  = 16; // a dot and the gap after it
+constexpr int kDotPitch  = 12; // a dot and a compact 2 px gap
 constexpr int kLabelCell = 16; // a group letter and the gap after it
-constexpr int kGroupGap  = 10; // between one group's last dot and the next letter
+constexpr int kGroupGap  = 4;  // between one group's last dot and the next letter
 constexpr int kDotsLeft  = 8;
 constexpr int kDotsTopY  = 114;
 

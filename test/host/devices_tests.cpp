@@ -186,21 +186,25 @@ const suite<"devices"> devicesTests = [] {
         expect(persisted.size() == 1 && !(*persisted[0].records)[kWallA].valid);
     };
 
-    "the layout: five wall lights east to west, then work and button"_test = [] {
-        static_assert(kRoleCount == 7 && kLightCount == 6);
+    "the layout: five wall bulbs, torchiere, two schedule plugs, and button"_test = [] {
+        static_assert(kRoleCount == 9 && kLightCount == 8);
         static_assert(members(Group::Wall).size() == 5);
         static_assert(roleName(kWallA) == "WallA" && roleName(kWallE) == "WallE");
-        static_assert(roleName(kWork) == "Work" && roleName(kButton) == "Button");
+        static_assert(roleName(kWork) == "Work" && roleName(kDesk) == "Desk" && roleName(kGrow) == "Grow" &&
+                      roleName(kButton) == "Button");
         static_assert(parseRole("wallc") == kWallC && !parseRole("WallF"));
-        static_assert(slot(kWork) == 5 && kRoles[slot(kWallC)] == kWallC);
-        expect(std::ranges::equal(lights(), std::span{kRoles}.first(6)));
-        static_assert(kindOf(kWallA) == Kind::ColorBulb && kindOf(kButton) == Kind::Button);
+        static_assert(slot(kWork) == 5 && slot(kDesk) == 6 && slot(kGrow) == 7 && slot(kButton) == 8);
+        expect(std::ranges::equal(lights(), std::span{kRoles}.first(8)));
+        static_assert(kindOf(kWallA) == Kind::ColorBulb && kindOf(kDesk) == Kind::Plug &&
+                      kindOf(kGrow) == Kind::Plug && kindOf(kButton) == Kind::Button);
         static_assert(isLight(kWork) && !isLight(kButton) && isButton(kButton) && !isButton(kWork));
 
         const auto wall = parseSelection("wall");
         expect(wall && selects(*wall, kWallE) && !selects(*wall, kWork));
         const auto work = parseSelection("WORK");
         expect(work && selects(*work, kWork) && !selects(*work, kWallA));
+        const auto desk = parseSelection("desk");
+        expect(desk && selects(*desk, kDesk) && !selects(*desk, kGrow));
         const auto all = parseSelection("all");
         expect(all && std::ranges::all_of(kRoles, [&](Role r) { return selects(*all, r); }));
         expect(!parseSelection("lamp"));
@@ -260,25 +264,33 @@ const suite<"devices"> devicesTests = [] {
     };
 
     "zones: every light in one, with its look; buttons control theirs"_test = [] {
-        static_assert(kZoneCount == 1 && kZoneOf[kWallA] == kZoneIds[0] && kZoneOf[kButton] == kZoneIds[0]);
+        static_assert(kZoneCount == 3 && kZoneOf[kWallA] == kZoneIds[0] && kZoneOf[kButton] == kZoneIds[0] &&
+                      kZoneOf[kDesk] == kZoneIds[1] && kZoneOf[kGrow] == kZoneIds[2]);
         static_assert(kControlsOf[kButton] && !kControlsOf[kWork]);
         static_assert(contains(kWeatherLights.precip, kWallC) && contains(kWeatherLights.alerts, kWallB) &&
                       !contains(kWeatherLights.alerts, kWallC));
 
-        // Another room: the wall in one zone, the work light (and the button) in another.
+        // Another room: the wall in one zone, with the work light, schedule
+        // plugs and button in another.
         constexpr std::array zones{
-            ZoneSpec{.name = "wall", .lights = {{"wall", SunCurve{}}}, .weather = Weather{.precip = {"wall"}}},
+            ZoneSpec{.name = "wall",
+                     .lights = {{"wall", SunCurve{}}},
+                     .weather = Weather{.precip = {"wall"}, .alerts = {}}},
             ZoneSpec{.name     = "desk",
-                     .lights   = {{"WORK", WorkCurve{}}},
+                     .lights   = {{"WORK", WorkCurve{}}, {"Desk", OnOffOnly{}}, {"Grow", OnOffOnly{}}},
                      .modes    = {Mode::Daylight, Mode::Off},
                      .controls = {{.by = "button", .twice = std::nullopt}}},
         };
         constexpr Topology t = topologyOf(zones);
-        static_assert(t.zone_of[kWallE] == ZoneId{0} && t.zone_of[kWork] == ZoneId{1} && t.zone_of[kButton] == ZoneId{1});
+        static_assert(t.zone_of[kWallE] == ZoneId{0} && t.zone_of[kWork] == ZoneId{1} &&
+                      t.zone_of[kDesk] == ZoneId{1} && t.zone_of[kGrow] == ZoneId{1} &&
+                      t.zone_of[kButton] == ZoneId{1});
         static_assert(std::holds_alternative<WorkCurve>(t.look_of[kWork]) && std::holds_alternative<SunCurve>(t.look_of[kWallA]));
         static_assert(t.controls_of[kButton] && !t.controls_of[kButton]->twice && t.controls_of[kButton]->hold == Mode::Off);
         static_assert(zones[1].allows(Mode::Off) && !zones[1].allows(Mode::RedAlert));
-        static_assert(t.weather.precip.count() == 5 && contains(t.weather.precip, kWallE) && t.weather.alerts.none());
+        static_assert(std::ranges::all_of(members(Group::Wall),
+                                          [&](Role role) { return contains(t.weather.precip, role); }) &&
+                      std::ranges::none_of(kRoles, [&](Role role) { return contains(t.weather.alerts, role); }));
         // A light in no zone or two, a look on the button, a button picking red alert in "desk", ... don't compile.
 
         // A gate's rules after one that always answers are never asked, so that doesn't compile either.
@@ -287,7 +299,8 @@ const suite<"devices"> devicesTests = [] {
         static_assert(!answersAlways(nine_to_five.closesOnly()) && !answersAlways(nine_to_five.opensOnly()));
         constexpr std::array layered{
             ZoneSpec{.name   = "all",
-                     .lights = {{"wall", SunCurve{}}, {"work", WorkCurve{}}},
+                     .lights = {{"wall", SunCurve{}}, {"work", WorkCurve{}},
+                                {"Desk", OnOffOnly{}}, {"Grow", OnOffOnly{}}},
                      .gate   = {nine_to_five.closesOnly(), nine_to_five.opensOnly(), Always{}}},
         };
         static_assert(topologyOf(layered).zone_of[kWork] == ZoneId{0}); // one-way rules first: fine

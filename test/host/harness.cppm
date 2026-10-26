@@ -27,7 +27,11 @@ constexpr Role kWallB{Group::Wall, 1};
 constexpr Role kWallC{Group::Wall, 2};
 constexpr Role kWallE{Group::Wall, 4}; // the west end
 constexpr Role kWork{Group::Work};
+constexpr Role kDesk{Group::Desk};
+constexpr Role kGrow{Group::Grow};
 constexpr Role kButton{Group::Button};
+constexpr std::size_t kDimmableLightCount =
+    std::ranges::count_if(kRoles, [](Role role) { return caps(role).level; });
 
 
 // noon()'s day: a Tuesday, the 172nd day of the year.

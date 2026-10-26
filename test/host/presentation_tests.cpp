@@ -28,6 +28,9 @@ const suite<"presentation"> presentationTests = [] {
         expect(data.sky.empty() && data.sky_tone == Tone::Sky);
         expect(data.groups.size() == kLayout.size());
         expect(data.groups[0].name == "Wall" && data.groups[0].label == 'D' && data.groups[0].count == 5);
+        expect(data.groups[1].name == "Work" && data.groups[1].label == 'W');
+        expect(data.groups[2].name == "Desk" && data.groups[2].label == 'L' && data.groups[2].count == 1);
+        expect(data.groups[3].name == "Grow" && data.groups[3].label == 'G' && data.groups[3].count == 1);
     };
 
     "sky presentation prefers precipitation to cloud cover"_test = [] {

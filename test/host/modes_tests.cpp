@@ -41,7 +41,7 @@ const suite<"modes"> modesTests = [] {
 
     };
 
-    "hold -> all off; the daylight program is paused until resumed"_test = [] {
+    "hold -> office off; independent plug schedules keep running"_test = [] {
         Harness h;
         h.tick();
         h.pairBulb(kWallB, 0xC3, 0x0003);
@@ -52,7 +52,12 @@ const suite<"modes"> modesTests = [] {
 
         h.clearLog();
         h.post(ProgramTick{.time = noon(), .transition = 60s});
-        expect(h.all<LightTarget>().empty());
+        const auto targets = h.all<LightTarget>();
+        expect(targets.size() == 2);
+        const auto desk = std::ranges::find(targets, kDesk, &LightTarget::role);
+        const auto grow = std::ranges::find(targets, kGrow, &LightTarget::role);
+        expect(desk != targets.end() && desk->state.on);
+        expect(grow != targets.end() && !grow->state.on);
         expect(h.all<SetLight>().empty());
     };
 
@@ -143,7 +148,7 @@ const suite<"modes"> modesTests = [] {
 
         h.post(ModeRequested{Mode::Tuning});
         const auto start = h.all<LightTarget>();
-        expect(start.size() == kLightCount);
+        expect(start.size() == kDimmableLightCount);
         for (const auto &t : start) {
             expect(t.state.on && colorOf<Xy>(t.state)); // the sunset's amber
             expect(t.state.level == (t.role == kWork ? 12 : 1));

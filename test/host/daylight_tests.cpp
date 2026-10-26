@@ -62,6 +62,8 @@ const suite<"daylight"> daylightTests = [] {
         static_assert(std::ranges::all_of(members(Group::Wall),
                                           [](Role r) { return std::holds_alternative<SunCurve>(kLookOf[r]); }));
         static_assert(std::holds_alternative<WorkCurve>(kLookOf[kWork]));
+        static_assert(std::holds_alternative<OnOffOnly>(kLookOf[kDesk]) &&
+                      std::holds_alternative<OnOffOnly>(kLookOf[kGrow]));
 
         Harness h;
         h.tick();
@@ -78,6 +80,32 @@ const suite<"daylight"> daylightTests = [] {
         expect(!before.on);
         expect(fading.on && full.on && fading.level < full.level && fading.level * 2 > full.level - 4);
         expect(colorOf<Mireds>(full) && colorOf<Mireds>(full)->value == ProgramConfig{}.work_cool_mireds);
+    };
+
+    "desk and grow plugs follow independent daily schedules"_test = [] {
+        Harness h;
+        h.tick();
+        const auto isOn = [&](Role role, std::chrono::minutes time) {
+            h.clearLog();
+            h.post(ProgramTick{.time = at(time), .transition = 60s});
+            const auto targets = h.all<LightTarget>();
+            const auto it = std::ranges::find(targets, role, &LightTarget::role);
+            return it != targets.end() && it->state.on;
+        };
+
+        expect(!isOn(kDesk, 7h + 59min));
+        expect(isOn(kDesk, 8h));
+        expect(isOn(kDesk, 18h + 59min));
+        expect(!isOn(kDesk, 19h));
+        expect(!isOn(kGrow, 3h + 44min));
+        expect(isOn(kGrow, 3h + 45min));
+        expect(isOn(kGrow, 8h + 44min));
+        expect(!isOn(kGrow, 8h + 45min));
+
+        // The physical button controls only the office zone. The plugs stay
+        // on their own schedule even while the office program is off.
+        h.post(ButtonPressed{.button = kButton, .press = Press::Hold, .source = Source::Zigbee, .at = h.now});
+        expect(isOn(kDesk, 12h));
     };
 
     "intensity scales the target level; ProgramTick ramps over the interval"_test = [] {

@@ -67,7 +67,7 @@ private:
 // A device's IEEE (EUI-64) address, from its label: when it joins, it takes
 // `role`.
 struct Address {
-    std::string_view role;         // one role: "WallA", "Work", any case
+    std::string_view role;         // one role: "WallA", "Work", "Desk", "Grow", any case
     uint64_t         ext_addr = 0; // 0: not known yet (claim it with `pair`)
 };
 
@@ -114,7 +114,11 @@ struct WorkCurve {
     Tunable<uint16_t> warm  = &ProgramConfig::work_warm_mireds;
 };
 
-using Look = std::variant<SunCurve, WorkCurve>;
+// A binary load has no brightness or color curve; its zone's gate alone
+// decides when the plug turns on.
+struct OnOffOnly {};
+
+using Look = std::variant<SunCurve, WorkCurve, OnOffOnly>;
 
 // What a group's lights, or one light, show (in a zone).
 struct Shows {
@@ -275,6 +279,9 @@ template <std::ranges::input_range Zones> [[nodiscard]] consteval Topology topol
                 }
                 if (!isLight(role)) {
                     fail("a zone gives a button a look");
+                }
+                if (std::holds_alternative<OnOffOnly>(s.look) && kindOf(role) != Kind::Plug) {
+                    fail("an on/off-only look requires a plug");
                 }
                 if (shown[role]) {
                     fail("a light is in two zones, or shown twice");

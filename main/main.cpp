@@ -94,7 +94,7 @@ void App::appTask(void *arg)
     for (;;) {
         app.runtime_.bus().wait();
         const std::scoped_lock lock{stack};
-        app.runtime_.process();
+        (void)app.runtime_.process(); // wait() guarantees this pass has work; no drain needed
     }
 }
 

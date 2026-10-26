@@ -14,10 +14,11 @@ export namespace sunsim::core {
 
 // Owns the lighting programs, a set per zone, and runs the one each zone's
 // Mode selects: it starts it on the zone's ModeChanged, and passes it the
-// ticks and refreshes. Settings, the weather and the console's tuning go to
-// every program that handles them (see Program). Keeps the latest time, for
-// programs that need it when they start or refresh. On `tune save` it posts
-// the levels tuned in the zones that are tuning as the lights' minimums.
+// ticks and refreshes. Settings and weather go to every program that handles
+// them; console tuning goes only to each zone's running program. Keeps the
+// latest time, for programs that need it when they start or refresh. On
+// `tune save` it posts the levels tuned in the zones that are tuning as the
+// lights' minimums.
 //
 // Adding a program: a Mode (in sunsim::ev: the enum, kModes, modeName), a
 // Program subclass, its place in Programs here, and whatever selects it
@@ -33,7 +34,7 @@ public:
     void on(const ev::NetworkUp &) { on(ev::RefreshLights{}); }
     void on(const ev::ConfigChanged &e);
     void on(const ev::SkyChanged &e) { toEvery(e); }
-    void on(const ev::TuneLights &e) { toEvery(e); }
+    void on(const ev::TuneLights &e) { toRunning(e); }
     void on(const ev::TuneSave &e);
 
 private:

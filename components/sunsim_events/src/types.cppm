@@ -144,7 +144,7 @@ namespace detail {
 static_assert(std::ranges::all_of(kLayout, [](const GroupSpec &g) { return g.count >= 1 && g.count <= 26; }),
               "a group has 1-26 members (lettered A-Z)");
 static_assert(std::ranges::equal(kLayout | std::views::transform(&GroupSpec::group),
-                                 std::array{Group::Wall, Group::Work, Group::Button}),
+                                 std::array{Group::Wall, Group::Work, Group::Desk, Group::Grow, Group::Button}),
               "kLayout must list the groups in Group order");
 static_assert(std::ranges::count_if(kRoles, isButton) <= 1,
               "one button at most: ZigbeeAdapter tells presses apart by its one address");
@@ -177,7 +177,7 @@ static_assert(std::ranges::all_of(kRoleNames.items, [](const RoleName &n) { retu
 }
 } // namespace detail
 
-// "WallA" ... "WallE", "Work", "Button". NUL-terminated.
+// "WallA" ... "WallE", "Work", "Desk", "Grow", "Button". NUL-terminated.
 [[nodiscard]] constexpr std::string_view roleName(Role role) noexcept
 {
     const detail::RoleName &n = detail::kRoleNames[role];

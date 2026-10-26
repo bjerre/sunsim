@@ -10,7 +10,7 @@ import std.compat;
 export namespace sunsim::ev {
 
 // What a device does. Each group can hold any number of devices.
-enum class Group : uint8_t { Wall, Work, Button };
+enum class Group : uint8_t { Wall, Work, Desk, Grow, Button };
 
 // What a device is, and so what it can do (caps()).
 enum class Kind : uint8_t {
@@ -50,11 +50,13 @@ struct GroupSpec {
 
 // The installation: what each group is and how many it has, in Group
 // order. A group's members are lettered (WallA, WallB, ...); a group of one
-// is just its name (Work, Button). Wall lights are lettered east to west:
-// their order along the wall drives the sun-direction dimming.
+// is just its name (Work, Desk, Grow, Button). Wall lights are lettered east
+// to west: their order along the wall drives the sun-direction dimming.
 inline constexpr std::array kLayout{
     GroupSpec{Group::Wall, "Wall", Kind::ColorBulb, 5},
     GroupSpec{Group::Work, "Work", Kind::ColorBulb, 1},
+    GroupSpec{Group::Desk, "Desk", Kind::Plug, 1},
+    GroupSpec{Group::Grow, "Grow", Kind::Plug, 1},
     GroupSpec{Group::Button, "Button", Kind::Button, 1},
 };
 

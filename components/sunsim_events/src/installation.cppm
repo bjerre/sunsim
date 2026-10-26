@@ -23,6 +23,8 @@ inline constexpr List<Address, kRoleCount> kAddresses{
     {"WallD", 0x0000000000000000},
     {"WallE", 0x0000000000000000},
     {"Work", 0x0000000000000000},
+    {"Desk", 0x0000000000000000},
+    {"Grow", 0x0000000000000000},
     {"Button", 0x0000000000000000},
 };
 
@@ -37,6 +39,19 @@ inline constexpr std::array kZones{
                             .fade = &ProgramConfig::fade}},
         .controls = {{.by = "Button"}}, // single: daylight, double: red alert, hold: off
         .weather  = Weather{.precip = {"WallC"}, .alerts = {"WallB", "WallD"}},
+    },
+    ZoneSpec{
+        .name   = "desk-downlight",
+        .lights = {{.lights = "Desk", .look = OnOffOnly{}}},
+        .gate   = {Window{.hours = DaySpan{std::chrono::hours{8}, std::chrono::hours{19}}}},
+        .modes  = {Mode::Daylight},
+    },
+    ZoneSpec{
+        .name   = "bookcase-grow-light",
+        .lights = {{.lights = "Grow", .look = OnOffOnly{}}},
+        .gate   = {Window{.hours = DaySpan{std::chrono::minutes{3 * 60 + 45},
+                                           std::chrono::minutes{8 * 60 + 45}}}},
+        .modes  = {Mode::Daylight},
     },
 };
 

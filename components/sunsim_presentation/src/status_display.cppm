@@ -26,6 +26,10 @@ struct DeviceGroupView {
         return 'D';
     case ev::Group::Work:
         return 'W';
+    case ev::Group::Desk:
+        return 'L';
+    case ev::Group::Grow:
+        return 'G';
     case ev::Group::Button:
         return 'B';
     }

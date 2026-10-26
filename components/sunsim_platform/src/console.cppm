@@ -41,8 +41,8 @@ export namespace sunsim::platform {
 //   restart               reboot, keeping everything
 //   factory_reset         forget all roles AND the Zigbee network, then restart
 //
-// <role> is a device's name (WallA-WallE east to west, Work, Button); a
-// <group> is all of one kind (wall). Case doesn't matter.
+// <role> is a device's name (WallA-WallE east to west, Work, Desk, Grow,
+// Button); a <group> is all of one kind (wall). Case doesn't matter.
 class Console {
 public:
     Console(ev::Post post, const StatusSlot &status) : post_(std::move(post)), status_(status) {}
@@ -763,7 +763,7 @@ void Console::start()
                       "[<light|group|all> <1-254>]");
     add<&cmdTune>(*this, "tune", "Tuning mode: hold bulbs steady to find each one's lowest visible level",
                   "[<light|group|all> <1-254> [kelvin] | save | off]");
-    add<&cmdPress>(*this, "press", "Simulate the button: single = resume daylight, double = red alert, hold = all off",
+    add<&cmdPress>(*this, "press", "Simulate the button: single = resume daylight, double = red alert, hold = office off",
                    "single|double|hold");
     add<&cmdFastDay>(*this, "fastday", "Debug: run a whole active window every few seconds, or back to real time",
                      "[on [seconds] | off]");
