@@ -1,0 +1,77 @@
+name: Build and deploy browser demo
+
+on:
+  push:
+    branches:
+      - main
+      - feature/browser-simulation
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: emscripten-core/setup-emsdk@v15
+        with:
+          version: 6.0.13
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install build2
+        shell: bash
+        run: |
+          package=build2-toolchain_0.18.1-0~ubuntu24.04_amd64.deb
+          url="https://download.build2.org/0.18.1/bindist/ubuntu/ubuntu24.04/x86_64/$package"
+          curl -fsSL "$url" -o "$RUNNER_TEMP/$package"
+          printf '%s  %s\n' \
+            'fe9300de9afb21d6c8c032955979ab85389597b621e3170c70cd3c1a0e89a2aa' \
+            "$RUNNER_TEMP/$package" | sha256sum --check
+          sudo apt-get update
+          sudo apt-get install -y "$RUNNER_TEMP/$package"
+
+      # Emscripten's first -dumpmachine may print a sanity-check line that
+      # build2 mistakes for the target triple. Prime it before detection.
+      - name: Prime Emscripten target detection
+        run: em++ -dumpmachine
+
+      - name: Build WebAssembly simulator
+        run: SUNSIM_WASM=1 b config.cxx=em++ 'alias{wasm}'
+
+      - name: Test WebAssembly simulator
+        run: node test/build2/wasm_smoke.mjs
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run check
+
+      - uses: actions/configure-pages@v5
+
+      - name: Build static site
+        run: bun run build
+        env:
+          VITE_BASE_PATH: /sunsim/
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: web/dist
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-24.04
+    needs: build
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

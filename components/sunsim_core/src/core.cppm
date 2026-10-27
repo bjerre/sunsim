@@ -2,7 +2,9 @@
 // partition per class (and for the math), all re-exported here.
 export module sunsim.core;
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 import sunsim.ev;
 
 export import :day_info;
@@ -46,6 +48,26 @@ struct CoreModules {
 // overloads). Platform modules are attached separately (main/main.cpp);
 // tests attach only these.
 void wireCore(ev::EventBus &bus, CoreModules &m);
+
+// The portable application runtime: owns the bus and wired core, while
+// platform adapters attach separately. A browser scheduler can call process()
+// whenever it has work; the firmware may wait on bus() before doing so.
+class CoreRuntime {
+public:
+    explicit CoreRuntime(ev::Addresses addresses) : core_(bus_.post(), addresses) { wireCore(bus_, core_); }
+
+    CoreRuntime(const CoreRuntime &)            = delete;
+    CoreRuntime &operator=(const CoreRuntime &) = delete;
+
+    [[nodiscard]] ev::EventBus &bus() noexcept { return bus_; }
+    [[nodiscard]] const ev::Post &post() const noexcept { return bus_.post(); }
+    [[nodiscard]] bool process() { return bus_.process(); }
+    void drain() { bus_.drain(); }
+
+private:
+    ev::EventBus bus_;
+    CoreModules  core_;
+};
 
 } // namespace sunsim::core
 

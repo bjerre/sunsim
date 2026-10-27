@@ -16,7 +16,9 @@ module;
 
 export module sunsim.platform:zigbee_adapter;
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 import sunsim.ev;
 import :bulb_endpoint;
 

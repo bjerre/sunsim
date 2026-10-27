@@ -57,6 +57,25 @@ const suite<"weather"> weatherTests = [] {
         }
     };
 
+    "JSON scalar numbers parse only complete decimal numbers"_test = [] {
+        const auto number = [](std::string_view text) {
+            weather::JsonScanner::Scalar scalar;
+            scalar.text = text;
+            return scalar.number();
+        };
+        expect(number("-12.5e+2") == -1250.0);
+        expect(number("0") == 0.0);
+        expect(!number(""));
+        expect(number("01") == 1.0);
+        expect(number("1.") == 1.0);
+        expect(!number("1x"));
+        expect(!number("0x1p2"));
+        weather::JsonScanner::Scalar string_number;
+        string_number.text = "42";
+        string_number.is_string = true;
+        expect(!string_number.number());
+    };
+
     "Open-Meteo's current conditions: cloud and what's falling, units skipped"_test = [] {
         constexpr std::string_view reply =
             R"({"latitude":44.98,"longitude":-93.27,"current_units":{"time":"unixtime","interval":"seconds",)"

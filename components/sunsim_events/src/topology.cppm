@@ -5,7 +5,9 @@
 
 export module sunsim.ev:topology;
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 import :types;
 
 export namespace sunsim::ev {
@@ -65,7 +67,7 @@ private:
 // A device's IEEE (EUI-64) address, from its label: when it joins, it takes
 // `role`.
 struct Address {
-    std::string_view role;         // one role: "WallA", "Work", any case
+    std::string_view role;         // one role: "WallA", "Work", "Desk", "Grow", any case
     uint64_t         ext_addr = 0; // 0: not known yet (claim it with `pair`)
 };
 
@@ -112,12 +114,17 @@ struct WorkCurve {
     Tunable<uint16_t> warm  = &ProgramConfig::work_warm_mireds;
 };
 
-using Look = std::variant<SunCurve, WorkCurve>;
+// A binary load has no brightness or color curve; its zone's gate alone
+// decides when the plug turns on.
+struct OnOffOnly {};
+
+using Look = std::variant<SunCurve, WorkCurve, OnOffOnly>;
 
 // What a group's lights, or one light, show (in a zone).
 struct Shows {
     std::string_view lights; // a group ("Wall") or one light ("Work"), any case
     Look             look;
+    uint8_t          peak = 100; // default brightness as a percent of full output
 };
 
 // ---- Gates: when the lights may be on ---------------------------------------
@@ -218,6 +225,7 @@ struct WeatherLights {
 struct Topology {
     PerRole<std::optional<ZoneId>>   zone_of{};     // a light's zone, or the zone a button controls
     PerRole<Look>                    look_of{};     // lights
+    PerRole<uint8_t>                 peak_of{};     // default brightness, percent
     PerRole<std::optional<Controls>> controls_of{}; // buttons that control a zone
     WeatherLights                    weather{};
 };
@@ -232,6 +240,9 @@ template <std::ranges::input_range Zones> [[nodiscard]] consteval Topology topol
 {
     Topology      t{};
     PerRole<bool> shown{};
+    for (const Role role : kRoles) {
+        t.peak_of[role] = 100;
+    }
     uint8_t       index = 0;
     for (const ZoneSpec &zone : zones) {
         const ZoneId id{index++};
@@ -255,6 +266,9 @@ template <std::ranges::input_range Zones> [[nodiscard]] consteval Topology topol
             fail("a zone can't run daylight (every zone starts in it)");
         }
         for (const Shows &s : zone.lights) {
+            if (s.peak < 1 || s.peak > 100) {
+                fail("a light's peak isn't between 1 and 100 percent");
+            }
             const auto selection = parseSelection(s.lights);
             if (!selection) {
                 fail("a zone's lights name something the layout doesn't have");
@@ -266,11 +280,15 @@ template <std::ranges::input_range Zones> [[nodiscard]] consteval Topology topol
                 if (!isLight(role)) {
                     fail("a zone gives a button a look");
                 }
+                if (std::holds_alternative<OnOffOnly>(s.look) && kindOf(role) != Kind::Plug) {
+                    fail("an on/off-only look requires a plug");
+                }
                 if (shown[role]) {
                     fail("a light is in two zones, or shown twice");
                 }
                 shown[role]     = true;
                 t.look_of[role] = s.look;
+                t.peak_of[role] = s.peak;
                 t.zone_of[role] = id;
             }
         }

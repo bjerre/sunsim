@@ -1,5 +1,5 @@
-// Host tests: the real core modules, attached with the same core::wireCore()
-// as the firmware, driven by events; a recorder captures everything posted.
+// Host tests: the real core modules, attached through CoreRuntime like the
+// firmware, driven by events; a recorder captures everything posted.
 // Each file's tests are a boost.ut suite; this runs them. ut prints the
 // failures and the summary, and the exit status is 0 only if every expect()
 // held. Its command line (--help), e.g.:

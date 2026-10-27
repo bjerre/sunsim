@@ -4,7 +4,9 @@ module;
 
 export module sunsim.platform:settings_store;
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 import sunsim.ev;
 
 export namespace sunsim::platform {

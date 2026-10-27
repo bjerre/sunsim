@@ -4,7 +4,9 @@ module;
 
 module sunsim.platform:zone; // internal: not exported
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 
 namespace sunsim::platform {
 

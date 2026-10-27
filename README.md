@@ -1,13 +1,21 @@
 # sunsim
 
-An ESP32-C6 Zigbee coordinator that drives 6 Zigbee bulbs through a daylight
-simulation and responds to one physical button controller:
+An ESP32-C6 Zigbee coordinator that drives six bulbs and two schedule-only
+smart plugs through a daylight simulation, and responds to one physical
+button controller:
 
-- **5 "wall" bulbs** fade through a warm-to-cool, dim-to-bright curve
-  between the real local sunrise and sunset, simulating daylight.
-- **1 "work" bulb** stays bright and shifts cool to warm across the work
-  hours (default 08:30-17:30: ~6000K in the morning to ~3000K by
-  17:30, then holds warm).
+- **5 "wall" bulbs** (WallA-E) simulate the changing light from the south-facing
+  window, fading through a warm-to-cool, dim-to-bright curve between sunrise
+  and sunset.
+- **1 "work" bulb** powers the room's torchiere; it stays bright and shifts
+  cool to warm across the work hours (default 08:30-17:30: ~6000K in the
+  morning to ~3000K by 17:30, then holds warm).
+- **Desk plug** switches the desk's downward-facing light on from 08:00-19:00
+  every day.
+- **Grow plug** switches on the plant grow light on the bookcase beside the
+  desk from 03:45-08:45 every day.
+- These two plugs follow independent on/off schedules; they are not dimmed
+  and are unaffected by the office button's modes.
 - The wall bulbs sit east-to-west on the south wall (WallA east, WallE
   west): the one nearest the real sun's direction is brightest (`config sunshift`),
   and near sunrise/sunset they glow amber, deepest at the end nearest the
@@ -24,12 +32,12 @@ simulation and responds to one physical button controller:
   in daylight or off mode. Which lights pulse is the office zone's
   `.weather` in `installation.cppm`; `config weather on|off` and the
   `weather` command.
-- All bulbs only run inside an **active window** (default Mon-Fri,
-  08:00-19:00, 10 min fade at each edge) and are off outside it.
+- The wall and torchiere bulbs only run inside an **active window** (default
+  Mon-Fri, 08:00-19:00, 10 min fade at each edge) and are off outside it.
 - **1 button controller** (any simple single-button Zigbee switch):
   - single press -> resume the daylight program
-  - long press (Off) -> all lights off until pressed again
-  - double press -> a "red alert" strobe effect on all the bulbs
+  - long press (Off) -> office lights off until pressed again
+  - double press -> a "red alert" strobe effect on the office bulbs
 
 sunsim forms and is the coordinator of its own small Zigbee network - it
 does not join an existing hub's network. Built on
@@ -53,6 +61,64 @@ script loads ESP-IDF's environment itself, so it works from any terminal:
 ./sunsim test            # host tests
 ./sunsim idf menuconfig  # any idf.py command
 ```
+
+The portable event, core, weather and presentation modules have a `build2`
+target, currently validated with GCC 15 and libstdc++'s `std.compat` module.
+The firmware still uses ESP-IDF's CMake build; the existing full host test
+suite remains available through `./sunsim test`. On the first build,
+configure the firmware-compatible compiler flags and build the portable
+target:
+
+```
+b config.cxx.coptions=-fno-exceptions config.cxx.coptions+=-fno-rtti 'alias{portable}'
+```
+
+After that, `b 'alias{portable}'` rebuilds it incrementally, and
+`./sunsim_build2_smoke` runs the smoke test. The initial configuration is
+saved by build2; `b clean` removes generated module artifacts.
+
+The same portable modules also build to WebAssembly with Emscripten. Load the
+SDK environment, install the browser tooling once, then build and run the
+Svelte browser simulation:
+
+```
+. ~/emsdk/emsdk_env.sh
+SUNSIM_WASM=1 b config.cxx=em++ 'alias{wasm}'
+"$EMSDK_NODE" test/build2/wasm_smoke.mjs
+bun install
+bun run check
+bun run dev -- --host 0.0.0.0
+```
+
+Keep `SUNSIM_WASM=1` set for incremental wasm builds; it selects the Emscripten
+header fallback and JavaScript module output. `web/src/App.svelte` coordinates
+the page lifecycle, while the office, window, device display, and controls are
+separate Svelte panes that can be composed or embedded independently.
+`web/simulator.ts` remains a framework-independent TypeScript controller that
+owns the WASM instance and publishes typed state and actions. Vite builds and
+serves the Svelte UI; `bun run build` produces static files in `web/dist/`.
+The browser WASM target is separate from the native smoke-test executable.
+Open the Vite URL (normally `http://localhost:5173/`) to run the shared C++ core
+in the browser. Bun and Svelte are build-time tools; neither Bun nor Node.js is
+required in the browser. Emscripten still uses its bundled Node runtime while
+compiling and linking.
+The GitHub Actions workflow builds and publishes a static demo to
+`https://bjerre.github.io/sunsim/` when changes are pushed to `main` or
+`feature/browser-simulation`. For the first deployment, set the repository's
+Pages source to GitHub Actions under Settings → Pages. The demo runs entirely
+in the browser and does not control physical devices; location coordinates
+remain in that browser's local storage.
+The torchiere runs its separate weekday work-hours program (default
+08:30-17:30), so choose a weekday and a time in that range to see it on. On
+load, the browser asks for location permission; if granted, it uses the
+coordinates and browser local timezone and saves the coordinates in
+`localStorage` for the next visit. They stay in this browser and are not sent
+to a service. A saved location is used immediately while the browser checks
+for an updated fix. If permission is denied and no location was saved yet, the
+simulation uses the Greenwich/UTC demo clock. The calendar and time slider
+replay a chosen day in the active timezone. Use “Use / refresh my location” to
+retry; browser geolocation requires a secure context: use `localhost` on this
+computer, or HTTPS when serving it remotely.
 
 It finds the board as the only `/dev/ttyACM*` (or set `SUNSIM_PORT`), and
 uses `~/.espressif/v6.1/esp-idf` (or set `SUNSIM_IDF`). `cmd` doesn't reset
@@ -159,8 +225,9 @@ The board's LCD (Waveshare ESP32-C6-GEEK, 1.14" ST7789) shows:
 - the time, large, and the weekday ("sim" in fast-day mode)
 - the mode: `daylight`, `idle` (outside active hours), `off` or `RED ALERT`
 - today's day length, and the countdown to the next sunrise or sunset
-- one dot per device, grouped `D ●●●●●  W ●  B ●`: D = the daylight wall
-  (WallA-WallE, east to west), W = the work light, B = the button;
+- one dot per device, grouped `D ●●●●●  W ●  L ●  G ●  B ●`: D = the
+  window-light wall array (WallA-WallE, east to west), W = the torchiere,
+  L = the desk downlight plug, G = the bookcase grow-light plug, B = the button;
   green = responding, amber = paired but silent, gray = not paired
 
 The `status` console command prints the same information. Pins and
@@ -218,11 +285,10 @@ bulbs' sunrise/sunset calculation - see
 
 ## Pairing
 
-Roles (`WallA`-`WallE` east to west along the wall, `Work`, `Button`; the
-kind and count of each group are `ev::kLayout` in `types.cppm`, the one
-place to change for more or fewer wall lights, or a plug) are assigned from the serial
-console (`idf.py monitor`, over the same USB cable used for flashing), one
-device at a time:
+Roles (`WallA`-`WallE` east to west along the wall, `Work`, `Desk`, `Grow`,
+`Button`; the kind and count of each group are `ev::kLayout` in
+`layout.cppm`) are assigned from the serial console (`idf.py monitor`, over
+the same USB cable used for flashing), one device at a time:
 
 ```
 sunsim> pair WallA        # arms WallA and opens the network for 180s
@@ -269,7 +335,7 @@ Tested with a SONOFF SNZB-01-style button, which says which press it was:
 |--------|--------------|------------------------|
 | single | `Toggle`     | resume daylight program |
 | double | `On`         | red alert (TNG pulse)  |
-| hold   | `Off`        | all lights off         |
+| hold   | `Off`        | office lights off      |
 
 These buttons send to sunsim's endpoint 1 regardless of the binding, where
 the stack has no On/Off server and would drop them, so frames from the
@@ -296,7 +362,7 @@ every mode before a button is paired:
 ```
 sunsim> press double   # red alert
 sunsim> press single   # resume the daylight program
-sunsim> press hold     # all lights off
+sunsim> press hold     # office lights off
 ```
 
 ## Debug fast-day mode
@@ -373,11 +439,15 @@ strings checked at compile time.
   - `math/` - `daylight.cppm` (what each look shows), `solar.cppm`,
     `sky.cppm` (the forecast's cloud cover by hour), `day_info.cppm`: the
     pure math.
-  - `core.cppm` - `CoreModules` and `wireCore()`, which attaches them to the bus.
+  - `core.cppm` - `CoreModules`, `CoreRuntime` (the portable bus/core event
+    pump), and `wireCore()`.
 - `components/sunsim_weather/` (`sunsim::weather`, module `sunsim.weather`)
   - reading the weather services' replies as they stream in, pure C++
   (host-tested): `json.cppm` (`JsonScanner`), `readers.cppm` (Open-Meteo's
   forecast and conditions, NWS's alerts; WMO codes, alert tiers).
+- `components/sunsim_presentation/` (`sunsim::presentation`, module
+  `sunsim.presentation`) - pure display data for the LVGL renderer and the
+  future browser renderer; `StatusDisplayData` is built from a `StatusSnapshot`.
 - `components/sunsim_platform/` (`sunsim::platform`, module
   `sunsim.platform`) - everything ESP-IDF; `bulb_endpoint`,
   `fast_day_clock`, `format` and `wifi` are internal partitions, not exported:

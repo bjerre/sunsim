@@ -9,7 +9,10 @@ module;
 
 export module sunsim.ev:types;
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
+export import :layout;
 
 export namespace sunsim::ev {
 
@@ -71,55 +74,6 @@ inline constexpr Weekdays kMondayToFriday{0b0111110};
 inline constexpr Weekdays kEveryDay{0b1111111};
 
 // ---- Roles ----------------------------------------------------------------
-
-// What a device does. Each group can hold any number of devices.
-enum class Group : uint8_t { Wall, Work, Button };
-
-// What a device is, and so what it can do (caps()).
-enum class Kind : uint8_t {
-    ColorBulb, // on/off, level, color (temperature, xy and hue/saturation)
-    Plug,      // on/off, for whatever's plugged into it
-    Button,    // presses: its On/Off client, bound to us
-};
-
-// What a device takes from us. A light takes at least On/Off; a button
-// takes nothing (it sends).
-struct Caps {
-    bool power = false; // On/Off
-    bool level = false; // Level Control
-    bool color = false; // Color Control
-};
-
-[[nodiscard]] constexpr Caps caps(Kind kind) noexcept
-{
-    switch (kind) {
-    case Kind::ColorBulb:
-        return {.power = true, .level = true, .color = true};
-    case Kind::Plug:
-        return {.power = true};
-    case Kind::Button:
-        break;
-    }
-    return {};
-}
-
-// N devices of one kind with one job.
-struct GroupSpec {
-    Group            group;
-    std::string_view name;
-    Kind             kind;
-    uint8_t          count;
-};
-
-// The installation: what each group is and how many it has, in Group
-// order. A group's members are lettered (WallA, WallB, ...); a group of one
-// is just its name (Work, Button). Wall lights are lettered east to west:
-// their order along the wall drives the sun-direction dimming.
-inline constexpr std::array kLayout{
-    GroupSpec{Group::Wall, "Wall", Kind::ColorBulb, 5},
-    GroupSpec{Group::Work, "Work", Kind::ColorBulb, 1},
-    GroupSpec{Group::Button, "Button", Kind::Button, 1},
-};
 
 // One device's job: its group, and which member of it. Assigned at pairing
 // time (console `pair`, or its address in installation.cppm), never by join
@@ -190,7 +144,7 @@ namespace detail {
 static_assert(std::ranges::all_of(kLayout, [](const GroupSpec &g) { return g.count >= 1 && g.count <= 26; }),
               "a group has 1-26 members (lettered A-Z)");
 static_assert(std::ranges::equal(kLayout | std::views::transform(&GroupSpec::group),
-                                 std::array{Group::Wall, Group::Work, Group::Button}),
+                                 std::array{Group::Wall, Group::Work, Group::Desk, Group::Grow, Group::Button}),
               "kLayout must list the groups in Group order");
 static_assert(std::ranges::count_if(kRoles, isButton) <= 1,
               "one button at most: ZigbeeAdapter tells presses apart by its one address");
@@ -223,7 +177,7 @@ static_assert(std::ranges::all_of(kRoleNames.items, [](const RoleName &n) { retu
 }
 } // namespace detail
 
-// "WallA" ... "WallE", "Work", "Button". NUL-terminated.
+// "WallA" ... "WallE", "Work", "Desk", "Grow", "Button". NUL-terminated.
 [[nodiscard]] constexpr std::string_view roleName(Role role) noexcept
 {
     const detail::RoleName &n = detail::kRoleNames[role];
@@ -429,13 +383,6 @@ inline constexpr uint8_t kMaxAmberSweepDeg = 30;
 
 // Per-light peak intensity, 1-100 (% of full brightness). Buttons unused.
 using Peaks = PerRole<uint8_t>;
-inline constexpr Peaks kDefaultPeaks = [] {
-    Peaks peaks{};
-    for (const Role role : kRoles) {
-        peaks[role] = role.group == Group::Work ? 90 : 100;
-    }
-    return peaks;
-}();
 
 // Per-light minimum level, 1-254 (raw Zigbee level): the lowest a light is
 // sent while on, so it stays visibly lit down to sunset. Bulbs differ in
@@ -468,6 +415,49 @@ struct CloudCover {
 // What's falling now, from the WMO weather code, and how hard.
 enum class Precip : uint8_t { None, Drizzle, Rain, FreezingRain, Snow, Thunderstorm };
 enum class Intensity : uint8_t { Light, Moderate, Heavy };
+
+// Which weather overlay currently owns a light's output, and the phase of
+// its pulse. `None` means the running program owns the output.
+enum class WeatherEffect : uint8_t { None, Drizzle, Rain, FreezingRain, Snow, Thunderstorm, Advisory, Watch, Warning };
+enum class PulsePhase : uint8_t { None, Bright, Dim };
+
+[[nodiscard]] constexpr const char *weatherEffectName(WeatherEffect effect) noexcept
+{
+    switch (effect) {
+    case WeatherEffect::None:
+        return "none";
+    case WeatherEffect::Drizzle:
+        return "drizzle";
+    case WeatherEffect::Rain:
+        return "rain";
+    case WeatherEffect::FreezingRain:
+        return "freezing rain";
+    case WeatherEffect::Snow:
+        return "snow";
+    case WeatherEffect::Thunderstorm:
+        return "thunderstorm";
+    case WeatherEffect::Advisory:
+        return "advisory";
+    case WeatherEffect::Watch:
+        return "watch";
+    case WeatherEffect::Warning:
+        return "warning";
+    }
+    return "none";
+}
+
+[[nodiscard]] constexpr const char *pulsePhaseName(PulsePhase phase) noexcept
+{
+    switch (phase) {
+    case PulsePhase::None:
+        return "none";
+    case PulsePhase::Bright:
+        return "bright";
+    case PulsePhase::Dim:
+        return "dim";
+    }
+    return "none";
+}
 
 [[nodiscard]] constexpr const char *precipName(Precip precip) noexcept
 {

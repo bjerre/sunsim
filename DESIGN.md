@@ -79,7 +79,7 @@ directly — see the table below, then the join sequence.
 | `short_addr` (NWK address) | 16-bit | Assigned by sunsim (the trust center) when the device associates | No — can change on every rejoin |
 | `endpoint` | 8-bit | Discovered via a ZDO Match_Desc query, not announced by the device | Fixed per device/firmware, but not knowable up front |
 
-Role (`WallA`-`WallE`, `Work`, `Button`: a group and an index within it,
+Role (`WallA`-`WallE`, `Work`, `Desk`, `Grow`, `Button`: a group and an index within it,
 `ev::Role`, with the counts per group in `ev::kLayout`) comes from none of these.
 It's assigned when the device joins: to the role armed with the console's
 `pair <role>` (if the device doesn't already hold one), or else by looking
@@ -349,9 +349,16 @@ mireds    += (cool_mireds - mireds) · (cloudcool / 100) · c    default cloudco
 golden    *= 1 - c                                 no golden glow under a gray sky
 ```
 
-The work light is task lighting and ignores the sky. In fast-day mode the
-simulated day reads the forecast's first day, never the live reading, so
-the sped-up loop shows today's sky. `config clouds off` ignores both.
+The work light powers the room torchiere and ignores the sky. In fast-day
+mode the simulated day reads the forecast's first day, never the live
+reading, so the sped-up loop shows today's sky. `config clouds off`
+ignores both.
+
+The `Desk` and `Grow` roles are on/off-only plugs in their own
+Daylight-only zones. Their daily windows (08:00-19:00 and 03:45-08:45,
+respectively) switch the desk downlight and the bookcase grow light beside
+it; they have no dimming or color curve and are unaffected by the office
+button's modes. `OnOffOnly` is accepted only for a plug at compile time.
 
 ### Weather lights (`core::Overlays`, `overlays.cppm`)
 

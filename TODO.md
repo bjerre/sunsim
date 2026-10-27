@@ -121,21 +121,25 @@ Needs the board.
 The mode means "run the zone's own looks and gate", which reads wrong for
 grow lights. Rename it, keeping `daylight` as a console alias.
 
-## The whole room in installation.cppm
+## Name groups by their place in the layout
 
-`kLayout` (the groups and their kinds) still lives in `types.cppm`. One
-obstacle is gone: `ProgramConfig` no longer depends on the layout, since
-the weather lights moved into the zones. But `topology.cppm`'s checks use
-the roles, which are derived from `kLayout`, and installation.cppm uses the
-checks.
+`Group` is still an enum whose order must match `kLayout`; optionally,
+replace it with names where a group is identified by its place in the table.
 
-- [ ] Reorder `sunsim.ev`'s partitions so `kLayout` can sit in
-      installation.cppm. Options: give the layout a partition of its own
-      that installation.cppm re-exports, or make the checks independent of
-      the roles until they're instantiated.
-- [ ] Move the default peaks into the zone: `Shows{..., .peak = 90}`.
-- [ ] Optional: replace the `Group` enum with names (a group is its place
-      in `kLayout`).
+## Browser office simulation
+
+Run the shared `CoreRuntime` in a browser with virtual devices and an
+interactive office view. Simulate device/event behavior, not the Zigbee radio.
+
+- [x] Build the portable module graph as WebAssembly with build2 and run its
+      smoke test with Emscripten's Node runtime.
+- [x] Add a browser scheduler that calls `CoreRuntime::process()` without blocking.
+- [x] Implement virtual devices that consume the real light, discovery, bind
+      and ping events and post their normal result events.
+- [x] Add browser inputs for button presses and supported sensors; route them
+      through the virtual devices and the same event bus.
+- [x] Render virtual bulb state in the office view and render
+      `StatusDisplayData` in a panel matching the ESP32-C6-GEEK display.
 
 ## Status display: more than one zone
 

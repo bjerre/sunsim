@@ -16,10 +16,12 @@ module;
 
 export module sunsim.platform:status_display;
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 import sunsim.ev;
+import sunsim.presentation;
 import :status_slot;
-import :format;
 
 export namespace sunsim::platform {
 
@@ -27,8 +29,8 @@ export namespace sunsim::platform {
 // the "Status display" menuconfig): current time, day length, countdown to
 // the next sunrise/sunset, mode, the sky (an alert, else rain or snow, else
 // cloud cover), and one dot per device for its link state,
-// grouped: "D ●●●●●  W ●  B ●" (the daylight wall east to west, the work
-// light, the button).
+// grouped: "D ●●●●● W ● L ● G ● B ●" (the daylight wall east to west, the
+// torchiere, desk downlight, grow light, and button).
 // Redraws once a second from the latest StatusSnapshot - the same data as
 // the `status` console command. No-op unless CONFIG_SUNSIM_DISPLAY.
 void startStatusDisplay(const StatusSlot &status);
@@ -62,7 +64,7 @@ struct Ui {
     lv_obj_t *mode;
     lv_obj_t *day_length;
     lv_obj_t *next_event;
-    lv_obj_t *cloud;
+    lv_obj_t *sky;
     ev::PerRole<lv_obj_t *> dots;
 };
 
@@ -74,9 +76,9 @@ struct Context {
 // The device dots: one row, each group's letter followed by a dot per
 // member in order (the wall's east to west).
 constexpr int kDotSize   = 10;
-constexpr int kDotPitch  = 16; // a dot and the gap after it
+constexpr int kDotPitch  = 12; // a dot and a compact 2 px gap
 constexpr int kLabelCell = 16; // a group letter and the gap after it
-constexpr int kGroupGap  = 10; // between one group's last dot and the next letter
+constexpr int kGroupGap  = 4;  // between one group's last dot and the next letter
 constexpr int kDotsLeft  = 8;
 constexpr int kDotsTopY  = 114;
 
@@ -89,21 +91,6 @@ constexpr int dotsRowWidth()
     return width - kGroupGap;
 }
 static_assert(kDotsLeft + dotsRowWidth() <= kWidth, "the device dots don't fit in one row (see ev::kLayout)");
-
-// A group's letter on the display: D = the daylight wall, W = the work
-// light, B = the button.
-char groupLabel(ev::Group group)
-{
-    switch (group) {
-    case ev::Group::Wall:
-        return 'D';
-    case ev::Group::Work:
-        return 'W';
-    case ev::Group::Button:
-        return 'B';
-    }
-    return '?';
-}
 
 lv_color_t linkColor(ev::DeviceLink link)
 {
@@ -118,6 +105,27 @@ lv_color_t linkColor(ev::DeviceLink link)
     return lv_color_hex(0x3a3a3a); // dim gray
 }
 
+lv_color_t toneColor(presentation::Tone tone)
+{
+    switch (tone) {
+    case presentation::Tone::Muted:
+        return lv_color_hex(0x888888);
+    case presentation::Tone::Daylight:
+        return lv_color_hex(0xffd27f);
+    case presentation::Tone::Tuning:
+        return lv_color_hex(0x7fd4ff);
+    case presentation::Tone::Advisory:
+        return lv_color_hex(0xffe040);
+    case presentation::Tone::Watch:
+        return lv_color_hex(0xff9a30);
+    case presentation::Tone::Warning:
+        return lv_color_hex(0xff3030);
+    case presentation::Tone::Sky:
+        return lv_color_hex(0x9ab8d8);
+    }
+    return lv_color_white();
+}
+
 lv_obj_t *makeLabel(lv_obj_t *parent, const lv_font_t *font, lv_align_t align, int x, int y)
 {
     lv_obj_t *label = lv_label_create(parent);
@@ -128,7 +136,7 @@ lv_obj_t *makeLabel(lv_obj_t *parent, const lv_font_t *font, lv_align_t align, i
     return label;
 }
 
-void buildUi(Ui &ui)
+void buildUi(Ui &ui, const auto &groups)
 {
     lv_obj_t *scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
@@ -139,13 +147,13 @@ void buildUi(Ui &ui)
     ui.mode       = makeLabel(scr, &lv_font_montserrat_14, LV_ALIGN_TOP_RIGHT, -6, 32);
     ui.day_length = makeLabel(scr, &lv_font_montserrat_20, LV_ALIGN_TOP_LEFT, 6, 54);
     ui.next_event = makeLabel(scr, &lv_font_montserrat_20, LV_ALIGN_TOP_LEFT, 6, 80);
-    ui.cloud      = makeLabel(scr, &lv_font_montserrat_14, LV_ALIGN_TOP_RIGHT, -6, 58);
+    ui.sky        = makeLabel(scr, &lv_font_montserrat_14, LV_ALIGN_TOP_RIGHT, -6, 58);
 
     int x = kDotsLeft;
-    for (const ev::GroupSpec &g : ev::kLayout) {
+    for (const presentation::DeviceGroupView &g : groups) {
         lv_obj_t *label = makeLabel(scr, &lv_font_montserrat_14, LV_ALIGN_TOP_LEFT, x, kDotsTopY);
         lv_obj_set_style_text_color(label, lv_color_hex(0xaaaaaa), 0);
-        const char text[] = {groupLabel(g.group), '\0'};
+        const char text[] = {g.label, '\0'};
         lv_label_set_text(label, text); // copies it
         x += kLabelCell;
 
@@ -164,61 +172,19 @@ void buildUi(Ui &ui)
     }
 }
 
-void render(Ui &ui, const ev::StatusSnapshot &st)
+void render(Ui &ui, const presentation::StatusDisplayData &data)
 {
-    if (st.time.valid) {
-        const ev::DayInfo &day = st.day;
-        lv_label_set_text(ui.time, std::format("{:%H:%M}", st.time.local).c_str());
-        lv_label_set_text(ui.weekday, std::format("{}{:%a}", st.time.simulated ? "sim " : "", st.time.weekday()).c_str());
-        lv_label_set_text(ui.day_length, ("Day " + durationText(day.day_length)).c_str());
-        lv_label_set_text(ui.next_event, std::format("{} {}  {}", day.next_is_sunrise ? "Rise" : "Set",
-                                                     durationText(day.until_next), clockText(day.next_event))
-                                             .c_str());
-    } else {
-        lv_label_set_text(ui.time, "--:--");
-        lv_label_set_text(ui.weekday, "");
-        lv_label_set_text(ui.day_length, "Waiting for");
-        lv_label_set_text(ui.next_event, "time sync...");
-    }
-
-    // The first zone's mode: the main one.
-    const ev::ZoneStatus &zone = st.zones[ev::kZoneIds[0]];
-    switch (zone.mode) {
-    case ev::Mode::Daylight:
-        lv_label_set_text(ui.mode, zone.gate_open ? "daylight" : "idle");
-        lv_obj_set_style_text_color(ui.mode, lv_color_hex(zone.gate_open ? 0xffd27f : 0x888888), 0);
-        break;
-    case ev::Mode::Off:
-        lv_label_set_text(ui.mode, "off");
-        lv_obj_set_style_text_color(ui.mode, lv_color_hex(0x888888), 0);
-        break;
-    case ev::Mode::RedAlert:
-        lv_label_set_text(ui.mode, "RED ALERT");
-        lv_obj_set_style_text_color(ui.mode, lv_color_hex(0xff3030), 0);
-        break;
-    case ev::Mode::Tuning:
-        lv_label_set_text(ui.mode, "tuning");
-        lv_obj_set_style_text_color(ui.mode, lv_color_hex(0x7fd4ff), 0);
-        break;
-    }
-
-    // The sky: the worst alert in its color, else what's falling, else cloud.
-    constexpr uint32_t kSkyColor = 0x9ab8d8; // gray-blue
-    uint32_t           sky_color = kSkyColor;
-    if (const ev::AlertLevel level = st.sky.alert(); level != ev::AlertLevel::None) {
-        sky_color = level == ev::AlertLevel::Warning ? 0xff3030 : level == ev::AlertLevel::Watch ? 0xff9a30 : 0xffe040;
-        lv_label_set_text(ui.cloud, ev::alertLevelName(level));
-    } else if (st.sky.conditions && st.sky.conditions->precip != ev::Precip::None) {
-        lv_label_set_text(ui.cloud, ev::precipName(st.sky.conditions->precip));
-    } else if (st.sky.cloud_percent) {
-        lv_label_set_text_fmt(ui.cloud, "cloud %u%%", *st.sky.cloud_percent);
-    } else {
-        lv_label_set_text(ui.cloud, "");
-    }
-    lv_obj_set_style_text_color(ui.cloud, lv_color_hex(sky_color), 0);
+    lv_label_set_text(ui.time, data.time.c_str());
+    lv_label_set_text(ui.weekday, data.weekday.c_str());
+    lv_label_set_text(ui.day_length, data.day_length.c_str());
+    lv_label_set_text(ui.next_event, data.next_event.c_str());
+    lv_label_set_text(ui.mode, data.mode.c_str());
+    lv_obj_set_style_text_color(ui.mode, toneColor(data.mode_tone), 0);
+    lv_label_set_text(ui.sky, data.sky.c_str());
+    lv_obj_set_style_text_color(ui.sky, toneColor(data.sky_tone), 0);
 
     for (const ev::Role role : ev::kRoles) {
-        lv_obj_set_style_bg_color(ui.dots[role], linkColor(st.devices[role].link), 0);
+        lv_obj_set_style_bg_color(ui.dots[role], linkColor(data.device_links[role]), 0);
     }
 }
 
@@ -272,9 +238,12 @@ void displayTask(void *arg)
 {
     auto &ctx = *static_cast<Context *>(arg);
     for (;;) {
-        if (const auto st = ctx.status->get(); st && lvgl_port_lock(0)) {
-            render(ctx.ui, *st);
-            lvgl_port_unlock();
+        if (const auto st = ctx.status->get()) {
+            const presentation::StatusDisplayData data = presentation::makeStatusDisplayData(*st);
+            if (lvgl_port_lock(0)) {
+                render(ctx.ui, data);
+                lvgl_port_unlock();
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
@@ -322,7 +291,7 @@ void startStatusDisplay(const StatusSlot &status)
 
     static Context ctx{.status = &status, .ui = {}};
     if (lvgl_port_lock(0)) {
-        buildUi(ctx.ui);
+        buildUi(ctx.ui, presentation::kDeviceGroups);
         lv_label_set_text(ctx.ui.time, "sunsim");
         lvgl_port_unlock();
     }

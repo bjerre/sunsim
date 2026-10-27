@@ -4,7 +4,10 @@
 
 export module sunsim.ev:installation;
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
+export import :layout;
 import :topology;
 import :types;
 
@@ -20,21 +23,13 @@ inline constexpr List<Address, kRoleCount> kAddresses{
     {"WallD", 0x0000000000000000},
     {"WallE", 0x0000000000000000},
     {"Work", 0x0000000000000000},
+    {"Desk", 0x0000000000000000},
+    {"Grow", 0x0000000000000000},
     {"Button", 0x0000000000000000},
 };
 
 // Lights that share a mode and a gate. Every light is in exactly one.
-inline constexpr std::array kZones{
-    ZoneSpec{
-        .name   = "office",
-        .lights = {{"Wall", SunCurve{}}, {"Work", WorkCurve{}}},
-        // The active hours (`config hours`, `days`, `fade`).
-        .gate     = {Window{.hours = &ProgramConfig::active, .days = &ProgramConfig::active_days,
-                            .fade = &ProgramConfig::fade}},
-        .controls = {{.by = "Button"}}, // single: daylight, double: red alert, hold: off
-        .weather  = Weather{.precip = {"WallC"}, .alerts = {"WallB", "WallD"}},
-    },
-};
+#include "installation.generated.inc"
 
 // ---- Derived: the tables above per role and per zone, checked as they compile ----
 
@@ -43,6 +38,7 @@ inline constexpr Addresses kAddressOf = addressesOf(kAddresses);
 inline constexpr Topology                         kTopology      = topologyOf(kZones);
 inline constexpr PerRole<std::optional<ZoneId>>   kZoneOf        = kTopology.zone_of;
 inline constexpr PerRole<Look>                    kLookOf        = kTopology.look_of;
+inline constexpr Peaks                            kDefaultPeaks  = kTopology.peak_of;
 inline constexpr PerRole<std::optional<Controls>> kControlsOf    = kTopology.controls_of;
 inline constexpr WeatherLights                    kWeatherLights = kTopology.weather;
 

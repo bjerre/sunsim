@@ -45,28 +45,25 @@ public:
 private:
     static void appTask(void *arg);
 
-    ev::EventBus            bus_;
+    core::CoreRuntime       runtime_{ev::kAddressOf};
     platform::SettingsStore settings_;
     platform::Clock         clock_;
     platform::InternetSync  internet_;
     platform::ZigbeeAdapter zigbee_;
     platform::StatusSlot    status_;
-    platform::Console       console_{bus_.post(), status_};
-    core::CoreModules       core_;
+    platform::Console       console_{runtime_.post(), status_};
 };
 
 } // namespace
 
 App::App()
-    : settings_(bus_.post(), defaultProgram()), clock_(bus_.post()),
-      internet_(bus_.post(), defaultProgram().latitude_deg, defaultProgram().longitude_deg), zigbee_(bus_.post()),
-      core_(bus_.post(), ev::kAddressOf)
+    : settings_(runtime_.post(), defaultProgram()), clock_(runtime_.post()),
+      internet_(runtime_.post(), defaultProgram().latitude_deg, defaultProgram().longitude_deg), zigbee_(runtime_.post())
 {
-    core::wireCore(bus_, core_);
     // The platform modules, each to the events it handles. Settings before
     // the radio: on FactoryReset the stored roles are erased first, as the
     // radio's reset reboots and never returns.
-    bus_.attach(settings_, clock_, internet_, zigbee_, status_);
+    runtime_.bus().attach(settings_, clock_, internet_, zigbee_, status_);
 }
 
 void App::run()
@@ -95,9 +92,9 @@ void App::appTask(void *arg)
 
     platform::ZigbeeAdapter::StackLock stack;
     for (;;) {
-        app.bus_.wait();
+        app.runtime_.bus().wait();
         const std::scoped_lock lock{stack};
-        app.bus_.process();
+        (void)app.runtime_.process(); // wait() guarantees this pass has work; no drain needed
     }
 }
 

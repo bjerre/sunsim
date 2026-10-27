@@ -1,6 +1,5 @@
-// What every host test uses: the core, attached like the firmware's, with a
-// log of everything posted; a fixed day to run it on; and boost.ut's
-// "name"_test and expect().
+// What every host test uses: the portable runtime, with a log of everything
+// posted; a fixed day to run it on; and boost.ut's "name"_test and expect().
 export module sunsim.test;
 
 import std.compat;
@@ -28,7 +27,11 @@ constexpr Role kWallB{Group::Wall, 1};
 constexpr Role kWallC{Group::Wall, 2};
 constexpr Role kWallE{Group::Wall, 4}; // the west end
 constexpr Role kWork{Group::Work};
+constexpr Role kDesk{Group::Desk};
+constexpr Role kGrow{Group::Grow};
 constexpr Role kButton{Group::Button};
+constexpr std::size_t kDimmableLightCount =
+    std::ranges::count_if(kRoles, [](Role role) { return caps(role).level; });
 
 
 // noon()'s day: a Tuesday, the 172nd day of the year.
@@ -47,14 +50,13 @@ TimeReading noon()
 
 // The core, wired like the firmware, plus a log of every event posted.
 struct Harness {
-    EventBus                 bus;
-    core::CoreModules        core{bus.post(), {}};
+    core::CoreRuntime        runtime{Addresses{}};
+    EventBus                &bus = runtime.bus();
     std::vector<Event>       log;
     Instant                  now{};
 
     Harness()
     {
-        core::wireCore(bus, core);
         // Record everything posted, including platform-bound events.
         recordAll(std::make_index_sequence<std::variant_size_v<Payload>>{});
         post(NetworkUp{}); // at time 0, so "15 s after the network is up" is 15 s in

@@ -5,7 +5,9 @@
 
 export module sunsim.ev:bus;
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 import :events;
 import :log;
 

@@ -21,7 +21,7 @@ set(modules "src/platform.cppm"
 # InternetSync's and Clock's definitions live in module implementation units
 # (see internet_sync.cppm and clock.cppm for why).
 idf_component_register(SRCS ${modules} "src/clock.cpp" "src/internet_sync.cpp"
-                       REQUIRES sunsim_events esp_timer esp_event espressif__esp-zigbee-lib
+                       REQUIRES sunsim_events sunsim_presentation esp_timer esp_event espressif__esp-zigbee-lib
                        PRIV_REQUIRES sunsim_weather console driver pthread esp_coex esp_http_client esp_lcd mbedtls nvs_flash esp_wifi esp_netif lwip
                                      espressif__esp_lvgl_port)
 

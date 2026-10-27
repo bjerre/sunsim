@@ -1,6 +1,8 @@
 export module sunsim.core:daylight;
 
+#if !defined(__EMSCRIPTEN__)
 import std.compat;
+#endif
 import sunsim.ev;
 import :solar;
 
@@ -41,6 +43,9 @@ struct Glow {
 
 // Cool to warm across the curve's hours, at full brightness.
 [[nodiscard]] std::optional<Glow> show(const ev::WorkCurve &curve, const LookContext &ctx) noexcept;
+
+// A plug has no dimming or color; the zone gate controls its on/off state.
+[[nodiscard]] std::optional<Glow> show(const ev::OnOffOnly &look, const LookContext &) noexcept;
 
 // Something that can be a Look: it has a show().
 template <class L>
@@ -166,6 +171,11 @@ std::optional<Glow> show(const ev::WorkCurve &curve, const LookContext &ctx) noe
     const auto   mireds = static_cast<uint16_t>(std::lround(cool + warmth * (warm - cool)));
 
     return Glow{.brightness = 1.0, .color = ev::Mireds{mireds}};
+}
+
+std::optional<Glow> show(const ev::OnOffOnly &, const LookContext &) noexcept
+{
+    return Glow{.brightness = 1.0};
 }
 
 } // namespace sunsim::core
