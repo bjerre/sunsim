@@ -93,13 +93,35 @@ const char *linkName(sunsim::ev::DeviceLink link)
     return "unpaired";
 }
 
+const char *pressName(sunsim::ev::Press press)
+{
+    using sunsim::ev::Press;
+    switch (press) {
+    case Press::Single:
+        return "single";
+    case Press::Double:
+        return "double";
+    case Press::Hold:
+        return "hold";
+    case Press::Ambiguous:
+        return nullptr;
+    }
+    return nullptr;
+}
+
 struct VirtualOffice {
+    struct OutputMetadata {
+        sunsim::ev::WeatherEffect weather_effect = sunsim::ev::WeatherEffect::None;
+        sunsim::ev::PulsePhase    pulse_phase    = sunsim::ev::PulsePhase::None;
+    };
+
     sunsim::core::CoreRuntime runtime{sunsim::ev::Addresses{}};
     sunsim::ev::Instant now{};
     sunsim::ev::TimeReading time{};
     sunsim::ev::ProgramConfig config{};
     sunsim::ev::StatusSnapshot status{};
     sunsim::ev::PerRole<sunsim::ev::LightState> lights{};
+    sunsim::ev::PerRole<OutputMetadata> output_metadata{};
     std::vector<sunsim::ev::Instant> wakes;
     std::string state_json;
     bool have_status = false;
@@ -111,6 +133,11 @@ struct VirtualOffice {
             if (e.snapshot) {
                 status = *e.snapshot;
                 have_status = true;
+            }
+        });
+        bus.on<sunsim::ev::OutputTarget>([this](const auto &e) {
+            if (sunsim::ev::isLight(e.role)) {
+                output_metadata[e.role] = {e.weather_effect, e.pulse_phase};
             }
         });
         bus.on<sunsim::ev::SetLight>([this](const auto &e) {
@@ -156,6 +183,7 @@ struct VirtualOffice {
         status = {};
         have_status = false;
         lights = {};
+        output_metadata = {};
         wakes.clear();
 
         config = {};
@@ -258,6 +286,13 @@ struct VirtualOffice {
         using sunsim::ev::Intensity;
         using sunsim::ev::Precip;
         const auto kind = precip >= 0 && precip <= 5 ? static_cast<Precip>(precip) : Precip::None;
+        // The core deliberately uses forecast cloud during simulated time
+        // and ignores live cloud readings. Model the browser slider as a
+        // simple all-day forecast while keeping precipitation a live input.
+        sunsim::ev::CloudCover forecast;
+        forecast.day = time.day();
+        forecast.percent.fill(static_cast<uint8_t>(std::clamp(cloud, 0, 100)));
+        runtime.post()(sunsim::ev::CloudCoverUpdated{.forecast = forecast});
         runtime.post()(sunsim::ev::ConditionsUpdated{
             .now = {.cloud_percent = static_cast<uint8_t>(std::clamp(cloud, 0, 100)),
                     .precip = kind,
@@ -300,10 +335,40 @@ struct VirtualOffice {
             color);
     }
 
+    void appendDaylightCurve(std::string &out, sunsim::ev::Role role)
+    {
+        out += ",\"curve\":[";
+        if (!status.time.valid) {
+            out += ']';
+            return;
+        }
+
+        constexpr std::size_t sample_count = 97;
+        const double cloud = status.sky.cloud_percent.value_or(0) / 100.0;
+        for (std::size_t i = 0; i < sample_count; ++i) {
+            const int minute = static_cast<int>(std::min(i * 15, 1439uz));
+            auto sample_time = status.time;
+            sample_time.local = std::chrono::local_seconds{
+                status.time.day() + std::chrono::minutes{minute}};
+            const auto target = sunsim::core::daylightTarget(
+                role, status.config, status.peaks, status.min_levels, sample_time, cloud);
+            if (i != 0) {
+                out += ',';
+            }
+            out += std::format("{{\"minute\":{},\"on\":{},\"level\":{},\"color\":",
+                               minute, target.on ? "true" : "false", target.level);
+            appendColor(out, target.color);
+            out += '}';
+        }
+        out += ']';
+    }
+
     std::string json()
     {
         using sunsim::presentation::makeStatusDisplayData;
+        using sunsim::presentation::makeProgramFlowDisplayData;
         const auto display = makeStatusDisplayData(status);
+        const auto flow = makeProgramFlowDisplayData(status);
         const std::chrono::year_month_day sim_date{time.day()};
         const auto sun = sunsim::core::computeSunPosition(
             config.latitude_deg, config.longitude_deg, time.dayOfYear(),
@@ -313,7 +378,7 @@ struct VirtualOffice {
             "\"time\":{},\"weekday\":{},\"simDate\":{},"
             "\"sun\":{{\"azimuthDeg\":{},\"elevationDeg\":{}}},"
             "\"dayLength\":{},\"nextEvent\":{},\"mode\":{},"
-            "\"modeTone\":{},\"sky\":{},\"skyTone\":{},\"simMinute\":{},\"lights\":[",
+            "\"modeTone\":{},\"sky\":{},\"skyTone\":{},\"simMinute\":{},\"programFlow\":[",
             config.latitude_deg, config.longitude_deg, time.utc_offset.count(), jsonString(display.time),
             jsonString(display.weekday),
             jsonString(std::format("{:04}-{:02}-{:02}", static_cast<int>(sim_date.year()),
@@ -323,6 +388,39 @@ struct VirtualOffice {
             jsonString(display.mode), jsonString(toneName(display.mode_tone)), jsonString(display.sky),
             jsonString(toneName(display.sky_tone)),
             std::chrono::duration_cast<std::chrono::minutes>(time.sinceMidnight()).count());
+        for (std::size_t i = 0; i < flow.zone_count; ++i) {
+            const auto &zone = flow.zones[i];
+            if (i != 0) {
+                out += ',';
+            }
+            out += std::format("{{\"zone\":{},\"mode\":{},\"gateOpen\":{},\"gateApplies\":{},\"availableModes\":[",
+                               jsonString(zone.name), jsonString(sunsim::ev::modeName(zone.mode)),
+                               zone.gate_open ? "true" : "false", zone.gate_applies ? "true" : "false");
+            for (std::size_t j = 0; j < zone.mode_count; ++j) {
+                if (j != 0) {
+                    out += ',';
+                }
+                const auto &choice = zone.available_modes[j];
+                const char *press = choice.button_press ? pressName(*choice.button_press) : nullptr;
+                out += std::format("{{\"mode\":{},\"buttonPress\":{}}}",
+                                   jsonString(sunsim::ev::modeName(choice.mode)),
+                                   press ? jsonString(press) : "null");
+            }
+            out += "],\"members\":[";
+            for (std::size_t j = 0; j < zone.member_count; ++j) {
+                const auto &member = zone.members[j];
+                if (j != 0) {
+                    out += ',';
+                }
+                out += std::format("{{\"role\":{},\"behavior\":{}",
+                                   jsonString(sunsim::ev::roleName(member.role)),
+                                   jsonString(member.behavior));
+                appendDaylightCurve(out, member.role);
+                out += '}';
+            }
+            out += "]}";
+        }
+        out += "],\"lights\":[";
         bool first = true;
         for (const auto role : sunsim::ev::lights()) {
             const auto &light = lights[role];
@@ -330,8 +428,12 @@ struct VirtualOffice {
                 out += ',';
             }
             first = false;
-            out += std::format("{{\"role\":{},\"on\":{},\"level\":{},\"color\":",
-                               jsonString(sunsim::ev::roleName(role)), light.on ? "true" : "false", light.level);
+            const auto &metadata = output_metadata[role];
+            out += std::format(
+                "{{\"role\":{},\"on\":{},\"level\":{},\"weatherEffect\":{},\"pulsePhase\":{},\"color\":",
+                jsonString(sunsim::ev::roleName(role)), light.on ? "true" : "false", light.level,
+                jsonString(sunsim::ev::weatherEffectName(metadata.weather_effect)),
+                jsonString(sunsim::ev::pulsePhaseName(metadata.pulse_phase)));
             appendColor(out, light.color);
             out += '}';
         }

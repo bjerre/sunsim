@@ -58,8 +58,35 @@ struct StatusDisplayData {
     ev::PerRole<ev::DeviceLink> device_links{};
 };
 
+struct ProgramFlowMemberData {
+    ev::Role        role{};
+    std::string_view behavior;
+};
+
+struct ProgramFlowModeData {
+    ev::Mode mode = ev::Mode::Daylight;
+    std::optional<ev::Press> button_press{};
+};
+
+struct ProgramFlowZoneData {
+    std::string_view name;
+    ev::Mode         mode = ev::Mode::Daylight;
+    bool             gate_open = false;
+    bool             gate_applies = true;
+    std::array<ProgramFlowModeData, 4> available_modes{};
+    std::size_t      mode_count = 0;
+    std::array<ProgramFlowMemberData, ev::kLightCount> members{};
+    std::size_t      member_count = 0;
+};
+
+struct ProgramFlowDisplayData {
+    std::array<ProgramFlowZoneData, ev::kZoneCount> zones{};
+    std::size_t zone_count = 0;
+};
+
 // Pure presentation transform: every renderer gets the same screen data.
 [[nodiscard]] StatusDisplayData makeStatusDisplayData(const ev::StatusSnapshot &status);
+[[nodiscard]] ProgramFlowDisplayData makeProgramFlowDisplayData(const ev::StatusSnapshot &status);
 
 // Time-formatting helpers also used by the console.
 [[nodiscard]] std::string clockText(ev::Hours after_midnight);
@@ -85,6 +112,27 @@ std::string durationText(ev::Hours duration)
     return std::format("{}h {:02}m", std::chrono::floor<std::chrono::hours>(t).count(),
                        (t % std::chrono::hours{1}).count());
 }
+
+namespace {
+
+std::string_view behaviorName(const ev::Look &look)
+{
+    return std::visit(
+        []<class T>(const T &) -> std::string_view {
+            if constexpr (std::same_as<T, ev::SunCurve>) {
+                return "sun curve";
+            } else if constexpr (std::same_as<T, ev::WorkCurve>) {
+                return "work curve";
+            } else if constexpr (std::same_as<T, ev::OnOffOnly>) {
+                return "on/off";
+            } else {
+                static_assert(std::same_as<T, void>, "Add a display label for this light behavior");
+            }
+        },
+        look);
+}
+
+} // namespace
 
 StatusDisplayData makeStatusDisplayData(const ev::StatusSnapshot &status)
 {
@@ -142,6 +190,42 @@ StatusDisplayData makeStatusDisplayData(const ev::StatusSnapshot &status)
 
     for (const ev::Role role : ev::kRoles) {
         data.device_links[role] = status.devices[role].link;
+    }
+    return data;
+}
+
+ProgramFlowDisplayData makeProgramFlowDisplayData(const ev::StatusSnapshot &status)
+{
+    ProgramFlowDisplayData data;
+    for (const ev::ZoneId zone : ev::kZoneIds) {
+        ProgramFlowZoneData &view = data.zones[data.zone_count++];
+        view.name                   = ev::spec(zone).name;
+        view.mode                   = status.zones[zone].mode;
+        view.gate_open              = status.zones[zone].gate_open;
+        view.gate_applies           = view.mode == ev::Mode::Daylight;
+        for (const ev::Mode mode : ev::spec(zone).modes) {
+            ProgramFlowModeData &choice = view.available_modes[view.mode_count++];
+            choice.mode = mode;
+            for (const ev::Controls &control : ev::spec(zone).controls) {
+                if (control.single == mode) {
+                    choice.button_press = ev::Press::Single;
+                    break;
+                }
+                if (control.twice == mode) {
+                    choice.button_press = ev::Press::Double;
+                    break;
+                }
+                if (control.hold == mode) {
+                    choice.button_press = ev::Press::Hold;
+                    break;
+                }
+            }
+        }
+        for (const ev::Role role : ev::lights()) {
+            if (ev::kZoneOf[role] == zone) {
+                view.members[view.member_count++] = {role, behaviorName(ev::kLookOf[role])};
+            }
+        }
     }
     return data;
 }

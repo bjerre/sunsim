@@ -1,6 +1,17 @@
 export type WallRole = "WallA" | "WallB" | "WallC" | "WallD" | "WallE";
 export type LightRole = WallRole | "Work" | "Desk" | "Grow";
 export type DeviceRole = LightRole | "Button";
+export type WeatherEffect =
+  | "none"
+  | "drizzle"
+  | "rain"
+  | "freezing rain"
+  | "snow"
+  | "thunderstorm"
+  | "advisory"
+  | "watch"
+  | "warning";
+export type PulsePhase = "none" | "bright" | "dim";
 
 export type LightColor =
   | { mode: "mireds"; value: number }
@@ -11,7 +22,36 @@ export interface SimLight {
   role: LightRole;
   on: boolean;
   level: number;
+  weatherEffect: WeatherEffect;
+  pulsePhase: PulsePhase;
   color: LightColor;
+}
+
+export interface ProgramFlowMember {
+  role: LightRole;
+  behavior: string;
+  curve: ProgramCurveSample[];
+}
+
+export interface ProgramCurveSample {
+  minute: number;
+  on: boolean;
+  level: number;
+  color: LightColor;
+}
+
+export interface ProgramFlowZone {
+  zone: string;
+  mode: string;
+  gateOpen: boolean;
+  gateApplies: boolean;
+  availableModes: ProgramFlowMode[];
+  members: ProgramFlowMember[];
+}
+
+export interface ProgramFlowMode {
+  mode: string;
+  buttonPress: "single" | "double" | "hold" | null;
 }
 
 export interface SimulatorState {
@@ -28,6 +68,7 @@ export interface SimulatorState {
   sky: string;
   skyTone: string;
   simMinute: number;
+  programFlow: ProgramFlowZone[];
   lights: SimLight[];
   devices: { role: DeviceRole; link: string; endpoint: boolean }[];
 }

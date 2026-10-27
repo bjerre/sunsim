@@ -10,6 +10,12 @@ import :program;
 
 export namespace sunsim::core {
 
+// The daylight program's ungarnished light target for one role and time.
+// Shared with diagnostics and displays so they sample the same curve and gate.
+[[nodiscard]] ev::LightState daylightTarget(ev::Role role, const ev::ProgramConfig &config,
+                                            const ev::Peaks &peaks, const ev::MinLevels &min_levels,
+                                            const ev::TimeReading &time, double cloud) noexcept;
+
 // The normal program: each light shows its look (ev::kLookOf: the wall's
 // sun curve, with the cloud cover live, else forecast; the work light's
 // cool -> warm day) while its zone's gate (the active hours) lets it,
@@ -29,7 +35,6 @@ public:
 
 private:
     void emit(ev::Role role, const ev::TimeReading &time, ev::Transition transition);
-    [[nodiscard]] uint8_t levelFor(ev::Role role, double brightness) const noexcept;
 
     ev::ProgramConfig config_{};
     ev::Peaks         peaks_         = ev::kDefaultPeaks;
@@ -56,7 +61,34 @@ double positionInGroup(ev::Role role) noexcept
     const std::size_t count = ev::spec(role.group).count;
     return count < 2 ? 0.0 : 1.0 - 2.0 * role.index / static_cast<double>(count - 1);
 }
+
+uint8_t levelFor(ev::Role role, double brightness, const ev::Peaks &peaks,
+                 const ev::MinLevels &min_levels) noexcept
+{
+    const double top   = std::max(1.0, ev::kMaxLevel * peaks[role] / 100.0);
+    const double floor = std::min<double>(min_levels[role], top);
+    return static_cast<uint8_t>(std::lround(floor + (top - floor) * std::clamp(brightness, 0.0, 1.0)));
+}
 } // namespace
+
+ev::LightState daylightTarget(ev::Role role, const ev::ProgramConfig &config, const ev::Peaks &peaks,
+                              const ev::MinLevels &min_levels, const ev::TimeReading &time, double cloud) noexcept
+{
+    if (!time.valid || !ev::kZoneOf[role]) {
+        return {};
+    }
+    const double open = openness(ev::spec(*ev::kZoneOf[role]).gate, time, config);
+    const auto glow = show(ev::kLookOf[role], {.config = config,
+                                                .time = time,
+                                                .position = positionInGroup(role),
+                                                .cloud = cloud});
+    if (!glow || open <= 0.0) {
+        return {};
+    }
+    return {.on = true,
+            .level = levelFor(role, glow->brightness * open, peaks, min_levels),
+            .color = glow->color};
+}
 
 void DaylightProgram::refresh(std::optional<ev::Role> role, const std::optional<ev::TimeReading> &now)
 {
@@ -78,34 +110,15 @@ void DaylightProgram::on(const ev::ConfigChanged &e)
     min_levels_ = e.min_levels;
 }
 
-// A brightness (0-1) on the light's own range: its minimum level (the
-// lowest it visibly shows) up to its peak. So a light stays lit, dimly,
-// until the curve really ends at sunset.
-uint8_t DaylightProgram::levelFor(ev::Role role, double brightness) const noexcept
-{
-    const double top   = std::max(1.0, ev::kMaxLevel * peaks_[role] / 100.0);
-    const double floor = std::min<double>(min_levels_[role], top);
-    return static_cast<uint8_t>(std::lround(floor + (top - floor) * std::clamp(brightness, 0.0, 1.0)));
-}
-
 void DaylightProgram::emit(ev::Role role, const ev::TimeReading &time, ev::Transition transition)
 {
-    ev::LightState state{};
     if (time.valid) {
-        clock_warned_     = false;
-        const double open = openness(ev::spec(zone()).gate, time, config_);
-        const auto   glow = show(ev::kLookOf[role], {.config   = config_,
-                                                     .time     = time,
-                                                     .position = positionInGroup(role),
-                                                     .cloud    = cloud_percent_ / 100.0});
-        if (glow && open > 0.0) {
-            state = {.on = true, .level = levelFor(role, glow->brightness * open), .color = glow->color};
-        }
+        clock_warned_ = false;
     } else if (!clock_warned_) {
         clock_warned_ = true;
         ev::log::warn(kTag, "Clock not set yet (no time sync) - holding lights off");
     }
-    target(role, state, transition);
+    target(role, daylightTarget(role, config_, peaks_, min_levels_, time, cloud_percent_ / 100.0), transition);
 }
 
 } // namespace sunsim::core

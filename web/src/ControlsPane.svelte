@@ -37,7 +37,7 @@
   }: Props = $props();
 
   let precipitation = $state<Precipitation>(0);
-  let cloudPercent = $state(20);
+  let cloudPercent = $state(0);
   let alertLevel = $state<AlertLevel>(0);
 
   function updateWeather(): void {
@@ -118,6 +118,7 @@
         updateWeather();
       }}
     />
+    <p class="hint">Cloud cover sets the simulated forecast for the whole day and dims the wall-light curve.</p>
   </div>
   <div class="control-group last">
     <label for="alert-select"><span>Weather alert</span></label>

@@ -416,6 +416,49 @@ struct CloudCover {
 enum class Precip : uint8_t { None, Drizzle, Rain, FreezingRain, Snow, Thunderstorm };
 enum class Intensity : uint8_t { Light, Moderate, Heavy };
 
+// Which weather overlay currently owns a light's output, and the phase of
+// its pulse. `None` means the running program owns the output.
+enum class WeatherEffect : uint8_t { None, Drizzle, Rain, FreezingRain, Snow, Thunderstorm, Advisory, Watch, Warning };
+enum class PulsePhase : uint8_t { None, Bright, Dim };
+
+[[nodiscard]] constexpr const char *weatherEffectName(WeatherEffect effect) noexcept
+{
+    switch (effect) {
+    case WeatherEffect::None:
+        return "none";
+    case WeatherEffect::Drizzle:
+        return "drizzle";
+    case WeatherEffect::Rain:
+        return "rain";
+    case WeatherEffect::FreezingRain:
+        return "freezing rain";
+    case WeatherEffect::Snow:
+        return "snow";
+    case WeatherEffect::Thunderstorm:
+        return "thunderstorm";
+    case WeatherEffect::Advisory:
+        return "advisory";
+    case WeatherEffect::Watch:
+        return "watch";
+    case WeatherEffect::Warning:
+        return "warning";
+    }
+    return "none";
+}
+
+[[nodiscard]] constexpr const char *pulsePhaseName(PulsePhase phase) noexcept
+{
+    switch (phase) {
+    case PulsePhase::None:
+        return "none";
+    case PulsePhase::Bright:
+        return "bright";
+    case PulsePhase::Dim:
+        return "dim";
+    }
+    return "none";
+}
+
 [[nodiscard]] constexpr const char *precipName(Precip precip) noexcept
 {
     switch (precip) {

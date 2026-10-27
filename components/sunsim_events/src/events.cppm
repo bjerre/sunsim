@@ -212,7 +212,10 @@ struct LightChange {             // a bulb, what it's to show, and how quickly t
     Transition color_transition{};
 };
 struct LightTarget : LightChange {};  // what a bulb should show, from the running program
-struct OutputTarget : LightChange {}; // what it does show: Overlays' pick, for LightOutput
+struct OutputTarget : LightChange {   // what it does show: Overlays' pick, for LightOutput
+    WeatherEffect weather_effect = WeatherEffect::None;
+    PulsePhase    pulse_phase    = PulsePhase::None;
+};
 struct SetLight {                // one bulb's ZCL commands, sent in field order
     uint16_t               short_addr = 0;
     uint8_t                endpoint   = 0;

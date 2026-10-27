@@ -20,6 +20,7 @@ struct Pulse {
     Shade   shade;
     uint8_t fade_seconds = 1;   // each fade, bright to dim or back: a cycle is twice this
     double  strength     = 1.0; // the top of the pulse, as a fraction of the light's peak
+    ev::WeatherEffect effect = ev::WeatherEffect::None;
 
     friend constexpr bool operator==(const Pulse &, const Pulse &) noexcept = default;
 };
@@ -92,14 +93,15 @@ constexpr Pulse alertPulse(ev::AlertLevel level) noexcept
 {
     switch (level) {
     case ev::AlertLevel::Advisory:
-        return {.shade = {50, 254}, .fade_seconds = 3};
+        return {.shade = {50, 254}, .fade_seconds = 3, .effect = ev::WeatherEffect::Advisory};
     case ev::AlertLevel::Watch:
-        return {.shade = {28, 254}, .fade_seconds = 2};
+        return {.shade = {28, 254}, .fade_seconds = 2, .effect = ev::WeatherEffect::Watch};
     case ev::AlertLevel::Warning:
+        return {.shade = {0, 254}, .fade_seconds = 1, .effect = ev::WeatherEffect::Warning};
     case ev::AlertLevel::None:
-        break;
+        return {};
     }
-    return {.shade = {0, 254}, .fade_seconds = 1};
+    return {};
 }
 
 // Blues for water, paler and slower for snow; violet for freezing rain,
@@ -109,18 +111,19 @@ constexpr Pulse precipPulse(ev::Precip precip, ev::Intensity intensity) noexcept
     const double strength = intensity == ev::Intensity::Heavy ? 1.0 : intensity == ev::Intensity::Moderate ? 0.8 : 0.6;
     switch (precip) {
     case ev::Precip::Drizzle:
-        return {.shade = {205, 170}, .fade_seconds = 3, .strength = strength};
-    case ev::Precip::FreezingRain:
-        return {.shade = {280, 230}, .fade_seconds = 2, .strength = strength};
-    case ev::Precip::Snow:
-        return {.shade = {195, 150}, .fade_seconds = 3, .strength = strength};
-    case ev::Precip::Thunderstorm:
-        return {.shade = {270, 254}, .fade_seconds = 1, .strength = strength};
+        return {.shade = {205, 170}, .fade_seconds = 3, .strength = strength, .effect = ev::WeatherEffect::Drizzle};
     case ev::Precip::Rain:
+        return {.shade = {228, 254}, .fade_seconds = 2, .strength = strength, .effect = ev::WeatherEffect::Rain};
+    case ev::Precip::FreezingRain:
+        return {.shade = {280, 230}, .fade_seconds = 2, .strength = strength, .effect = ev::WeatherEffect::FreezingRain};
+    case ev::Precip::Snow:
+        return {.shade = {195, 150}, .fade_seconds = 3, .strength = strength, .effect = ev::WeatherEffect::Snow};
+    case ev::Precip::Thunderstorm:
+        return {.shade = {270, 254}, .fade_seconds = 1, .strength = strength, .effect = ev::WeatherEffect::Thunderstorm};
     case ev::Precip::None:
-        break;
+        return {};
     }
-    return {.shade = {228, 254}, .fade_seconds = 2, .strength = strength};
+    return {};
 }
 
 constexpr uint8_t zigbeeHue(uint16_t degrees) noexcept
@@ -219,14 +222,18 @@ void Overlays::show(ev::Role role, const Pulse &pulse, bool bright)
     const uint8_t top    = std::max(min_levels_[role], static_cast<uint8_t>(std::max(1L, std::lround(peak))));
     const uint8_t bottom = std::clamp(static_cast<uint8_t>(std::lround(top * kDimFraction)), min_levels_[role], top);
 
-    post_(ev::OutputTarget{{
-        .role             = role,
-        .state            = {.on    = true,
-                             .level = bright ? top : bottom,
-                             .color = ev::HueSat{zigbeeHue(pulse.shade.hue_deg), pulse.shade.saturation}},
-        .level_transition = ev::Transition{static_cast<uint16_t>(pulse.fade_seconds * 10 - 1)}, // nearly the whole fade
-        .color_transition = kColorTransition,
-    }});
+    post_(ev::OutputTarget{
+        ev::LightChange{
+            .role = role,
+            .state = {.on = true,
+                      .level = bright ? top : bottom,
+                      .color = ev::HueSat{zigbeeHue(pulse.shade.hue_deg), pulse.shade.saturation}},
+            .level_transition = ev::Transition{static_cast<uint16_t>(pulse.fade_seconds * 10 - 1)},
+            .color_transition = kColorTransition,
+        },
+        pulse.effect,
+        bright ? ev::PulsePhase::Bright : ev::PulsePhase::Dim,
+    });
 }
 
 void Overlays::release(ev::Role role)

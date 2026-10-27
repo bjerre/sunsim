@@ -1,4 +1,4 @@
-import type { LightColor, SimLight, SimulatorState } from "./simulator.js";
+import type { LightColor, SimLight, SimulatorState } from "./simulator.ts";
 
 type Rgb = [number, number, number];
 

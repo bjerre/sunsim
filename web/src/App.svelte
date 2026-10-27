@@ -3,6 +3,7 @@
   import ControlsPane from "./ControlsPane.svelte";
   import DisplayPane from "./DisplayPane.svelte";
   import OfficePane from "./OfficePane.svelte";
+  import ProgramFlowPane from "./ProgramFlowPane.svelte";
   import WindowPane from "./WindowPane.svelte";
   import {
     createSimulatorController,
@@ -13,7 +14,7 @@
     type SimulationClock,
     type SimulatorController,
     type SimulatorState,
-  } from "../simulator.js";
+  } from "../simulator.ts";
 
   const savedLocationKey = "sunsim.location.v1";
 
@@ -227,7 +228,10 @@
 
   {#if simState}
     <section class="workspace">
-      <OfficePane snapshot={simState} />
+      <div class="main-column">
+        <OfficePane snapshot={simState} />
+        <ProgramFlowPane snapshot={simState} onButtonPress={pressButton} />
+      </div>
       <aside class="side-column">
         <WindowPane snapshot={simState} />
         <DisplayPane snapshot={simState} />

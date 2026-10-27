@@ -82,7 +82,73 @@ h2 { margin: 0; font-size: 17px; font-weight: 600; }
 .legend-on { background: #f0ce82; box-shadow: 0 0 8px #f0ce82aa; }
 .legend-off { background: #404a42; border: 1px solid #879283; }
 .side-column { display: grid; gap: 18px; }
+.main-column { display: grid; min-width: 0; gap: 18px; }
 .display, .controls { padding: 19px; }
+.program-flow { padding: 22px; }
+.flow-intro { margin-top: -4px; margin-bottom: 15px; }
+.flow-zones { display: grid; gap: 10px; }
+.flow-zone { min-width: 0; padding: 12px; border: 1px solid #2d3c32; border-radius: 10px; background: #141d18aa; }
+.flow-zone-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.flow-zone-heading h3 { margin: 0; color: #dce7dd; font-size: 12px; font-weight: 600; }
+.zone-id { color: #78887c; font: 9px "DM Mono", monospace; }
+.flow-path { display: grid; grid-template-columns: minmax(88px, .8fr) 14px minmax(88px, .8fr) 14px minmax(100px, .9fr) 14px minmax(160px, 1.5fr); align-items: center; gap: 7px; }
+.flow-stage { display: flex; min-height: 48px; flex-direction: column; justify-content: center; gap: 5px; padding: 7px 9px; border: 1px solid #38493c; border-radius: 7px; background: #202c24; }
+.flow-stage span { color: #829286; font: 8px "DM Mono", monospace; letter-spacing: .08em; }
+.flow-stage strong { color: #dce7dd; font-size: 11px; font-weight: 500; }
+.flow-mode-list { display: flex; flex-wrap: wrap; gap: 3px; }
+.flow-mode-chip { padding: 3px 5px; border: 1px solid #354239; border-radius: 5px; background: #1a241e; color: #78887c; font: 7px "DM Mono", monospace; text-transform: uppercase; cursor: pointer; }
+.flow-mode-chip:disabled { cursor: default; opacity: .78; }
+.flow-mode-chip:not(:disabled):hover { border-color: #829c85; color: #dce7dd; }
+.flow-mode-chip:focus-visible { outline: 2px solid #9ccc9a; outline-offset: 2px; }
+.flow-mode-chip[data-active="true"] { border-color: #618368; background: #24372a; color: #b7d7bb; }
+.flow-mode-chip[data-active="true"][data-mode="RED ALERT"] { border-color: #a5423d; background: #532825; color: #ffd1c9; }
+.flow-mode-chip[data-active="true"][data-mode="RED ALERT"][data-pulse="HIGH"] { box-shadow: 0 0 9px #dc554566; }
+.flow-mode-chip[data-active="true"][data-mode="RED ALERT"][data-pulse="LOW"] { box-shadow: 0 0 2px #dc554522; }
+.flow-program-pulse { color: #f0a39c; font: 8px "DM Mono", monospace; letter-spacing: .04em; }
+.flow-program-pulse[data-phase="HIGH"] { color: #ffd1c9; }
+.gate-stage[data-open="true"] { border-color: #466b4d; background: #1b3022; }
+.gate-stage[data-open="true"] strong { color: #a5d5ae; }
+.gate-stage[data-open="false"] strong { color: #a3aaa1; }
+.gate-stage[data-applies="false"][data-mode="RED ALERT"] { border-color: #82413d; background: #35201f; }
+.gate-stage[data-applies="false"][data-mode="RED ALERT"] strong { color: #f0a39c; }
+.weather-stage[data-active="true"] { border-color: #3e5261; background: #1c2a31; }
+.weather-stage[data-active="true"] strong { color: #a9d5eb; font-size: 9px; }
+.weather-stage[data-active="true"] .weather-output[data-phase="bright"] { color: #d6eff9; }
+.flow-arrow { color: #718578; font: 14px "DM Mono", monospace; text-align: center; }
+.flow-members { display: grid; grid-template-columns: repeat(auto-fit, minmax(75px, 1fr)); gap: 5px; }
+.flow-member { display: grid; min-width: 0; grid-template-columns: 1fr auto; gap: 3px 5px; padding: 7px; border: 1px solid #334137; border-radius: 7px; background: #1b2520; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: border-color .15s, background .15s; }
+.flow-member:hover, .flow-member.selected { border-color: #63836a; background: #24332a; }
+.flow-member:focus-visible { outline: 2px solid #9ccc9a; outline-offset: 2px; }
+.flow-member strong { overflow: hidden; color: #d2ded4; font: 9px "DM Mono", monospace; text-overflow: ellipsis; }
+.flow-member span { grid-column: 1 / -1; color: #87968a; font-size: 9px; }
+.flow-member small { color: #89958b; font: 8px "DM Mono", monospace; }
+.flow-member small[data-on="true"] { color: #a5d5ae; }
+.flow-member[data-pulse] { border-color: #633a37; }
+.flow-member-state[data-phase] { grid-column: 1 / -1; color: #f0a39c; }
+.flow-member-state[data-phase="HIGH"] { color: #ffd1c9; }
+.flow-member[data-weather] { border-color: #3e5261; }
+.flow-member-state[data-weather] { grid-column: 1 / -1; color: #a9d5eb; }
+.flow-member-level { grid-column: 1 / -1; display: block; height: 3px; overflow: hidden; border-radius: 2px; background: #3a2928; }
+.flow-member-level::after { content: ""; display: block; width: var(--output-level); height: 100%; border-radius: inherit; background: #df6258; transition: width .2s ease-out; }
+.flow-member[data-pulse="HIGH"] .flow-member-level::after { box-shadow: 0 0 6px #ff786e; }
+.flow-member-level[data-weather] { background: #263945; }
+.flow-member-level[data-weather]::after { background: #72b6d6; box-shadow: 0 0 6px #72b6d6aa; }
+.flow-curve { margin-top: 14px; padding: 13px 12px 10px; border: 1px solid #2d3c32; border-radius: 10px; background: #141d18aa; }
+.flow-curve-heading, .flow-curve-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.flow-curve-heading { margin-bottom: 5px; }
+.flow-curve-heading .eyebrow { margin-bottom: 4px; font-size: 8px; }
+.flow-curve-heading h3 { margin: 0; color: #dce7dd; font-size: 12px; font-weight: 500; }
+.curve-live { color: #87968a; font: 8px "DM Mono", monospace; }
+.curve-live[data-on="true"] { color: #a5d5ae; }
+.curve-chart { display: block; width: 100%; height: auto; overflow: visible; }
+.curve-grid { stroke: #34443a; stroke-width: 1; stroke-dasharray: 3 5; }
+.curve-level, .curve-hour { fill: #819085; font: 8px "DM Mono", monospace; }
+.curve-tick { stroke: #637267; stroke-width: 1; }
+.curve-line { fill: none; stroke: #a5d5ae; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.curve-now { stroke: #f0ce82; stroke-width: 1.5; stroke-dasharray: 3 3; }
+.flow-curve-meta { margin-top: 4px; color: #819085; font-size: 9px; }
+.flow-curve-meta strong { color: #e2c887; font: 9px "DM Mono", monospace; }
+.flow-note { margin-top: 12px; }
 .display-led { width: 7px; height: 7px; background: #f1bb67; box-shadow: 0 0 10px #f1bb6799; }
 .lcd { padding: 14px 15px 12px; border: 7px solid #34423a; border-radius: 7px; background: #a8ba91; color: #243526; font: 11px "DM Mono", monospace; box-shadow: inset 0 0 20px #31442d44, 0 4px 0 #101712; text-shadow: 0 1px #e1e8c9; }
 .lcd-top { font-size: 12px; font-weight: 500; }
@@ -113,4 +179,4 @@ input[type="date"] { width: 100%; padding: 9px 10px; border: 1px solid #3a4b3d; 
 .sub-label { margin-top: 13px; }
 footer { margin-top: 18px; color: #718176; font: 10px "DM Mono", monospace; }
 @media (max-width: 850px) { .workspace { grid-template-columns: 1fr; } .side-column { grid-template-columns: 1fr 1fr; align-items: start; } .room { min-height: 490px; } }
-@media (max-width: 600px) { .shell { padding: 22px 14px; } .topbar { align-items: flex-start; gap: 12px; flex-direction: column; } .side-column { grid-template-columns: 1fr; } .room { min-height: 460px; } .wall { left: 5%; right: 5%; } .bookcase-scene { left: 4%; transform: scale(.78); transform-origin: left bottom; } .desk-scene { left: 29%; transform: scale(.8); transform-origin: left bottom; } .torchiere { right: 8%; } .torchiere-caption { right: 5%; } .light-legend { align-items: flex-start; gap: 10px; flex-wrap: wrap; } footer { align-items: flex-start; gap: 8px; flex-direction: column; } }
+@media (max-width: 600px) { .shell { padding: 22px 14px; } .topbar { align-items: flex-start; gap: 12px; flex-direction: column; } .side-column { grid-template-columns: 1fr; } .room { min-height: 460px; } .wall { left: 5%; right: 5%; } .bookcase-scene { left: 4%; transform: scale(.78); transform-origin: left bottom; } .desk-scene { left: 29%; transform: scale(.8); transform-origin: left bottom; } .torchiere { right: 8%; } .torchiere-caption { right: 5%; } .light-legend { align-items: flex-start; gap: 10px; flex-wrap: wrap; } .flow-path { grid-template-columns: minmax(0, 1fr); } .flow-arrow { transform: rotate(90deg); } footer { align-items: flex-start; gap: 8px; flex-direction: column; } }
