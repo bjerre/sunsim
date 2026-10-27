@@ -26,6 +26,7 @@ usage: ./sunsim <command> [args]
                    (e.g. `./sunsim status`, `./sunsim intensity all 100`)
   cmd <command>    the same, for a name the script uses itself (`./sunsim cmd help`)
   test             build and run the host tests
+  definition       generate or check the installation document's C++ tables
   idf <args>       any idf.py command (e.g. `./sunsim idf menuconfig`)
 
 Console commands (also in `monitor`); `./sunsim cmd help` lists them all:
@@ -132,14 +133,26 @@ host_tests() {
     "$ROOT/build-host/sunsim_tests" | grep -Ev '^[IWE] \(' # results, not the core's logging
 }
 
+definition_check() {
+    python3 "$ROOT/tools/generate_installation.py" --check
+}
+
 cd "$ROOT"
 case ${1:-help} in
-build)   idf_env; idf.py build ;;
-flash)   idf_env; idf.py -p "$(port)" flash ;;
+build)   definition_check; idf_env; idf.py build ;;
+flash)   definition_check; idf_env; idf.py -p "$(port)" flash ;;
 monitor) idf_env; idf.py -p "$(port)" monitor ;;
-go)      idf_env; idf.py -p "$(port)" flash monitor ;;
+go)      definition_check; idf_env; idf.py -p "$(port)" flash monitor ;;
 cmd)     shift; [[ $# -gt 0 ]] || { usage >&2; exit 1; }; idf_env; console_cmd "$@" ;;
-test)    idf_env; host_tests ;;
+test)    definition_check; python3 -m unittest discover -s "$ROOT/test/config"; idf_env; host_tests ;;
+definition)
+    shift
+    case ${1:-check} in
+        generate) python3 "$ROOT/tools/generate_installation.py" ;;
+        check)    definition_check ;;
+        *)        echo "usage: ./sunsim definition [generate|check]" >&2; exit 2 ;;
+    esac
+    ;;
 idf)     shift; idf_env; idf.py "$@" ;;
 help | -h | --help) usage ;;
 *)       idf_env; console_cmd "$@" ;; # a console command

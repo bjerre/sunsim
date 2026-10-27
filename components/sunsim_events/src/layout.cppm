@@ -52,12 +52,6 @@ struct GroupSpec {
 // order. A group's members are lettered (WallA, WallB, ...); a group of one
 // is just its name (Work, Desk, Grow, Button). Wall lights are lettered east
 // to west: their order along the wall drives the sun-direction dimming.
-inline constexpr std::array kLayout{
-    GroupSpec{Group::Wall, "Wall", Kind::ColorBulb, 5},
-    GroupSpec{Group::Work, "Work", Kind::ColorBulb, 1},
-    GroupSpec{Group::Desk, "Desk", Kind::Plug, 1},
-    GroupSpec{Group::Grow, "Grow", Kind::Plug, 1},
-    GroupSpec{Group::Button, "Button", Kind::Button, 1},
-};
+#include "layout.generated.inc"
 
 } // namespace sunsim::ev

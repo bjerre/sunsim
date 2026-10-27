@@ -29,31 +29,7 @@ inline constexpr List<Address, kRoleCount> kAddresses{
 };
 
 // Lights that share a mode and a gate. Every light is in exactly one.
-inline constexpr std::array kZones{
-    ZoneSpec{
-        .name   = "office",
-        .lights = {{.lights = "Wall", .look = SunCurve{}},
-                   {.lights = "Work", .look = WorkCurve{}, .peak = 90}},
-        // The active hours (`config hours`, `days`, `fade`).
-        .gate     = {Window{.hours = &ProgramConfig::active, .days = &ProgramConfig::active_days,
-                            .fade = &ProgramConfig::fade}},
-        .controls = {{.by = "Button"}}, // single: daylight, double: red alert, hold: off
-        .weather  = Weather{.precip = {"WallC"}, .alerts = {"WallB", "WallD"}},
-    },
-    ZoneSpec{
-        .name   = "desk-downlight",
-        .lights = {{.lights = "Desk", .look = OnOffOnly{}}},
-        .gate   = {Window{.hours = DaySpan{std::chrono::hours{8}, std::chrono::hours{19}}}},
-        .modes  = {Mode::Daylight},
-    },
-    ZoneSpec{
-        .name   = "bookcase-grow-light",
-        .lights = {{.lights = "Grow", .look = OnOffOnly{}}},
-        .gate   = {Window{.hours = DaySpan{std::chrono::minutes{3 * 60 + 45},
-                                           std::chrono::minutes{8 * 60 + 45}}}},
-        .modes  = {Mode::Daylight},
-    },
-};
+#include "installation.generated.inc"
 
 // ---- Derived: the tables above per role and per zone, checked as they compile ----
 

@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "groups": [
+    { "name": "Wall", "kind": "color-bulb", "count": 5 },
+    { "name": "Work", "kind": "color-bulb", "count": 1 },
+    { "name": "Desk", "kind": "plug", "count": 1 },
+    { "name": "Grow", "kind": "plug", "count": 1 },
+    { "name": "Button", "kind": "button", "count": 1 }
+  ],
+  "zones": [
+    {
+      "name": "office",
+      "lights": [
+        { "selection": "Wall", "look": { "type": "sun-curve" } },
+        {
+          "selection": "Work",
+          "look": {
+            "type": "work-curve",
+            "hours": { "setting": "work" },
+            "coolMireds": { "setting": "work_cool_mireds" },
+            "warmMireds": { "setting": "work_warm_mireds" }
+          },
+          "peakPercent": 90
+        }
+      ],
+      "gate": [
+        {
+          "type": "window",
+          "hours": { "setting": "active" },
+          "days": { "setting": "active_days" },
+          "fadeMinutes": { "setting": "fade" }
+        }
+      ],
+      "modes": ["daylight", "off", "red-alert", "tuning"],
+      "controls": [
+        {
+          "button": "Button",
+          "single": "daylight",
+          "double": "red-alert",
+          "hold": "off"
+        }
+      ],
+      "weather": {
+        "precipitation": ["WallC"],
+        "alerts": ["WallB", "WallD"]
+      }
+    },
+    {
+      "name": "desk-downlight",
+      "lights": [
+        { "selection": "Desk", "look": { "type": "on-off" } }
+      ],
+      "gate": [
+        {
+          "type": "window",
+          "hours": { "start": "08:00", "end": "19:00" }
+        }
+      ],
+      "modes": ["daylight"]
+    },
+    {
+      "name": "bookcase-grow-light",
+      "lights": [
+        { "selection": "Grow", "look": { "type": "on-off" } }
+      ],
+      "gate": [
+        {
+          "type": "window",
+          "hours": { "start": "03:45", "end": "08:45" }
+        }
+      ],
+      "modes": ["daylight"]
+    }
+  ]
+}
