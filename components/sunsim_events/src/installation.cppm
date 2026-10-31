@@ -47,6 +47,48 @@ static_assert(kZoneCount >= 1 && kZoneCount <= 255, "1-255 zones");
 
 [[nodiscard]] constexpr const ZoneSpec &spec(ZoneId zone) noexcept { return kZones[zone.index]; }
 
+// Runtime profiles keep the current fixed role catalogue, but can describe a
+// different grouping of those roles into zones. Reserve a small bounded
+// table so the same firmware/Wasm build can use profiles without allocation.
+inline constexpr std::size_t kMaxZones = 8;
+
+struct Installation {
+    std::array<ZoneSpec, kMaxZones> zones{};
+    std::size_t                     zone_count = 0;
+    Topology                        topology{};
+
+    [[nodiscard]] constexpr const ZoneSpec &spec(ZoneId zone) const noexcept { return zones[zone.index]; }
+    [[nodiscard]] constexpr std::span<const ZoneId> zoneIds() const noexcept
+    {
+        return std::span{kAllZoneIds}.first(zone_count);
+    }
+
+private:
+    inline static constexpr std::array<ZoneId, kMaxZones> kAllZoneIds = [] {
+        std::array<ZoneId, kMaxZones> ids{};
+        for (std::size_t i = 0; i < ids.size(); ++i) {
+            ids[i] = {static_cast<uint8_t>(i)};
+        }
+        return ids;
+    }();
+};
+
+template <std::ranges::sized_range Zones>
+[[nodiscard]] constexpr Installation installationOf(const Zones &zones)
+{
+    if (std::ranges::empty(zones) || std::ranges::size(zones) > kMaxZones) {
+        fail("an installation must have 1-8 zones");
+    }
+    Installation result;
+    for (const ZoneSpec &zone : zones) {
+        result.zones[result.zone_count++] = zone;
+    }
+    result.topology = topologyOf(std::span{result.zones}.first(result.zone_count));
+    return result;
+}
+
+inline constexpr Installation kDefaultInstallation = installationOf(kZones);
+
 // Every zone, in order.
 inline constexpr std::array<ZoneId, kZoneCount> kZoneIds = [] {
     std::array<ZoneId, kZoneCount> ids{};
@@ -58,7 +100,7 @@ inline constexpr std::array<ZoneId, kZoneCount> kZoneIds = [] {
 
 // One T per zone, indexed by the zone.
 template <class T> struct PerZone {
-    std::array<T, kZoneCount> items{};
+    std::array<T, kMaxZones> items{};
 
     [[nodiscard]] constexpr T       &operator[](ZoneId zone) noexcept { return items[zone.index]; }
     [[nodiscard]] constexpr const T &operator[](ZoneId zone) const noexcept { return items[zone.index]; }

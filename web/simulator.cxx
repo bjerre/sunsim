@@ -115,7 +115,8 @@ struct VirtualOffice {
         sunsim::ev::PulsePhase    pulse_phase    = sunsim::ev::PulsePhase::None;
     };
 
-    sunsim::core::CoreRuntime runtime{sunsim::ev::Addresses{}};
+    const sunsim::ev::Installation &installation;
+    sunsim::core::CoreRuntime runtime;
     sunsim::ev::Instant now{};
     sunsim::ev::TimeReading time{};
     sunsim::ev::ProgramConfig config{};
@@ -126,7 +127,8 @@ struct VirtualOffice {
     std::string state_json;
     bool have_status = false;
 
-    VirtualOffice()
+    explicit VirtualOffice(const sunsim::ev::Installation &profile)
+        : installation(profile), runtime(sunsim::ev::Addresses{}, profile)
     {
         auto &bus = runtime.bus();
         bus.on<sunsim::ev::StatusChanged>([this](const auto &e) {
@@ -187,7 +189,7 @@ struct VirtualOffice {
         wakes.clear();
 
         config = {};
-        runtime.post()(sunsim::ev::ConfigChanged{.config = config});
+        runtime.post()(sunsim::ev::ConfigChanged{.config = config, .peaks = installation.topology.peak_of});
 
         sunsim::ev::DeviceRecords records;
         for (const auto role : sunsim::ev::kRoles) {
@@ -351,7 +353,7 @@ struct VirtualOffice {
             sample_time.local = std::chrono::local_seconds{
                 status.time.day() + std::chrono::minutes{minute}};
             const auto target = sunsim::core::daylightTarget(
-                role, status.config, status.peaks, status.min_levels, sample_time, cloud);
+                role, status.config, status.peaks, status.min_levels, sample_time, cloud, installation);
             if (i != 0) {
                 out += ',';
             }
@@ -368,7 +370,7 @@ struct VirtualOffice {
         using sunsim::presentation::makeStatusDisplayData;
         using sunsim::presentation::makeProgramFlowDisplayData;
         const auto display = makeStatusDisplayData(status);
-        const auto flow = makeProgramFlowDisplayData(status);
+        const auto flow = makeProgramFlowDisplayData(status, installation);
         const std::chrono::year_month_day sim_date{time.day()};
         const auto sun = sunsim::core::computeSunPosition(
             config.latitude_deg, config.longitude_deg, time.dayOfYear(),
@@ -377,7 +379,8 @@ struct VirtualOffice {
             "{{\"location\":{{\"latitude\":{},\"longitude\":{}}},\"utcOffsetMinutes\":{},"
             "\"time\":{},\"weekday\":{},\"simDate\":{},"
             "\"sun\":{{\"azimuthDeg\":{},\"elevationDeg\":{}}},"
-            "\"dayLength\":{},\"nextEvent\":{},\"mode\":{},"
+            "\"dayLength\":{},\"nextEvent\":{},\"sunrise\":{},\"sunset\":{},"
+            "\"cloudPercent\":{},\"precipitation\":{},\"mode\":{},"
             "\"modeTone\":{},\"sky\":{},\"skyTone\":{},\"simMinute\":{},\"programFlow\":[",
             config.latitude_deg, config.longitude_deg, time.utc_offset.count(), jsonString(display.time),
             jsonString(display.weekday),
@@ -385,6 +388,9 @@ struct VirtualOffice {
                                    static_cast<unsigned>(sim_date.month()), static_cast<unsigned>(sim_date.day()))),
             sun.azimuth_deg, sun.elevation_deg,
             jsonString(display.day_length), jsonString(display.next_event),
+            jsonString(display.sunrise), jsonString(display.sunset),
+            display.cloud_percent ? std::to_string(*display.cloud_percent) : "null",
+            jsonString(sunsim::ev::precipName(display.precipitation)),
             jsonString(display.mode), jsonString(toneName(display.mode_tone)), jsonString(display.sky),
             jsonString(toneName(display.sky_tone)),
             std::chrono::duration_cast<std::chrono::minutes>(time.sinceMidnight()).count());
@@ -454,15 +460,79 @@ struct VirtualOffice {
     }
 };
 
+sunsim::ev::InstallationProfileBuilder &profileBuilder()
+{
+    static sunsim::ev::InstallationProfileBuilder builder;
+    return builder;
+}
+
+std::unique_ptr<VirtualOffice> &officeInstance()
+{
+    static std::unique_ptr<VirtualOffice> instance;
+    return instance;
+}
+
 VirtualOffice &office()
 {
-    static VirtualOffice instance;
-    return instance;
+    auto &instance = officeInstance();
+    if (!instance) {
+        const auto &profile = profileBuilder().ready() ? profileBuilder().installation() : sunsim::ev::kDefaultInstallation;
+        instance = std::make_unique<VirtualOffice>(profile);
+    }
+    return *instance;
 }
 
 } // namespace
 
 extern "C" {
+
+SUNSIM_KEEPALIVE int sunsim_profile_begin(int zoneCount)
+{
+    if (officeInstance()) {
+        return 0;
+    }
+    return profileBuilder().begin(zoneCount) ? 1 : 0;
+}
+
+SUNSIM_KEEPALIVE int sunsim_profile_zone(int index, const char *name, int startMinute, int endMinute)
+{
+    if (officeInstance()) {
+        return 0;
+    }
+    return name && profileBuilder().setZone(index, name, startMinute, endMinute) ? 1 : 0;
+}
+
+SUNSIM_KEEPALIVE int sunsim_profile_member(int zoneIndex, int roleIndex, int lookIndex, int peakPercent)
+{
+    if (officeInstance()) {
+        return 0;
+    }
+    return profileBuilder().addMember(zoneIndex, roleIndex, lookIndex, peakPercent) ? 1 : 0;
+}
+
+SUNSIM_KEEPALIVE int sunsim_profile_button(int zoneIndex, int roleIndex)
+{
+    if (officeInstance()) {
+        return 0;
+    }
+    return profileBuilder().setButton(zoneIndex, roleIndex) ? 1 : 0;
+}
+
+SUNSIM_KEEPALIVE int sunsim_profile_weather(int zoneIndex, int roleIndex, int effect)
+{
+    if (officeInstance()) {
+        return 0;
+    }
+    return profileBuilder().addWeatherRole(zoneIndex, roleIndex, effect) ? 1 : 0;
+}
+
+SUNSIM_KEEPALIVE int sunsim_profile_finish()
+{
+    if (officeInstance()) {
+        return 0;
+    }
+    return profileBuilder().finish() ? 1 : 0;
+}
 
 SUNSIM_KEEPALIVE void sunsim_init() { (void)office(); }
 

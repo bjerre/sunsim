@@ -30,10 +30,14 @@ class Program {
 public:
     // What every program is made with.
     struct Context {
-        ev::Post   post;
-        ev::ZoneId zone;
+        ev::Post                post;
+        ev::ZoneId              zone;
+        const ev::Installation &installation;
     };
-    explicit Program(Context context) : post_(std::move(context.post)), zone_(context.zone) {}
+    explicit Program(Context context)
+        : post_(std::move(context.post)), zone_(context.zone), installation_(context.installation)
+    {
+    }
 
     Program(const Program &)            = delete;
     Program &operator=(const Program &) = delete;
@@ -42,13 +46,14 @@ protected:
     ~Program();
 
     [[nodiscard]] ev::ZoneId zone() const noexcept { return zone_; }
+    [[nodiscard]] const ev::Installation &installation() const noexcept { return installation_; }
 
     // Calls f(role) for each light in the zone, or only for `only` if it's
     // given (and one of them).
     template <class F> void forEachLight(std::optional<ev::Role> only, F &&f) const
     {
         for (const ev::Role role : ev::lights()) {
-            if (ev::kZoneOf[role] == zone_ && (!only || *only == role)) {
+            if (installation_.topology.zone_of[role] == zone_ && (!only || *only == role)) {
                 f(role);
             }
         }
@@ -66,6 +71,7 @@ protected:
 private:
     ev::Post   post_;
     ev::ZoneId zone_;
+    const ev::Installation &installation_;
 };
 
 // What ProgramHost needs of a program.

@@ -56,6 +56,14 @@ public:
     [[nodiscard]] constexpr const T *end() const noexcept { return items_.data() + size_; }
     [[nodiscard]] constexpr std::size_t size() const noexcept { return size_; }
     [[nodiscard]] constexpr bool empty() const noexcept { return size_ == 0; }
+    constexpr bool push_back(const T &item) noexcept
+    {
+        if (size_ == N) {
+            return false;
+        }
+        items_[size_++] = item;
+        return true;
+    }
 
 private:
     std::array<T, N> items_{};
@@ -236,7 +244,7 @@ struct Topology {
 // gives a button a look or a light a second one; a light is in no zone; or
 // a button is named twice, isn't a button, or picks a mode its zone can't run;
 // or a weather light isn't a color light in its zone.
-template <std::ranges::input_range Zones> [[nodiscard]] consteval Topology topologyOf(const Zones &zones)
+template <std::ranges::input_range Zones> [[nodiscard]] constexpr Topology topologyOf(const Zones &zones)
 {
     Topology      t{};
     PerRole<bool> shown{};

@@ -11,7 +11,8 @@ if ($getenv('SUNSIM_WASM') == '1')
 {
   cxx.coptions += -include $src_root/test/build2/emscripten_std_compat.hpp
   exe{sunsim_web_simulator}: cxx.loptions += -sMODULARIZE=1 -sEXPORT_ES6=1 \
-      -sEXPORTED_RUNTIME_METHODS=UTF8ToString --no-entry
+      -sEXPORTED_RUNTIME_METHODS=UTF8ToString,stringToUTF8,lengthBytesUTF8 \
+      -sEXPORTED_FUNCTIONS=_malloc,_free --no-entry
   exe{sunsim_web_simulator}: extension = js
 }
 

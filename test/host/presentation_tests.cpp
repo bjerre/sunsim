@@ -24,6 +24,9 @@ const suite<"presentation"> presentationTests = [] {
         expect(data.time == "--:--");
         expect(data.day_length == "Waiting for");
         expect(data.next_event == "time sync...");
+        expect(!data.time_valid && data.sun_elevation_deg == -90.0);
+        expect(data.sunrise == "Rise --:--" && data.sunset == "Set --:--");
+        expect(!data.cloud_percent && data.precipitation == Precip::None);
         expect(data.mode == "idle" && data.mode_tone == Tone::Muted);
         expect(data.sky.empty() && data.sky_tone == Tone::Sky);
         expect(data.groups.size() == kLayout.size());
@@ -37,17 +40,23 @@ const suite<"presentation"> presentationTests = [] {
         StatusSnapshot status{};
         status.sky.cloud_percent = 80;
         status.sky.conditions = Conditions{.cloud_percent = 80, .precip = Precip::Rain};
-        expect(makeStatusDisplayData(status).sky == "rain");
+        const StatusDisplayData rainy = makeStatusDisplayData(status);
+        expect(rainy.sky == "rain");
+        expect(rainy.cloud_percent == 80 && rainy.precipitation == Precip::Rain);
 
         status.sky.conditions->precip = Precip::None;
-        expect(makeStatusDisplayData(status).sky == "cloud 80%");
+        const StatusDisplayData cloudy = makeStatusDisplayData(status);
+        expect(cloudy.sky == "cloud 80%");
+        expect(cloudy.cloud_percent == 80 && cloudy.precipitation == Precip::None);
     };
 
     "live status converts time, zone, sky and link into display data"_test = [] {
         StatusSnapshot status{};
         status.time = at(12h);
         status.time.simulated = true;
-        status.day = {.day_length = 12h, .next_is_sunrise = false, .next_event = 18h, .until_next = 2h + 30min};
+        status.day = {.sunrise = 6h, .sunset = 18h, .day_length = 12h,
+                      .sun_azimuth_deg = 210.0, .sun_elevation_deg = 35.0,
+                      .next_is_sunrise = false, .next_event = 18h, .until_next = 2h + 30min};
         status.zones[kZoneIds[0]] = {.mode = Mode::RedAlert, .gate_open = true};
         status.sky.alerts.count = 1;
         status.sky.alerts.items[0].level = AlertLevel::Warning;
@@ -56,6 +65,8 @@ const suite<"presentation"> presentationTests = [] {
         const StatusDisplayData data = makeStatusDisplayData(status);
 
         expect(data.time == "12:00" && data.weekday == "sim Tue");
+        expect(data.time_valid && data.sunrise == "Rise 06:00" && data.sunset == "Set 18:00");
+        expect(data.sun_azimuth_deg == 210.0 && data.sun_elevation_deg == 35.0);
         expect(data.day_length == "Day 12h 00m");
         expect(data.next_event == "Set 2h 30m  18:00");
         expect(data.mode == "RED ALERT" && data.mode_tone == Tone::Warning);

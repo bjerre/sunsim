@@ -13,7 +13,7 @@ export namespace sunsim::core {
 // published as StatusChanged once a second (after each Tick's DevicesUpdated).
 class StatusModel {
 public:
-    explicit StatusModel(ev::Post post);
+    explicit StatusModel(ev::Post post, const ev::Installation &installation);
 
     void on(const ev::ConfigChanged &e);
     void on(const ev::ModeChanged &e);
@@ -25,6 +25,7 @@ private:
     void publish();
 
     ev::Post           post_;
+    const ev::Installation &installation_;
     ev::StatusSnapshot snap_{};
 };
 
@@ -32,7 +33,10 @@ private:
 
 namespace sunsim::core {
 
-StatusModel::StatusModel(ev::Post post) : post_(std::move(post)) {}
+StatusModel::StatusModel(ev::Post post, const ev::Installation &installation)
+    : post_(std::move(post)), installation_(installation)
+{
+}
 
 void StatusModel::on(const ev::ConfigChanged &e)
 {
@@ -66,8 +70,8 @@ void StatusModel::publish()
 {
     const ev::TimeReading &t = snap_.time;
     snap_.day = computeDayInfo(t, snap_.config.latitude_deg, snap_.config.longitude_deg);
-    for (const ev::ZoneId zone : ev::kZoneIds) {
-        snap_.zones[zone].gate_open = openness(ev::spec(zone).gate, t, snap_.config) > 0.0;
+    for (const ev::ZoneId zone : installation_.zoneIds()) {
+        snap_.zones[zone].gate_open = openness(installation_.spec(zone).gate, t, snap_.config) > 0.0;
     }
     post_(ev::StatusChanged{std::make_shared<const ev::StatusSnapshot>(snap_)});
 }

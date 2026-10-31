@@ -27,6 +27,9 @@ usage: ./sunsim <command> [args]
   cmd <command>    the same, for a name the script uses itself (`./sunsim cmd help`)
   test             build and run the host tests
   definition       generate or check the installation document's C++ tables
+  profile upload FILE
+                   validate and upload a runtime installation profile over USB
+  profile clear    forget the uploaded profile and restore the built-in layout
   idf <args>       any idf.py command (e.g. `./sunsim idf menuconfig`)
 
 Console commands (also in `monitor`); `./sunsim cmd help` lists them all:
@@ -125,6 +128,73 @@ sys.exit(1 if "Unrecognized command" in reply or "non-zero error code" in reply 
 EOF
 }
 
+profile_action() {
+    python - "$(port)" "$@" <<'EOF'
+import pathlib, sys, time, serial
+
+port, action, *args = sys.argv[1:]
+prompt = b"sunsim> "
+acknowledgement = (b"profile saved; restarting to apply" if action == "upload"
+                   else b"saved profile cleared; restarting with built-in installation")
+
+if action == "upload":
+    if len(args) != 1:
+        raise SystemExit("usage: ./sunsim profile upload FILE")
+    path = pathlib.Path(args[0])
+    data = path.read_bytes()
+    if not data or len(data) > 3072:
+        raise SystemExit(f"profile must contain 1-3072 bytes (got {len(data)})")
+else:
+    data = b""
+
+with serial.Serial(port, 115200, timeout=0.2) as connection:
+    connection.reset_input_buffer()
+    connection.write(b"\r\n")
+    startup = bytearray()
+    deadline = time.time() + 5
+    while prompt not in startup and time.time() < deadline:
+        startup.extend(connection.read(4096))
+    if prompt not in startup:
+        raise SystemExit("sunsim: no console prompt; close any open monitor and try again")
+
+    def command(text, timeout=8):
+        encoded = text.encode()
+        connection.write(encoded + b"\r\n")
+        output = bytearray()
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            output.extend(connection.read(4096))
+            echo = output.find(encoded)
+            if echo >= 0 and prompt in output[echo:]:
+                break
+        else:
+            raise SystemExit(f"sunsim: no reply for `{text}`")
+        result = bytes(output)
+        if b"rejected" in result or b"could not" in result or b"error code" in result:
+            raise SystemExit(result.decode(errors="replace"))
+        return result
+
+    if action == "upload":
+        command(f"profile begin {len(data)}")
+        for offset in range(0, len(data), 24):
+            chunk = data[offset:offset + 24].hex()
+            command(f"profile chunk {offset} {chunk}")
+        connection.write(b"profile commit\r\n")
+    elif action == "clear":
+        connection.write(b"profile clear\r\n")
+    else:
+        raise SystemExit("usage: ./sunsim profile [upload FILE|clear]")
+
+    output = bytearray()
+    deadline = time.time() + 5
+    while acknowledgement not in output and time.time() < deadline:
+        output.extend(connection.read(4096))
+    if acknowledgement not in output:
+        raise SystemExit("sunsim: board did not confirm the profile change")
+    print(acknowledgement.decode() + ".")
+EOF
+}
+
 host_tests() {
     if [[ ! -f $ROOT/build-host/build.ninja ]]; then
         cmake --preset host -S "$ROOT/test/host" >/dev/null
@@ -144,6 +214,16 @@ flash)   definition_check; idf_env; idf.py -p "$(port)" flash ;;
 monitor) idf_env; idf.py -p "$(port)" monitor ;;
 go)      definition_check; idf_env; idf.py -p "$(port)" flash monitor ;;
 cmd)     shift; [[ $# -gt 0 ]] || { usage >&2; exit 1; }; idf_env; console_cmd "$@" ;;
+profile)
+    shift
+    case ${1:-} in
+        upload) [[ $# -eq 2 ]] || { echo "usage: ./sunsim profile upload FILE" >&2; exit 2; }
+                idf_env; profile_action upload "$2" ;;
+        clear)  [[ $# -eq 1 ]] || { echo "usage: ./sunsim profile clear" >&2; exit 2; }
+                idf_env; profile_action clear ;;
+        *)      echo "usage: ./sunsim profile [upload FILE|clear]" >&2; exit 2 ;;
+    esac
+    ;;
 test)    definition_check; python3 -m unittest discover -s "$ROOT/test/config"; idf_env; host_tests ;;
 definition)
     shift

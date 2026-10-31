@@ -11,6 +11,12 @@ using namespace sunsim::testing;
 using namespace std::chrono_literals;
 
 const suite<"daylight"> daylightTests = [] {
+    "day info carries the current solar position for the display"_test = [] {
+        const ev::DayInfo day = core::computeDayInfo(at(12h), 40.0, -75.0);
+        expect(day.sun_elevation_deg > 60.0);
+        expect(day.sun_azimuth_deg > 160.0 && day.sun_azimuth_deg < 200.0);
+    };
+
     "clock not set -> lights held off"_test = [] {
         Harness h;
         TimeReading unset = noon();

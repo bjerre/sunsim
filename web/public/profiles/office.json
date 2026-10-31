@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "zones": [
+    {
+      "name": "office",
+      "startMinute": 480,
+      "endMinute": 1140,
+      "buttonRole": "Button",
+      "members": [
+        { "role": "WallA", "look": "sun-curve" },
+        { "role": "WallB", "look": "sun-curve" },
+        { "role": "WallC", "look": "sun-curve" },
+        { "role": "WallD", "look": "sun-curve" },
+        { "role": "WallE", "look": "sun-curve" },
+        { "role": "Work", "look": "work-curve", "peakPercent": 90 }
+      ],
+      "weather": {
+        "precipitation": ["WallC"],
+        "alerts": ["WallB", "WallD"]
+      }
+    },
+    {
+      "name": "desk-downlight",
+      "startMinute": 480,
+      "endMinute": 1140,
+      "members": [{ "role": "Desk", "look": "on-off" }]
+    },
+    {
+      "name": "bookcase-grow-light",
+      "startMinute": 225,
+      "endMinute": 525,
+      "members": [{ "role": "Grow", "look": "on-off" }]
+    }
+  ]
+}

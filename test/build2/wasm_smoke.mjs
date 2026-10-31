@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import createSunsim from "../../sunsim_web_simulator.js";
 
 const core = await createSunsim();
@@ -62,6 +63,11 @@ assert.equal(growCurve[35].on, false);
 assert.equal(snapshot.devices.length, 9);
 assert.equal(snapshot.weekday, "sim Tue");
 assert.equal(snapshot.mode, "daylight");
+assert.match(snapshot.sunrise, /^Rise \d{2}:\d{2}$/);
+assert.match(snapshot.sunset, /^Set \d{2}:\d{2}$/);
+assert.ok(snapshot.cloudPercent === null ||
+  (Number.isInteger(snapshot.cloudPercent) && snapshot.cloudPercent >= 0 && snapshot.cloudPercent <= 100));
+assert.equal(snapshot.precipitation, "none");
 assert.ok(snapshot.lights.some((light) => light.on));
 assert.equal(snapshot.lights.find((light) => light.role === "Desk").on, true);
 assert.equal(snapshot.lights.find((light) => light.role === "Grow").on, false);
@@ -157,5 +163,98 @@ snapshot = state();
 assert.equal(snapshot.sky, "warning");
 assert.equal(snapshot.lights.find((light) => light.role === "WallB").weatherEffect, "warning");
 assert.equal(snapshot.lights.find((light) => light.role === "WallD").weatherEffect, "warning");
+
+const roleIndex = new Map([
+  ["WallA", 0], ["WallB", 1], ["WallC", 2], ["WallD", 3], ["WallE", 4],
+  ["Work", 5], ["Desk", 6], ["Grow", 7], ["Button", 8],
+]);
+const lookIndex = new Map([["sun-curve", 0], ["work-curve", 1], ["on-off", 2]]);
+const invalidProfile = await createSunsim();
+assert.equal(invalidProfile._sunsim_profile_begin(1), 1);
+const invalidNameBytes = invalidProfile.lengthBytesUTF8("unassigned-weather") + 1;
+const invalidName = invalidProfile._malloc(invalidNameBytes);
+try {
+  invalidProfile.stringToUTF8("unassigned-weather", invalidName, invalidNameBytes);
+  assert.equal(invalidProfile._sunsim_profile_zone(0, invalidName, 0, 1440), 1);
+} finally {
+  invalidProfile._free(invalidName);
+}
+assert.equal(invalidProfile._sunsim_profile_weather(0, roleIndex.get("WallC"), 0), 0);
+
+async function startProfile(path) {
+  const profile = JSON.parse(readFileSync(new URL(path, import.meta.url), "utf8"));
+  const instance = await createSunsim();
+  assert.equal(instance._sunsim_profile_begin(profile.zones.length), 1);
+  for (const [zoneIndex, zone] of profile.zones.entries()) {
+    const bytes = instance.lengthBytesUTF8(zone.name) + 1;
+    const pointer = instance._malloc(bytes);
+    assert.notEqual(pointer, 0);
+    try {
+      instance.stringToUTF8(zone.name, pointer, bytes);
+      assert.equal(
+        instance._sunsim_profile_zone(zoneIndex, pointer, zone.startMinute, zone.endMinute),
+        1,
+      );
+    } finally {
+      instance._free(pointer);
+    }
+    for (const member of zone.members) {
+      assert.equal(
+        instance._sunsim_profile_member(
+          zoneIndex,
+          roleIndex.get(member.role),
+          lookIndex.get(member.look),
+          member.peakPercent ?? 100,
+        ),
+        1,
+      );
+    }
+    if (zone.buttonRole) {
+      assert.equal(
+        instance._sunsim_profile_button(zoneIndex, roleIndex.get(zone.buttonRole)),
+        1,
+      );
+    }
+    for (const [effect, roles] of [
+      [0, zone.weather?.precipitation ?? []],
+      [1, zone.weather?.alerts ?? []],
+    ]) {
+      for (const role of roles) {
+        assert.equal(
+          instance._sunsim_profile_weather(zoneIndex, roleIndex.get(role), effect),
+          1,
+        );
+      }
+    }
+  }
+  assert.equal(instance._sunsim_profile_finish(), 1);
+  instance._sunsim_init();
+  return { instance, state: () => JSON.parse(instance.UTF8ToString(instance._sunsim_state())) };
+}
+
+const officeProfile = await startProfile("../../web/public/profiles/office.json");
+snapshot = officeProfile.state();
+assert.deepEqual(snapshot.programFlow.map((zone) => zone.zone), [
+  "office", "desk-downlight", "bookcase-grow-light",
+]);
+assert.equal(snapshot.programFlow[0].members.length, 6);
+officeProfile.instance._sunsim_set_minute(450);
+assert.equal(officeProfile.state().lights.find((light) => light.role === "Desk").on, false);
+
+const studioProfile = await startProfile("../../web/public/profiles/studio.json");
+snapshot = studioProfile.state();
+assert.deepEqual(snapshot.programFlow.map((zone) => zone.zone), ["studio", "plants"]);
+assert.deepEqual(snapshot.programFlow[0].members.map((member) => member.role), [
+  "WallA", "WallB", "WallC", "WallD", "WallE", "Work", "Desk",
+]);
+assert.deepEqual(snapshot.programFlow[0].availableModes.map((mode) => mode.buttonPress), [
+  "single", "hold", "double", null,
+]);
+studioProfile.instance._sunsim_press(1);
+assert.equal(studioProfile.state().programFlow[0].mode, "RED ALERT");
+studioProfile.instance._sunsim_press(0);
+studioProfile.instance._sunsim_set_minute(450);
+assert.equal(studioProfile.state().lights.find((light) => light.role === "Desk").on, true);
+assert.equal(studioProfile.state().lights.find((light) => light.role === "Grow").on, true);
 
 console.log("WASM browser simulation smoke test passed");

@@ -587,6 +587,8 @@ struct DayInfo {
     Hours sunrise{};
     Hours sunset{};
     Hours day_length{};
+    double sun_azimuth_deg   = 180.0; // compass bearing, clockwise from North
+    double sun_elevation_deg = -90.0; // degrees above the horizon; negative = below
     bool  next_is_sunrise = true; // false = next event is today's sunset
     Hours next_event{};           // when the next event is
     Hours until_next{};           // how long until it

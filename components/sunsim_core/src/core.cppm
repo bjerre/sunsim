@@ -30,11 +30,14 @@ export namespace sunsim::core {
 // All of the pure application logic. Platform code (radio, storage, clock,
 // console, display) talks to it only through events on the bus.
 struct CoreModules {
-    CoreModules(const ev::Post &post, ev::Addresses addresses)
-        : mode(post), registry(post, addresses), sky(post), programs(post), overlays(post), output(post), status(post)
+    CoreModules(const ev::Post &post, ev::Addresses addresses,
+                ev::Installation profile = ev::kDefaultInstallation)
+        : installation(std::move(profile)), mode(post, installation), registry(post, addresses), sky(post),
+          programs(post, installation), overlays(post, installation), output(post), status(post, installation)
     {
     }
 
+    ev::Installation installation;
     ModeController  mode;
     DeviceRegistry  registry;
     SkyModel        sky;
@@ -54,7 +57,11 @@ void wireCore(ev::EventBus &bus, CoreModules &m);
 // whenever it has work; the firmware may wait on bus() before doing so.
 class CoreRuntime {
 public:
-    explicit CoreRuntime(ev::Addresses addresses) : core_(bus_.post(), addresses) { wireCore(bus_, core_); }
+    explicit CoreRuntime(ev::Addresses addresses, ev::Installation profile = ev::kDefaultInstallation)
+        : core_(bus_.post(), addresses, std::move(profile))
+    {
+        wireCore(bus_, core_);
+    }
 
     CoreRuntime(const CoreRuntime &)            = delete;
     CoreRuntime &operator=(const CoreRuntime &) = delete;

@@ -2,6 +2,8 @@ module;
 
 #include "esp_console.h"
 #include "esp_system.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "sdkconfig.h"
 
 export module sunsim.platform:console;
@@ -10,6 +12,7 @@ export module sunsim.platform:console;
 import std.compat;
 #endif
 import sunsim.ev;
+import :installation_profile;
 import :status_slot;
 import :format;
 import :wifi;
@@ -45,7 +48,10 @@ export namespace sunsim::platform {
 // Button); a <group> is all of one kind (wall). Case doesn't matter.
 class Console {
 public:
-    Console(ev::Post post, const StatusSlot &status) : post_(std::move(post)), status_(status) {}
+    Console(ev::Post post, const StatusSlot &status, InstallationProfile &installation)
+        : post_(std::move(post)), status_(status), installation_(installation)
+    {
+    }
 
     Console(const Console &)            = delete;
     Console &operator=(const Console &) = delete;
@@ -55,12 +61,14 @@ public:
 
     // For the commands.
     void post(ev::Event e) const { post_(std::move(e)); }
+    [[nodiscard]] InstallationProfile &installationProfile() const noexcept { return installation_; }
     // The latest status, or nullopt after saying it's still starting up.
     [[nodiscard]] std::optional<ev::StatusSnapshot> snapshot() const;
 
 private:
     ev::Post          post_;
     const StatusSlot &status_;
+    InstallationProfile &installation_;
 };
 
 } // namespace sunsim::platform
@@ -453,7 +461,7 @@ std::string lightsText(const ev::RoleSet &set)
     return text.empty() ? "none" : text;
 }
 
-void printWeather(const ev::StatusSnapshot &st)
+void printWeather(const ev::StatusSnapshot &st, const ev::WeatherLights &weather_lights)
 {
     if (st.sky.conditions) {
         std::print("now      {}% cloud, ", st.sky.conditions->cloud_percent);
@@ -475,8 +483,8 @@ void printWeather(const ev::StatusSnapshot &st)
                      left.count());
     }
     printSetting(*ev::findSetting("weather"), st.config);
-    std::println("precip   {}", lightsText(ev::kWeatherLights.precip));
-    std::println("alerts   {}", lightsText(ev::kWeatherLights.alerts));
+    std::println("precip   {}", lightsText(weather_lights.precip));
+    std::println("alerts   {}", lightsText(weather_lights.alerts));
 }
 
 // What `weather simulate` takes for rain and snow.
@@ -535,7 +543,7 @@ int cmdWeather(Console &console, int argc, char **argv)
         return 1;
     }
     if (argc == 1) {
-        printWeather(*st);
+        printWeather(*st, console.installationProfile().installation().topology.weather);
         return 0;
     }
     if (std::string_view{argv[1]} == "simulate" && (argc == 3 || argc == 4)) {
@@ -578,11 +586,12 @@ int cmdStatus(Console &console, int, char **)
         std::println("alert   {}", alert.event.data());
     }
 
-    for (const ev::ZoneId zone : ev::kZoneIds) {
+    const auto &installation = console.installationProfile().installation();
+    for (const ev::ZoneId zone : installation.zoneIds()) {
         const ev::ZoneStatus &z = st->zones[zone];
         std::print("mode    ");
-        if (ev::kZoneCount > 1) {
-            std::print("{}: ", ev::spec(zone).name);
+        if (installation.zone_count > 1) {
+            std::print("{}: ", installation.spec(zone).name);
         }
         std::print("{}", ev::modeName(z.mode));
         if (z.mode == ev::Mode::Daylight) {
@@ -697,6 +706,80 @@ int cmdWifi(Console &, int argc, char **argv)
     return 1;
 }
 
+int hexDigit(char digit) noexcept
+{
+    if (digit >= '0' && digit <= '9') {
+        return digit - '0';
+    }
+    if (digit >= 'a' && digit <= 'f') {
+        return digit - 'a' + 10;
+    }
+    if (digit >= 'A' && digit <= 'F') {
+        return digit - 'A' + 10;
+    }
+    return -1;
+}
+
+int cmdProfile(Console &console, int argc, char **argv)
+{
+    auto &profile = console.installationProfile();
+    const std::string_view sub = argc >= 2 ? argv[1] : "";
+    if (sub == "begin" && argc == 3) {
+        const auto size = numberIn(argv[2], 1, static_cast<int>(InstallationProfile::kMaxJsonBytes));
+        if (size && profile.beginUpload(static_cast<std::size_t>(*size))) {
+            std::println("profile upload started ({} bytes)", *size);
+            return 0;
+        }
+        std::println("profile upload size must be 1-{} bytes", InstallationProfile::kMaxJsonBytes);
+        return 1;
+    }
+    if (sub == "chunk" && argc == 4) {
+        const auto offset = numberIn(argv[2], 0, static_cast<int>(InstallationProfile::kMaxJsonBytes));
+        const std::string_view hex = argv[3];
+        if (!offset || hex.empty() || hex.size() % 2 != 0 || hex.size() > 48) {
+            std::println("profile chunk needs an offset and 1-24 bytes encoded as hex");
+            return 1;
+        }
+        std::array<char, 24> bytes{};
+        for (std::size_t i = 0; i < hex.size() / 2; ++i) {
+            const int high = hexDigit(hex[i * 2]);
+            const int low = hexDigit(hex[i * 2 + 1]);
+            if (high < 0 || low < 0) {
+                std::println("profile chunk contains invalid hexadecimal");
+                return 1;
+            }
+            bytes[i] = static_cast<char>((high << 4) | low);
+        }
+        if (profile.appendUpload(static_cast<std::size_t>(*offset),
+                                 std::string_view{bytes.data(), hex.size() / 2})) {
+            std::println("profile chunk accepted");
+            return 0;
+        }
+        std::println("profile chunk rejected (upload order or size mismatch)");
+        return 1;
+    }
+    if (sub == "commit" && argc == 2) {
+        if (!profile.saveUpload()) {
+            std::println("profile rejected; existing saved profile is unchanged");
+            return 1;
+        }
+        std::println("profile saved; restarting to apply");
+        vTaskDelay(pdMS_TO_TICKS(300));
+        esp_restart();
+    }
+    if (sub == "clear" && argc == 2) {
+        if (!profile.clearSaved()) {
+            std::println("could not clear saved profile");
+            return 1;
+        }
+        std::println("saved profile cleared; restarting with built-in installation");
+        vTaskDelay(pdMS_TO_TICKS(300));
+        esp_restart();
+    }
+    std::println("usage: profile begin <bytes> | chunk <offset> <hex> | commit | clear");
+    return 1;
+}
+
 int cmdRestart(Console &, int, char **)
 {
     esp_restart();
@@ -772,6 +855,7 @@ void Console::start()
                      "[simulate drizzle|rain|freezing|snow|thunder [light|heavy] | advisory|watch|warning | clear]");
     add<&cmdWifi>(*this, "wifi", "List, add or remove the Wi-Fi networks used for the internet sync (e.g. home and work)",
                   "[add <ssid> [password] | remove <ssid> | clear]");
+    add<&cmdProfile>(*this, "profile", "Upload or clear a runtime installation profile", "begin|chunk|commit|clear");
     add<&cmdRestart>(*this, "restart", "Reboot (keeps roles, network and Wi-Fi settings)", nullptr);
     add<&cmdFactoryReset>(*this, "factory_reset", "Forget all roles AND the Zigbee network, then restart", nullptr);
 

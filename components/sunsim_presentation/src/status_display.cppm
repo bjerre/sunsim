@@ -50,10 +50,17 @@ struct StatusDisplayData {
     std::string weekday;
     std::string day_length  = "Waiting for";
     std::string next_event  = "time sync...";
+    std::string sunrise     = "Rise --:--";
+    std::string sunset      = "Set --:--";
+    bool        time_valid  = false;
+    double      sun_azimuth_deg   = 180.0;
+    double      sun_elevation_deg = -90.0;
     std::string mode;
     Tone        mode_tone   = Tone::Muted;
     std::string sky;
     Tone        sky_tone    = Tone::Sky;
+    std::optional<uint8_t> cloud_percent;
+    ev::Precip precipitation = ev::Precip::None;
     std::array<DeviceGroupView, ev::kLayout.size()> groups = kDeviceGroups;
     ev::PerRole<ev::DeviceLink> device_links{};
 };
@@ -80,13 +87,14 @@ struct ProgramFlowZoneData {
 };
 
 struct ProgramFlowDisplayData {
-    std::array<ProgramFlowZoneData, ev::kZoneCount> zones{};
+    std::array<ProgramFlowZoneData, ev::kMaxZones> zones{};
     std::size_t zone_count = 0;
 };
 
 // Pure presentation transform: every renderer gets the same screen data.
 [[nodiscard]] StatusDisplayData makeStatusDisplayData(const ev::StatusSnapshot &status);
-[[nodiscard]] ProgramFlowDisplayData makeProgramFlowDisplayData(const ev::StatusSnapshot &status);
+[[nodiscard]] ProgramFlowDisplayData makeProgramFlowDisplayData(
+    const ev::StatusSnapshot &status, const ev::Installation &installation = ev::kDefaultInstallation);
 
 // Time-formatting helpers also used by the console.
 [[nodiscard]] std::string clockText(ev::Hours after_midnight);
@@ -140,11 +148,21 @@ StatusDisplayData makeStatusDisplayData(const ev::StatusSnapshot &status)
 
     if (status.time.valid) {
         const ev::DayInfo &day = status.day;
+        data.time_valid         = true;
         data.time               = std::format("{:%H:%M}", status.time.local);
         data.weekday            = std::format("{}{:%a}", status.time.simulated ? "sim " : "", status.time.weekday());
         data.day_length         = "Day " + durationText(day.day_length);
         data.next_event         = std::format("{} {}  {}", day.next_is_sunrise ? "Rise" : "Set",
                                               durationText(day.until_next), clockText(day.next_event));
+        data.sunrise            = "Rise " + clockText(day.sunrise);
+        data.sunset             = "Set " + clockText(day.sunset);
+        data.sun_azimuth_deg    = day.sun_azimuth_deg;
+        data.sun_elevation_deg  = day.sun_elevation_deg;
+    }
+
+    data.cloud_percent = status.sky.cloud_percent;
+    if (status.sky.conditions) {
+        data.precipitation = status.sky.conditions->precip;
     }
 
     const ev::ZoneStatus &zone = status.zones[ev::kZoneIds[0]];
@@ -194,19 +212,20 @@ StatusDisplayData makeStatusDisplayData(const ev::StatusSnapshot &status)
     return data;
 }
 
-ProgramFlowDisplayData makeProgramFlowDisplayData(const ev::StatusSnapshot &status)
+ProgramFlowDisplayData makeProgramFlowDisplayData(const ev::StatusSnapshot &status,
+                                                  const ev::Installation &installation)
 {
     ProgramFlowDisplayData data;
-    for (const ev::ZoneId zone : ev::kZoneIds) {
+    for (const ev::ZoneId zone : installation.zoneIds()) {
         ProgramFlowZoneData &view = data.zones[data.zone_count++];
-        view.name                   = ev::spec(zone).name;
+        view.name                   = installation.spec(zone).name;
         view.mode                   = status.zones[zone].mode;
         view.gate_open              = status.zones[zone].gate_open;
         view.gate_applies           = view.mode == ev::Mode::Daylight;
-        for (const ev::Mode mode : ev::spec(zone).modes) {
+        for (const ev::Mode mode : installation.spec(zone).modes) {
             ProgramFlowModeData &choice = view.available_modes[view.mode_count++];
             choice.mode = mode;
-            for (const ev::Controls &control : ev::spec(zone).controls) {
+            for (const ev::Controls &control : installation.spec(zone).controls) {
                 if (control.single == mode) {
                     choice.button_press = ev::Press::Single;
                     break;
@@ -222,8 +241,8 @@ ProgramFlowDisplayData makeProgramFlowDisplayData(const ev::StatusSnapshot &stat
             }
         }
         for (const ev::Role role : ev::lights()) {
-            if (ev::kZoneOf[role] == zone) {
-                view.members[view.member_count++] = {role, behaviorName(ev::kLookOf[role])};
+            if (installation.topology.zone_of[role] == zone) {
+                view.members[view.member_count++] = {role, behaviorName(installation.topology.look_of[role])};
             }
         }
     }

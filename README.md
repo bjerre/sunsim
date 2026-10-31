@@ -102,6 +102,26 @@ Open the Vite URL (normally `http://localhost:5173/`) to run the shared C++ core
 in the browser. Bun and Svelte are build-time tools; neither Bun nor Node.js is
 required in the browser. Emscripten still uses its bundled Node runtime while
 compiling and linking.
+The WASM binary can also load a data-only installation profile at startup:
+choose **Office JSON profile** or **Studio JSON profile** in the page, or open
+`?profile=office` / `?profile=studio`. These documents in
+`web/public/profiles/` can regroup and reschedule the existing eight light
+roles, select their supported look (`sun-curve`, `work-curve`, or `on-off`),
+and assign the existing Button and weather effects. The same compiled core
+validates and runs each profile; no rebuild is needed to change those values.
+The available device roles and kinds remain fixed by the firmware build, and
+the current profile format supports daily time windows rather than arbitrary
+program logic. The same profile can be uploaded to the device over its USB
+console and is stored in NVS:
+
+```sh
+./sunsim profile upload web/public/profiles/office.json
+```
+
+The firmware validates the complete profile before saving it and restarts to
+apply it. `./sunsim profile clear` removes the uploaded profile and restores
+the built-in installation. A missing or invalid saved profile also falls back
+to the built-in installation.
 The GitHub Actions workflow builds and publishes a static demo to
 `https://bjerre.github.io/sunsim/` when changes are pushed to `main` or
 `feature/browser-simulation`. For the first deployment, set the repository's

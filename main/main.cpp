@@ -45,19 +45,21 @@ public:
 private:
     static void appTask(void *arg);
 
-    core::CoreRuntime       runtime_{ev::kAddressOf};
+    platform::InstallationProfile installation_;
+    core::CoreRuntime       runtime_{ev::kAddressOf, installation_.installation()};
     platform::SettingsStore settings_;
     platform::Clock         clock_;
     platform::InternetSync  internet_;
     platform::ZigbeeAdapter zigbee_;
     platform::StatusSlot    status_;
-    platform::Console       console_{runtime_.post(), status_};
+    platform::Console       console_{runtime_.post(), status_, installation_};
 };
 
 } // namespace
 
 App::App()
-    : settings_(runtime_.post(), defaultProgram()), clock_(runtime_.post()),
+    : settings_(runtime_.post(), defaultProgram(), installation_.installation().topology.peak_of),
+      clock_(runtime_.post()),
       internet_(runtime_.post(), defaultProgram().latitude_deg, defaultProgram().longitude_deg), zigbee_(runtime_.post())
 {
     // The platform modules, each to the events it handles. Settings before

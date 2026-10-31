@@ -12,6 +12,9 @@ button, select, input { font: inherit; }
 .shell { max-width: 1260px; margin: 0 auto; padding: 34px 34px 24px; }
 .topbar, .section-heading, .runtime, .lcd-top, .lcd-line, .lcd-bottom, .room-footer, .light-legend, footer, label, .range-labels, .torchiere-caption { display: flex; align-items: center; justify-content: space-between; }
 .topbar { margin-bottom: 26px; }
+.header-tools { display: flex; align-items: flex-end; gap: 12px; flex-direction: column; }
+.profile-picker { gap: 8px; color: #a7b5aa; font: 11px "DM Mono", monospace; }
+.profile-picker select { border: 1px solid #3a4b3e; border-radius: 8px; padding: 7px 9px; color: #dce6dd; background: #18221c; }
 .eyebrow { margin: 0 0 6px; color: #87a18d; font: 500 10px "DM Mono", monospace; letter-spacing: .15em; }
 h1, h2, p { margin-top: 0; }
 h1 { margin-bottom: 0; font-size: clamp(24px, 3vw, 34px); letter-spacing: -.04em; }
@@ -150,7 +153,20 @@ h2 { margin: 0; font-size: 17px; font-weight: 600; }
 .flow-curve-meta strong { color: #e2c887; font: 9px "DM Mono", monospace; }
 .flow-note { margin-top: 12px; }
 .display-led { width: 7px; height: 7px; background: #f1bb67; box-shadow: 0 0 10px #f1bb6799; }
+.display-controls { display: flex; align-items: center; gap: 10px; }
+.display-toggle { display: inline-flex; padding: 2px; border: 1px solid #3a4b3d; border-radius: 7px; background: #141d18; }
+.display-toggle button { padding: 5px 8px; border: 0; border-radius: 5px; background: transparent; color: #8c9b8f; font: 9px "DM Mono", monospace; cursor: pointer; }
+.display-toggle button[aria-pressed="true"] { background: #2c4031; color: #dce9dc; }
+.display-toggle button:focus-visible { outline: 2px solid #9ccc9a; outline-offset: 2px; }
 .lcd { padding: 14px 15px 12px; border: 7px solid #34423a; border-radius: 7px; background: #a8ba91; color: #243526; font: 11px "DM Mono", monospace; box-shadow: inset 0 0 20px #31442d44, 0 4px 0 #101712; text-shadow: 0 1px #e1e8c9; }
+.lcd-sky-frame { overflow: hidden; border: 7px solid #34423a; border-radius: 7px; background: #081321; box-shadow: inset 0 0 14px #0008, 0 4px 0 #101712; }
+.lcd-sky-art { display: block; width: 100%; height: auto; }
+.lcd-art-time { fill: #fff5dc; font: 600 38px "DM Sans", sans-serif; letter-spacing: -1.5px; paint-order: stroke; stroke: #263c50; stroke-width: 1px; stroke-linejoin: round; }
+.lcd-art-meta, .lcd-art-small, .lcd-art-link-label { fill: #f7f4e9; font-family: "DM Mono", monospace; paint-order: stroke; stroke: #17283a; stroke-width: 1.5px; stroke-linejoin: round; }
+.lcd-art-meta { font-size: 9px; }
+.lcd-art-small { font-size: 7px; }
+.lcd-art-event { font-size: 6.5px; }
+.lcd-art-link-label { fill: #bbc6c4; font-size: 7px; }
 .lcd-top { font-size: 12px; font-weight: 500; }
 .lcd-time { font-size: 24px; letter-spacing: -.06em; }
 .lcd-mode { padding: 9px 0 6px; font-size: 16px; font-weight: 500; text-transform: uppercase; }
@@ -179,4 +195,4 @@ input[type="date"] { width: 100%; padding: 9px 10px; border: 1px solid #3a4b3d; 
 .sub-label { margin-top: 13px; }
 footer { margin-top: 18px; color: #718176; font: 10px "DM Mono", monospace; }
 @media (max-width: 850px) { .workspace { grid-template-columns: 1fr; } .side-column { grid-template-columns: 1fr 1fr; align-items: start; } .room { min-height: 490px; } }
-@media (max-width: 600px) { .shell { padding: 22px 14px; } .topbar { align-items: flex-start; gap: 12px; flex-direction: column; } .side-column { grid-template-columns: 1fr; } .room { min-height: 460px; } .wall { left: 5%; right: 5%; } .bookcase-scene { left: 4%; transform: scale(.78); transform-origin: left bottom; } .desk-scene { left: 29%; transform: scale(.8); transform-origin: left bottom; } .torchiere { right: 8%; } .torchiere-caption { right: 5%; } .light-legend { align-items: flex-start; gap: 10px; flex-wrap: wrap; } .flow-path { grid-template-columns: minmax(0, 1fr); } .flow-arrow { transform: rotate(90deg); } footer { align-items: flex-start; gap: 8px; flex-direction: column; } }
+@media (max-width: 600px) { .shell { padding: 22px 14px; } .topbar { align-items: flex-start; gap: 12px; flex-direction: column; } .header-tools { align-items: flex-start; } .side-column { grid-template-columns: 1fr; } .room { min-height: 460px; } .wall { left: 5%; right: 5%; } .bookcase-scene { left: 4%; transform: scale(.78); transform-origin: left bottom; } .desk-scene { left: 29%; transform: scale(.8); transform-origin: left bottom; } .torchiere { right: 8%; } .torchiere-caption { right: 5%; } .light-legend { align-items: flex-start; gap: 10px; flex-wrap: wrap; } .flow-path { grid-template-columns: minmax(0, 1fr); } .flow-arrow { transform: rotate(90deg); } footer { align-items: flex-start; gap: 8px; flex-direction: column; } }

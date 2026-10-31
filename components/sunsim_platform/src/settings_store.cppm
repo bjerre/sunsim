@@ -24,7 +24,7 @@ class SettingsStore {
 public:
     // `defaults`: the program settings before anything was saved (location
     // comes from menuconfig).
-    SettingsStore(ev::Post post, ev::ProgramConfig defaults);
+    SettingsStore(ev::Post post, ev::ProgramConfig defaults, ev::Peaks default_peaks = ev::kDefaultPeaks);
 
     // Posts RolesLoaded and ConfigChanged with what's stored.
     void loadAll();
@@ -40,7 +40,7 @@ private:
 
     ev::Post          post_;
     ev::ProgramConfig config_;
-    ev::Peaks         peaks_      = ev::kDefaultPeaks;
+    ev::Peaks         peaks_;
     ev::MinLevels     min_levels_ = ev::kDefaultMinLevels;
 };
 
@@ -274,7 +274,10 @@ void migrateLayout()
 }
 } // namespace
 
-SettingsStore::SettingsStore(ev::Post post, ev::ProgramConfig defaults) : post_(std::move(post)), config_(defaults) {}
+SettingsStore::SettingsStore(ev::Post post, ev::ProgramConfig defaults, ev::Peaks default_peaks)
+    : post_(std::move(post)), config_(defaults), peaks_(default_peaks)
+{
+}
 
 void SettingsStore::publish()
 {

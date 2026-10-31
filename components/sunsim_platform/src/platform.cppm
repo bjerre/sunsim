@@ -7,6 +7,7 @@ export module sunsim.platform;
 export import :clock;
 export import :console;
 export import :internet_sync;
+export import :installation_profile;
 export import :settings_store;
 export import :status_display;
 export import :status_slot;

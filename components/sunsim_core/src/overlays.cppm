@@ -34,7 +34,7 @@ struct Pulse {
 // light is otherwise off.
 [[nodiscard]] std::optional<Pulse> weatherPulse(ev::Role role, bool lit, ev::Mode mode, const ev::ProgramConfig &config,
                                                 const ev::Sky           &sky,
-                                                const ev::WeatherLights &lights = ev::kWeatherLights) noexcept;
+                                                ev::WeatherLights lights = ev::kWeatherLights) noexcept;
 
 // The stage between the running program and LightOutput: passes each
 // LightTarget through as the OutputTarget, except on lights the weather has
@@ -45,7 +45,7 @@ struct Pulse {
 // lights, the pulse's beat).
 class Overlays {
 public:
-    explicit Overlays(ev::Post post);
+    explicit Overlays(ev::Post post, const ev::Installation &installation);
 
     void on(const ev::LightTarget &e);
     void on(const ev::Tick &e);
@@ -65,6 +65,7 @@ private:
     void release(ev::Role role);
 
     ev::Post              post_;
+    const ev::Installation &installation_;
     ev::Sky               sky_{};
     ev::PerZone<ev::Mode> modes_{}; // each zone's; Daylight, the first Mode, to start
     ev::ProgramConfig     config_{};
@@ -133,7 +134,7 @@ constexpr uint8_t zigbeeHue(uint16_t degrees) noexcept
 } // namespace
 
 std::optional<Pulse> weatherPulse(ev::Role role, bool lit, ev::Mode mode, const ev::ProgramConfig &config,
-                                  const ev::Sky &sky, const ev::WeatherLights &lights) noexcept
+                                  const ev::Sky &sky, ev::WeatherLights lights) noexcept
 {
     const ev::AlertLevel                 alert = sky.alert();
     const std::optional<ev::Conditions> &now   = sky.conditions;
@@ -157,7 +158,10 @@ std::optional<Pulse> weatherPulse(ev::Role role, bool lit, ev::Mode mode, const 
     return std::nullopt;
 }
 
-Overlays::Overlays(ev::Post post) : post_(std::move(post)) {}
+Overlays::Overlays(ev::Post post, const ev::Installation &installation)
+    : post_(std::move(post)), installation_(installation)
+{
+}
 
 void Overlays::on(const ev::ConfigChanged &e)
 {
@@ -197,7 +201,11 @@ void Overlays::reconcile()
     for (const ev::Role role : ev::lights()) {
         Light     &light = lights_[role];
         const bool lit   = light.base && light.base->state.on;
-        const auto pulse = weatherPulse(role, lit, modes_[*ev::kZoneOf[role]], config_, sky_);
+        const auto zone = installation_.topology.zone_of[role];
+        if (!zone) {
+            continue;
+        }
+        const auto pulse = weatherPulse(role, lit, modes_[*zone], config_, sky_, installation_.topology.weather);
         if (!pulse) {
             if (light.pulse) {
                 release(role);

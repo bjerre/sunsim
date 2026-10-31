@@ -26,6 +26,7 @@ ev::DayInfo computeDayInfo(const ev::TimeReading &time, double latitude_deg, dou
     const Hours    offset{time.utc_offset};
     const int      day_of_year = time.dayOfYear();
     const SunTimes today       = computeSunTimes(latitude_deg, longitude_deg, day_of_year, offset);
+    const SunPosition sun      = computeSunPosition(latitude_deg, longitude_deg, day_of_year, now, offset);
 
     Hours day_length = today.sunset - today.sunrise;
     if (day_length < Hours{0}) {
@@ -33,9 +34,11 @@ ev::DayInfo computeDayInfo(const ev::TimeReading &time, double latitude_deg, dou
     }
 
     ev::DayInfo info{
-        .sunrise         = today.sunrise,
-        .sunset          = today.sunset,
-        .day_length      = day_length,
+        .sunrise           = today.sunrise,
+        .sunset            = today.sunset,
+        .day_length        = day_length,
+        .sun_azimuth_deg   = sun.azimuth_deg,
+        .sun_elevation_deg = sun.elevation_deg,
         .next_is_sunrise = true,
         .next_event      = today.sunrise,
         .until_next      = today.sunrise - now,
