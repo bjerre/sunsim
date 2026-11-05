@@ -6,6 +6,7 @@
 
 pub mod clock;
 pub mod console;
+pub mod display;
 pub mod internet;
 pub mod settings_store;
 pub mod storage;

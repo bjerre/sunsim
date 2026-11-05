@@ -2,12 +2,13 @@
 //! on the app task, as the C++ main/main.cpp runs them, with what's kept in
 //! NVS (platform::SettingsStore on storage.rs) and the internet sync
 //! (platform::InternetSync on internet.rs), and the serial console
-//! (platform::Console on console.rs). Still to port from the C++ platform:
-//! the display.
+//! (platform::Console on console.rs) and the status display
+//! (platform::display on display.rs): the C++ platform, all of it.
 
 mod clock;
 mod config;
 mod console;
+mod display;
 mod internet;
 mod storage;
 mod zigbee;
@@ -72,6 +73,19 @@ fn main() {
 
     let wifi = WifiStore::new(storage::Nvs::open(nvs).expect("the Wi-Fi networks' NVS namespace"), Some(config::wifi_fallback()));
     let day_seconds = config::DEBUG_DAY_SECONDS.parse().expect("SUNSIM_DEBUG_DAY_SECONDS is a number");
+    if config::DISPLAY == "y" {
+        let p = peripherals.pins;
+        let pins = display::Pins {
+            spi: peripherals.spi2,
+            sclk: p.gpio1,
+            mosi: p.gpio2,
+            dc: p.gpio3,
+            rst: p.gpio4,
+            cs: p.gpio5,
+            backlight: p.gpio6,
+        };
+        display::start(pins, status.borrow().clone(), config::DISPLAY_FLIP == "y");
+    }
     console::start(bus.post().clone(), status.borrow().clone(), wifi, day_seconds).expect("the console");
 
     // The app task (this one): the bus's single consumer. Handlers may call

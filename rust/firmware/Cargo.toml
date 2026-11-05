@@ -28,6 +28,8 @@ esp-idf-svc = "0.53"
 ev = { path = "../ev", package = "sunsim-ev" }
 sunsim-core = { path = "../core" }
 platform = { path = "../platform", package = "sunsim-platform" }
+embedded-graphics = "0.8.2"
+mipidsi = "0.10.0"
 
 [build-dependencies]
 embuild = "0.33"

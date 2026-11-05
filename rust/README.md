@@ -7,7 +7,7 @@ A port of everything that doesn't touch ESP-IDF, as a cargo workspace:
 | `ev` (sunsim-ev) | `components/sunsim_events` | value types, events, the bus, flows, settings, the radio contract, the room |
 | `sunsim-core` | `components/sunsim_core` | the registry, modes, programs, overlays, output, send queue, sky and status models, the math |
 | `weather` (sunsim-weather) | `components/sunsim_weather` | the streaming JSON scanner and the Open-Meteo / NWS readers |
-| `platform` (sunsim-platform) | `components/sunsim_platform`, the logic | the platform modules without ESP-IDF, their hardware behind traits: the Clock, the SettingsStore (on a `Storage`: NVS's typed keys), the InternetSync (on an `Internet`: Wi-Fi sessions, SNTP, HTTPS), the saved Wi-Fi networks and the console's commands |
+| `platform` (sunsim-platform) | `components/sunsim_platform`, the logic | the platform modules without ESP-IDF, their hardware behind traits: the Clock, the SettingsStore (on a `Storage`: NVS's typed keys), the InternetSync (on an `Internet`: Wi-Fi sessions, SNTP, HTTPS), the saved Wi-Fi networks, the console's commands and the status display's picture (embedded-graphics) |
 | `sim` (sunsim-sim) | `sim/` | virtual time, the simulated clock and Zigbee network, `World` |
 | `tests` (sunsim-tests) | `test/host` | the harness (`src/lib.rs`) and the host tests, one file per area |
 
@@ -51,4 +51,4 @@ settings come from the build's environment instead (`src/config.rs`:
 names, the raw reads), `bulb.rs` (the ZCL light commands), `mod.rs` (the stack task, its
 callbacks, `ev::Radio`). esp-zigbee-lib comes through `components/zigbee_shim`, which
 depends on it and gives bindgen its function-like macros as functions. Not yet run on a
-board. Still to port: the display.
+board. The C++ platform is all ported.

@@ -17,6 +17,9 @@ pub const TZ: &str = setting!("SUNSIM_TZ", "UTC0");
 /// The Wi-Fi network to use while none is saved (console `wifi add`).
 pub const WIFI_SSID: &str = setting!("SUNSIM_WIFI_SSID", "");
 pub const WIFI_PASSWORD: &str = setting!("SUNSIM_WIFI_PASSWORD", "");
+/// The status display ("y"), and whether the board is upside down.
+pub const DISPLAY: &str = setting!("SUNSIM_DISPLAY", "y");
+pub const DISPLAY_FLIP: &str = setting!("SUNSIM_DISPLAY_FLIP", "n");
 /// Decimal degrees, positive = North / East.
 pub const LATITUDE_DEG: &str = setting!("SUNSIM_LATITUDE_DEG", "0.0");
 pub const LONGITUDE_DEG: &str = setting!("SUNSIM_LONGITUDE_DEG", "0.0");

@@ -13,3 +13,4 @@ sunsim-core.workspace = true
 weather.workspace = true
 sim.workspace = true
 platform.workspace = true
+embedded-graphics = "0.8.2"
