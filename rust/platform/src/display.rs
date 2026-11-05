@@ -2,13 +2,15 @@
 //! follows the sun (the day's arc, the sun where it is, a cloud, rain or
 //! snow, a skyline), the time, the mode, the day, sunrise and sunset, and a
 //! dot per device - from presentation's StatusView, in the LCD's colors.
+//! In red alert the sky gives way to a starship among the stars, with red
+//! bars that flash on the alert's beat.
 //! Drawn with embedded-graphics into a Frame (the firmware sends it to the
 //! panel at once; the tests look at its pixels). A port of the C++
 //! platform's status_display.cppm (its LVGL screen), minus the panel.
 
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
-use embedded_graphics::primitives::{Circle, ContainsPoint, Rectangle, RoundedRectangle};
+use embedded_graphics::primitives::{Circle, ContainsPoint, Ellipse, Rectangle, RoundedRectangle, Triangle};
 use ev::*;
 use u8g2_fonts::types::{FontColor, HorizontalAlignment, VerticalPosition};
 use u8g2_fonts::{FontRenderer, fonts};
@@ -106,15 +108,53 @@ const BUILDINGS: [(i32, u32, u32); 6] =
 #[derive(Clone, PartialEq, Debug)]
 pub struct Screen {
     pub view: StatusView,
+    /// In red alert, which half of the alert's two-second beat: the bars
+    /// lit or dimmed. Always false otherwise.
+    pub beat: bool,
 }
 
 impl Screen {
     pub fn of(st: &StatusSnapshot) -> Screen {
-        Screen { view: StatusView::of(st) }
+        let view = StatusView::of(st);
+        let beat = view.red_alert() && st.at.since_boot().floor_secs() % 2 == 0;
+        Screen { view, beat }
     }
 
     pub fn draw(&self, f: &mut Frame) {
+        if self.view.red_alert() {
+            self.draw_red_alert(f);
+        } else {
+            self.draw_sky(f);
+        }
+        self.draw_dots(f);
+    }
+
+    // The red-alert scene: deep space, the ship, the bars.
+    fn draw_red_alert(&self, f: &mut Frame) {
         let v = &self.view;
+        f.fill(Rectangle::new(Point::zero(), Size::new(WIDTH, DOTS_TOP_Y as u32)), rgb(0x02040c), 255);
+        for (x, y, bright) in STARS {
+            f.put(Point::new(x, y), rgb(if bright { 0xffffff } else { 0x7d8597 }), 255);
+        }
+        draw_starship(f);
+
+        // The bars, top and bottom: lit on the beat, dimmed between.
+        let bar = if self.beat { 255 } else { 90 };
+        for y in [0, 108] {
+            f.fill(Rectangle::new(Point::new(0, y), Size::new(WIDTH, 8)), RED, bar);
+        }
+        f.fill(Rectangle::new(Point::new(0, 116), Size::new(WIDTH, 2)), rgb(0x081321), 255);
+
+        let right = WIDTH as i32 - 6;
+        use HorizontalAlignment::{Left, Right};
+        text(f, TextSize::Medium, "RED ALERT", Point::new(6, 12), Left, if self.beat { RED } else { rgb(0xb02020) });
+        text(f, TextSize::Small, &v.time, Point::new(right, 14), Right, WHITE);
+    }
+
+    fn draw_sky(&self, f: &mut Frame) {
+        let v = &self.view;
+        // Every pixel, so nothing of the last scene (red alert's bars) stays.
+        f.fill(Rectangle::new(Point::zero(), Size::new(WIDTH, HEIGHT)), BLACK, 255);
         let sky = SKIES[sky_of(v)];
         for (i, band) in sky.iter().enumerate() {
             f.fill(Rectangle::new(Point::new(0, i as i32 * 21), Size::new(WIDTH, 22)), rgb(*band), 255);
@@ -157,7 +197,6 @@ impl Screen {
         }
 
         f.fill_rounded(Rectangle::new(Point::new(46, 103), Size::new(148, 15)), 7, rgb(0x0c1929), 160);
-        f.fill(Rectangle::new(Point::new(0, 118), Size::new(WIDTH, 17)), rgb(0x081321), 255);
 
         let right = WIDTH as i32 - 6;
         use HorizontalAlignment::{Center, Left, Right};
@@ -169,10 +208,26 @@ impl Screen {
         text(f, TextSize::Small, &v.sunrise, Point::new(6, 87), Left, WHITE);
         text(f, TextSize::Small, &v.sunset, Point::new(right, 87), Right, WHITE);
         text(f, TextSize::Small, &v.next_event, Point::new(WIDTH as i32 / 2, 104), Center, WHITE);
+    }
 
+    // A dot per device in its link's color, under each group's letter.
+    fn draw_dots(&self, f: &mut Frame) {
+        let v = &self.view;
+        f.fill(
+            Rectangle::new(Point::new(0, DOTS_TOP_Y), Size::new(WIDTH, HEIGHT - DOTS_TOP_Y as u32)),
+            rgb(0x081321),
+            255,
+        );
         let mut x = DOTS_LEFT;
         for g in LAYOUT {
-            text(f, TextSize::Small, group_label(g.group), Point::new(x, DOTS_TOP_Y), Left, LABEL_GRAY);
+            text(
+                f,
+                TextSize::Small,
+                group_label(g.group),
+                Point::new(x, DOTS_TOP_Y),
+                HorizontalAlignment::Left,
+                LABEL_GRAY,
+            );
             x += LABEL_CELL;
             for &role in members(g.group) {
                 f.fill_circle(Point::new(x, DOTS_TOP_Y + 4), DOT_SIZE, link_color(v.links[role]), 255);
@@ -180,6 +235,78 @@ impl Screen {
             }
             x += GROUP_GAP;
         }
+    }
+}
+
+// The stars behind the ship: (x, y, bright), scattered by hand.
+const STARS: [(i32, i32, bool); 28] = [
+    (12, 52, true),
+    (31, 61, false),
+    (126, 12, false),
+    (58, 92, true),
+    (76, 33, false),
+    (88, 101, false),
+    (104, 92, true),
+    (121, 96, false),
+    (139, 21, false),
+    (152, 88, true),
+    (171, 16, false),
+    (186, 99, false),
+    (203, 30, true),
+    (219, 64, false),
+    (231, 94, false),
+    (9, 84, false),
+    (24, 102, true),
+    (68, 52, false),
+    (196, 52, false),
+    (228, 22, false),
+    (113, 48, false),
+    (226, 80, true),
+    (17, 44, false),
+    (95, 84, true),
+    (163, 58, false),
+    (37, 33, false),
+    (209, 84, false),
+    (130, 104, false),
+];
+
+// The hull's colors: lit from above, shaded below.
+const HULL: Rgb565 = rgb(0xc9ced6);
+const HULL_SHADE: Rgb565 = rgb(0x8b929c);
+const HULL_DARK: Rgb565 = rgb(0x5b616b);
+
+/// A starship in side view, bow to the right: a saucer up front, a neck
+/// down and back to the secondary hull with its deflector dish, and a warp
+/// nacelle high behind on its pylon, its collector glowing red.
+fn draw_starship(f: &mut Frame) {
+    // The far nacelle and pylon, darker, a little higher.
+    f.fill_triangle([Point::new(74, 66), Point::new(80, 66), Point::new(64, 40)], HULL_DARK);
+    f.fill_rounded(Rectangle::new(Point::new(30, 35), Size::new(76, 8)), 4, HULL_DARK, 255);
+
+    // The secondary hull, its deflector dish at the front.
+    f.fill_ellipse(Rectangle::new(Point::new(62, 60), Size::new(82, 20)), HULL_SHADE);
+    f.fill_ellipse(Rectangle::new(Point::new(64, 60), Size::new(78, 13)), HULL);
+    f.fill_circle(Point::new(134, 64), 9, rgb(0xffa13d), 255);
+    f.fill_circle(Point::new(136, 66), 5, rgb(0xffe0a0), 255);
+
+    // The neck, from the secondary hull up and forward to the saucer.
+    f.fill_triangle([Point::new(112, 62), Point::new(126, 62), Point::new(150, 44)], HULL_SHADE);
+    f.fill_triangle([Point::new(112, 62), Point::new(138, 44), Point::new(150, 44)], HULL_SHADE);
+
+    // The near pylon and nacelle, its bussard collector at the front.
+    f.fill_triangle([Point::new(84, 64), Point::new(92, 64), Point::new(72, 48)], HULL_SHADE);
+    f.fill_rounded(Rectangle::new(Point::new(36, 44), Size::new(78, 10)), 5, HULL, 255);
+    f.fill(Rectangle::new(Point::new(40, 51), Size::new(70, 2)), HULL_SHADE, 255);
+    f.fill_circle(Point::new(106, 44), 10, rgb(0xff3a2a), 255);
+    f.fill_circle(Point::new(108, 46), 5, rgb(0xffb0a0), 255);
+
+    // The saucer: a broad thin disc, a rim below, the bridge dome on top.
+    f.fill_ellipse(Rectangle::new(Point::new(120, 30), Size::new(104, 18)), HULL_SHADE);
+    f.fill_ellipse(Rectangle::new(Point::new(120, 29), Size::new(104, 14)), HULL);
+    f.fill_ellipse(Rectangle::new(Point::new(160, 24), Size::new(24, 9)), HULL);
+    f.fill_ellipse(Rectangle::new(Point::new(167, 22), Size::new(10, 5)), rgb(0xe8ecf2));
+    for x in (130..214).step_by(12) {
+        f.put(Point::new(x, 37), rgb(0xffe9a8), 255); // windows along the rim
     }
 }
 
@@ -251,6 +378,13 @@ impl Frame {
         self.pixels[(p.y as u32 * WIDTH + p.x as u32) as usize]
     }
 
+    /// The picture at `brightness` (255 as drawn, 0 black), a pixel at a
+    /// time as the panel takes them: a step of a fade, with no second frame
+    /// (the board hasn't the memory for one).
+    pub fn faded(&self, brightness: u8) -> impl Iterator<Item = Rgb565> + '_ {
+        self.pixels.iter().map(move |&p| blend(BLACK, p, brightness))
+    }
+
     fn put(&mut self, p: Point, color: Rgb565, alpha: u8) {
         if (0..WIDTH as i32).contains(&p.x) && (0..HEIGHT as i32).contains(&p.y) {
             let i = (p.y as u32 * WIDTH + p.x as u32) as usize;
@@ -268,6 +402,20 @@ impl Frame {
         let c = Circle::new(top_left, diameter);
         for p in c.bounding_box().points().filter(|&p| c.contains(p)) {
             self.put(p, color, alpha);
+        }
+    }
+
+    fn fill_ellipse(&mut self, r: Rectangle, color: Rgb565) {
+        let e = Ellipse::new(r.top_left, r.size);
+        for p in r.points().filter(|&p| e.contains(p)) {
+            self.put(p, color, 255);
+        }
+    }
+
+    fn fill_triangle(&mut self, corners: [Point; 3], color: Rgb565) {
+        let t = Triangle::new(corners[0], corners[1], corners[2]);
+        for p in t.bounding_box().points().filter(|&p| t.contains(p)) {
+            self.put(p, color, 255);
         }
     }
 

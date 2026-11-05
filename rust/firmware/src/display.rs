@@ -95,7 +95,21 @@ fn run(pins: Pins, status: StatusSlot, flip: bool) -> Result<(), String> {
         if let Some(st) = status.get() {
             let screen = Screen::of(&st);
             if shown.as_ref() != Some(&screen) {
+                // Into or out of red alert: the old scene fades out, the new one in.
+                let fade = shown.as_ref().is_some_and(|s| s.view.red_alert() != screen.view.red_alert());
+                if fade {
+                    for brightness in [200, 140, 80, 30, 0] {
+                        panel.fill_contiguous(&whole, frame.faded(brightness)).map_err(|e| failed("draw", e))?;
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
+                }
                 screen.draw(&mut frame);
+                if fade {
+                    for brightness in [30, 80, 140, 200] {
+                        panel.fill_contiguous(&whole, frame.faded(brightness)).map_err(|e| failed("draw", e))?;
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
+                }
                 panel.fill_contiguous(&whole, frame.pixels.iter().copied()).map_err(|e| failed("draw", e))?;
                 shown = Some(screen);
             }

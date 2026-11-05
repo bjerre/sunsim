@@ -28,6 +28,16 @@
     Math.max(0.4, Math.min(1, 0.4 + (snapshot.cloudPercent ?? 100) / 170)),
   );
   let precipitationVisible = $derived(snapshot.precipitation !== "none");
+  // In red alert the board shows a starship among the stars instead of the sky.
+  let redAlert = $derived(snapshot.mode === "RED ALERT");
+  // As rust/platform/src/display.rs scatters them.
+  const stars: [number, number, boolean][] = [
+    [12, 52, true], [31, 61, false], [126, 12, false], [58, 92, true], [76, 33, false], [88, 101, false],
+    [104, 92, true], [121, 96, false], [139, 21, false], [152, 88, true], [171, 16, false], [186, 99, false],
+    [203, 30, true], [219, 64, false], [231, 94, false], [9, 84, false], [24, 102, true], [68, 52, false],
+    [196, 52, false], [228, 22, false], [113, 48, false], [226, 80, true], [17, 44, false], [95, 84, true],
+    [163, 58, false], [37, 33, false], [209, 84, false], [130, 104, false],
+  ];
 
   const linkGroups: { label: string; labelX: number; firstDotX: number; roles: DeviceRole[] }[] = [
     { label: "D", labelX: 7, firstDotX: 23, roles: ["WallA", "WallB", "WallC", "WallD", "WallE"] },
@@ -76,7 +86,9 @@
         class="lcd-sky-art"
         viewBox="0 0 240 135"
         role="img"
-        aria-label={`Simulated LCD sky at ${snapshot.time}, ${snapshot.sky || "clear"}`}
+        aria-label={redAlert
+          ? `Simulated LCD in red alert at ${snapshot.time}: a starship among the stars`
+          : `Simulated LCD sky at ${snapshot.time}, ${snapshot.sky || "clear"}`}
       >
         <defs>
           <linearGradient id="lcd-sky-gradient" x1="0" y1="0" x2="0" y2="1">
@@ -89,6 +101,39 @@
           </filter>
         </defs>
 
+        {#if redAlert}
+        <g class="lcd-scene">
+          <rect width="240" height="118" fill="#02040c" />
+          {#each stars as [x, y, bright]}
+            <rect {x} {y} width="1" height="1" fill={bright ? "#ffffff" : "#7d8597"} />
+          {/each}
+          <!-- A starship in side view, bow to the right. -->
+          <polygon points="74,66 80,66 64,40" fill="#5b616b" />
+          <rect x="30" y="35" width="76" height="8" rx="4" fill="#5b616b" />
+          <ellipse cx="103" cy="70" rx="41" ry="10" fill="#8b929c" />
+          <ellipse cx="103" cy="66.5" rx="39" ry="6.5" fill="#c9ced6" />
+          <circle cx="138.5" cy="68.5" r="4.5" fill="#ffa13d" />
+          <circle cx="138.5" cy="68.5" r="2.5" fill="#ffe0a0" />
+          <polygon points="112,62 126,62 150,44 138,44" fill="#8b929c" />
+          <polygon points="84,64 92,64 72,48" fill="#8b929c" />
+          <rect x="36" y="44" width="78" height="10" rx="5" fill="#c9ced6" />
+          <rect x="40" y="51" width="70" height="2" fill="#8b929c" />
+          <circle cx="111" cy="49" r="5" fill="#ff3a2a" />
+          <circle cx="110.5" cy="48.5" r="2.5" fill="#ffb0a0" />
+          <ellipse cx="172" cy="39" rx="52" ry="9" fill="#8b929c" />
+          <ellipse cx="172" cy="36" rx="52" ry="7" fill="#c9ced6" />
+          <ellipse cx="172" cy="28.5" rx="12" ry="4.5" fill="#c9ced6" />
+          <ellipse cx="172" cy="24.5" rx="5" ry="2.5" fill="#e8ecf2" />
+          {#each [130, 142, 154, 166, 178, 190, 202] as x}
+            <rect {x} y="37" width="1" height="1" fill="#ffe9a8" />
+          {/each}
+          <rect class="lcd-alert-bar" x="0" y="0" width="240" height="8" />
+          <rect class="lcd-alert-bar" x="0" y="108" width="240" height="8" />
+          <text class="lcd-art-meta lcd-alert-text" x="6" y="27">RED ALERT</text>
+          <text class="lcd-art-small" x="234" y="25" text-anchor="end">{snapshot.time}</text>
+        </g>
+        {:else}
+        <g class="lcd-scene">
         <rect width="240" height="135" fill="url(#lcd-sky-gradient)" />
         <path d="M18 102 Q120 44 222 102" fill="none" stroke="#ffe2ad" stroke-dasharray="1 7" stroke-linecap="round" opacity=".7" />
 
@@ -138,6 +183,9 @@
         <text class="lcd-art-small" x="6" y="98">{snapshot.sunrise}</text>
         <text class="lcd-art-small" x="234" y="98" text-anchor="end">{snapshot.sunset}</text>
         <text class="lcd-art-small lcd-art-event" x="120" y="113" text-anchor="middle">{snapshot.nextEvent}</text>
+        </g>
+        {/if}
+        <rect x="0" y="116" width="240" height="19" fill="#081321" />
 
         {#each linkGroups as group}
           <text class="lcd-art-link-label" x={group.labelX} y="131">{group.label}</text>

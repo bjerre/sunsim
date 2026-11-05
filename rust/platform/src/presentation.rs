@@ -71,6 +71,11 @@ pub struct StatusView {
 }
 
 impl StatusView {
+    /// Whether the main zone is in red alert.
+    pub fn red_alert(&self) -> bool {
+        self.mode == "RED ALERT"
+    }
+
     pub fn of(st: &StatusSnapshot) -> StatusView {
         let day = &st.day;
         let (sunrise, sunset) = if st.time.valid {

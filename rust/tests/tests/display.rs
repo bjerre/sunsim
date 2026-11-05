@@ -183,3 +183,59 @@ fn the_splash_says_sunsim() {
     draw_splash(&mut frame);
     assert!(frame.pixels.iter().any(|&p| p != BLACK));
 }
+
+#[test]
+fn red_alert_shows_the_starship_and_its_bars_flash_on_the_beat() {
+    let st = status(|h| h.post(ButtonPressed { press: Press::Double, at: h.now, ..ButtonPressed::default() }));
+    let screen = Screen::of(&st);
+    assert!(screen.view.red_alert());
+    let frame = drawn(&screen);
+    // Space, not the sky; the saucer and the glowing collector; the bars; the dots.
+    assert_eq!(frame.at(Point::new(5, 70)), rgb(0x02040c));
+    assert_eq!(frame.at(Point::new(150, 36)), rgb(0xc9ced6));
+    assert_eq!(frame.at(Point::new(110, 47)), rgb(0xffb0a0));
+    assert_eq!(dot_color(&frame, WALL_A), UNPAIRED);
+
+    let lit = drawn(&Screen { beat: true, ..screen.clone() });
+    let dim = drawn(&Screen { beat: false, ..screen.clone() });
+    assert_ne!(lit.at(Point::new(230, 3)), dim.at(Point::new(230, 3)));
+
+    // For a look at it: SUNSIM_FRAME=path.ppm cargo test --test display red_alert
+    if let Ok(path) = std::env::var("SUNSIM_FRAME") {
+        let mut ppm = format!("P6 {WIDTH} {HEIGHT} 255\n").into_bytes();
+        for p in &lit.pixels {
+            ppm.extend([p.r() << 3, p.g() << 2, p.b() << 3]);
+        }
+        std::fs::write(path, ppm).unwrap();
+    }
+}
+
+#[test]
+fn out_of_red_alert_the_sky_comes_back_and_nothing_beats() {
+    let st = status(|_| {});
+    let screen = Screen::of(&st);
+    assert!(!screen.view.red_alert() && !screen.beat);
+    assert_eq!(drawn(&screen).at(Point::new(120, 22)), rgb(SKIES[3][1]));
+}
+
+#[test]
+fn a_fade_dims_the_picture_to_black_and_back() {
+    let frame = drawn(&Screen::of(&status(|_| {})));
+    let p = Point::new(120, 22);
+    let at = |brightness: u8| frame.faded(brightness).nth((p.y as u32 * WIDTH + p.x as u32) as usize).unwrap();
+    assert_eq!(at(255), frame.at(p));
+    assert_eq!(at(0), BLACK);
+    let half = at(128);
+    assert!(half != BLACK && half != frame.at(p));
+}
+
+#[test]
+fn nothing_of_red_alert_stays_when_the_sky_comes_back() {
+    let alert =
+        Screen::of(&status(|h| h.post(ButtonPressed { press: Press::Double, at: h.now, ..ButtonPressed::default() })));
+    let sky = Screen::of(&status(|_| {}));
+    let mut reused = Frame::default();
+    alert.draw(&mut reused);
+    sky.draw(&mut reused); // the board draws each screen over the last
+    assert!(reused.pixels == drawn(&sky).pixels);
+}

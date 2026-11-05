@@ -161,6 +161,12 @@ h2 { margin: 0; font-size: 17px; font-weight: 600; }
 .lcd { padding: 14px 15px 12px; border: 7px solid #34423a; border-radius: 7px; background: #a8ba91; color: #243526; font: 11px "DM Mono", monospace; box-shadow: inset 0 0 20px #31442d44, 0 4px 0 #101712; text-shadow: 0 1px #e1e8c9; }
 .lcd-sky-frame { overflow: hidden; border: 7px solid #34423a; border-radius: 7px; background: #081321; box-shadow: inset 0 0 14px #0008, 0 4px 0 #101712; }
 .lcd-sky-art { display: block; width: 100%; height: auto; }
+.lcd-scene { animation: lcd-scene-in .6s ease-out; }
+@keyframes lcd-scene-in { from { opacity: 0; } to { opacity: 1; } }
+.lcd-alert-bar { fill: #ff3030; animation: lcd-alert-beat 2s steps(1) infinite; }
+.lcd-art-meta.lcd-alert-text { fill: #ff3030; font-size: 16px; font-weight: 700; animation: lcd-alert-beat 2s steps(1) infinite; }
+@keyframes lcd-alert-beat { 0% { opacity: 1; } 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .lcd-scene, .lcd-alert-bar, .lcd-alert-text { animation: none; } }
 .lcd-art-time { fill: #fff5dc; font: 600 38px "DM Sans", sans-serif; letter-spacing: -1.5px; paint-order: stroke; stroke: #263c50; stroke-width: 1px; stroke-linejoin: round; }
 .lcd-art-meta, .lcd-art-small, .lcd-art-link-label { fill: #f7f4e9; font-family: "DM Mono", monospace; paint-order: stroke; stroke: #17283a; stroke-width: 1.5px; stroke-linejoin: round; }
 .lcd-art-meta { font-size: 9px; }
