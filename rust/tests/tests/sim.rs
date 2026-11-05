@@ -29,7 +29,7 @@ const ROOM_GROUP: u16 = 0x5301;
 // The office's lights, which show the same in red alert (the plugs keep
 // their own schedules).
 fn office() -> impl Iterator<Item = Role> {
-    lights().filter(|&r| ZONE_OF[r] == Some(ZoneId(0)))
+    lights().filter(|&r| TOPOLOGY.zone_of[r] == Some(ZoneId(0)))
 }
 
 fn room_group() -> Vec<LightGroup> {

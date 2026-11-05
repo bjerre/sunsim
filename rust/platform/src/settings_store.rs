@@ -59,9 +59,10 @@ pub struct SettingsStore<S: Storage> {
 
 impl<S: Storage> SettingsStore<S> {
     /// `defaults`: the program settings before anything was saved (the
-    /// location comes from the build).
-    pub fn new(post: Post, storage: S, defaults: ProgramConfig) -> Self {
-        SettingsStore { post, storage, config: defaults, peaks: DEFAULT_PEAKS, min_levels: DEFAULT_MIN_LEVELS }
+    /// location comes from the build); `default_peaks`: the lights' before
+    /// any were set (the installation's).
+    pub fn new(post: Post, storage: S, defaults: ProgramConfig, default_peaks: Peaks) -> Self {
+        SettingsStore { post, storage, config: defaults, peaks: default_peaks, min_levels: DEFAULT_MIN_LEVELS }
     }
 
     pub fn storage(&self) -> &S {

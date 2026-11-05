@@ -26,6 +26,7 @@
 //! wifi remove <ssid>    forget one; `wifi clear` forgets all
 //! restart               reboot, keeping everything
 //! factory_reset         forget all roles AND the Zigbee network, then restart
+//! profile begin|chunk|commit|clear   upload (or forget) a runtime installation profile
 //! ```
 //!
 //! <role> is a device's name (WallA-WallE east to west, Work, Button); a
@@ -36,6 +37,7 @@ use std::sync::{Arc, Mutex};
 
 use ev::*;
 
+use crate::profile_store::{MAX_PROFILE_BYTES, ProfileStore};
 use crate::storage::Storage;
 use crate::wifi::{MAX_WIFI_NETWORKS, WifiSaveResult, WifiStore};
 
@@ -63,7 +65,8 @@ impl Module for StatusSlot {
 pub trait ConsoleBoard {
     /// Steady time since boot.
     fn now(&self) -> Instant;
-    /// Reboots (on the board, it doesn't return).
+    /// Reboots (on the board, it doesn't return). The console calls it
+    /// after the reply that announces it is out (Console::finish_reply).
     fn restart(&mut self);
 }
 
@@ -140,13 +143,16 @@ struct Command<S: Storage, B: ConsoleBoard> {
     run: Run<S, B>,
 }
 
-/// The console's commands, on the bus's Post, the status slot, the saved
-/// Wi-Fi networks and the board.
+/// The console's commands, on the bus's Post, the status slot, the zones
+/// the app runs, the saved Wi-Fi networks and profile, and the board.
 pub struct Console<S: Storage, B: ConsoleBoard> {
     post: Post,
     status: StatusSlot,
+    installation: Arc<Installation>,
     wifi: WifiStore<S>,
+    profiles: ProfileStore<S>,
     board: B,
+    restart: bool, // once the reply is out
     /// `fastday on`'s loop by default, real seconds.
     day_seconds: i64,
 }
@@ -154,15 +160,39 @@ pub struct Console<S: Storage, B: ConsoleBoard> {
 impl<S: Storage, B: ConsoleBoard> Console<S, B> {
     pub const PROMPT: &'static str = "sunsim> ";
 
-    pub fn new(post: Post, status: StatusSlot, wifi: WifiStore<S>, board: B, day_seconds: i64) -> Self {
-        Console { post, status, wifi, board, day_seconds }
+    pub fn new(
+        post: Post,
+        status: StatusSlot,
+        installation: Arc<Installation>,
+        wifi: WifiStore<S>,
+        profiles: ProfileStore<S>,
+        board: B,
+        day_seconds: i64,
+    ) -> Self {
+        Console { post, status, installation, wifi, profiles, board, restart: false, day_seconds }
+    }
+
+    /// Whether the last line asked for a restart (finish_reply does it).
+    pub fn restart_pending(&self) -> bool {
+        self.restart
+    }
+
+    /// After the reply to a line is out: restarts the board if the line asked for it.
+    pub fn finish_reply(&mut self) {
+        if std::mem::take(&mut self.restart) {
+            self.board.restart();
+        }
+    }
+
+    pub fn profiles(&self) -> &ProfileStore<S> {
+        &self.profiles
     }
 
     pub fn board(&mut self) -> &mut B {
         &mut self.board
     }
 
-    fn commands() -> [Command<S, B>; 17] {
+    fn commands() -> [Command<S, B>; 18] {
         [
             Command { name: "help", hint: "", help: "Print the list of registered commands", run: Self::help },
             Command {
@@ -244,6 +274,12 @@ impl<S: Storage, B: ConsoleBoard> Console<S, B> {
                 hint: "",
                 help: "Reboot (keeps roles, network and Wi-Fi settings)",
                 run: Self::restart,
+            },
+            Command {
+                name: "profile",
+                hint: "begin <bytes> | chunk <offset> <hex> | commit | clear",
+                help: "Upload or clear a runtime installation profile (./sunsim profile upload FILE)",
+                run: Self::profile,
             },
             Command {
                 name: "factory_reset",
@@ -617,8 +653,9 @@ impl<S: Storage, B: ConsoleBoard> Console<S, B> {
                     out!(o, "alert    {} ({}), {left} min left", alert.event(), alert.level.name());
                 }
                 Self::print_setting(find_setting("weather").expect("a weather setting"), &st.config, o);
-                out!(o, "precip   {}", Self::lights_text(WEATHER_LIGHTS.precip));
-                out!(o, "alerts   {}", Self::lights_text(WEATHER_LIGHTS.alerts));
+                let weather = self.installation.topology.weather;
+                out!(o, "precip   {}", Self::lights_text(weather.precip));
+                out!(o, "alerts   {}", Self::lights_text(weather.alerts));
                 0
             }
             [_, "simulate", what] => self.simulate_weather(&st, what, "", o),
@@ -720,11 +757,12 @@ impl<S: Storage, B: ConsoleBoard> Console<S, B> {
             out!(o, "alert   {}", alert.event());
         }
 
-        for zone in zone_ids() {
+        let installation = self.installation.clone();
+        for zone in installation.zone_ids() {
             let z = st.zones[zone];
             put!(o, "mode    ");
-            if ZONE_COUNT > 1 {
-                put!(o, "{}: ", spec_of(zone).name);
+            if installation.zones.len() > 1 {
+                put!(o, "{}: ", installation.spec(zone).name);
             }
             put!(o, "{}", z.mode.name());
             if z.mode == Mode::Daylight {
@@ -838,8 +876,68 @@ impl<S: Storage, B: ConsoleBoard> Console<S, B> {
     }
 
     fn restart(&mut self, _: &[&str], _: &mut String) -> i32 {
-        self.board.restart();
+        self.restart = true;
         0
+    }
+
+    // An upload in pieces a line can carry: `begin <bytes>`, then `chunk
+    // <offset> <hex>` (up to 24 bytes each, in order), then `commit`, which
+    // checks it, saves it and restarts to apply it. `clear` goes back to the
+    // built-in installation.
+    fn profile(&mut self, args: &[&str], o: &mut String) -> i32 {
+        match args {
+            [_, "begin", size] => match number_in(size, 1, MAX_PROFILE_BYTES as i64) {
+                Some(size) if self.profiles.begin_upload(size as usize) => {
+                    out!(o, "profile upload started ({size} bytes)");
+                    0
+                }
+                _ => {
+                    out!(o, "profile upload size must be 1-{MAX_PROFILE_BYTES} bytes");
+                    1
+                }
+            },
+            [_, "chunk", offset, hex] => {
+                let bytes = (hex.len() % 2 == 0 && hex.len() <= 48)
+                    .then(|| (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).ok()).collect())
+                    .flatten();
+                let (Some(offset), Some(bytes)) = (number_in(offset, 0, MAX_PROFILE_BYTES as i64), bytes) else {
+                    out!(o, "profile chunk needs an offset and 1-24 bytes encoded as hex");
+                    return 1;
+                };
+                let bytes: Vec<u8> = bytes;
+                if self.profiles.append(offset as usize, &bytes) {
+                    out!(o, "profile chunk accepted");
+                    0
+                } else {
+                    out!(o, "profile chunk rejected (upload order or size mismatch)");
+                    1
+                }
+            }
+            [_, "commit"] => match self.profiles.commit() {
+                Ok(()) => {
+                    out!(o, "profile saved; restarting to apply");
+                    self.restart = true;
+                    0
+                }
+                Err(why) => {
+                    out!(o, "profile rejected ({why}); existing saved profile is unchanged");
+                    1
+                }
+            },
+            [_, "clear"] => {
+                if !self.profiles.clear() {
+                    out!(o, "could not clear saved profile");
+                    return 1;
+                }
+                out!(o, "saved profile cleared; restarting with built-in installation");
+                self.restart = true;
+                0
+            }
+            _ => {
+                out!(o, "usage: profile begin <bytes> | chunk <offset> <hex> | commit | clear");
+                1
+            }
+        }
     }
 
     fn factory_reset(&mut self, _: &[&str], _: &mut String) -> i32 {

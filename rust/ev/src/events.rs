@@ -302,9 +302,21 @@ pub struct LightChange {
 /// What a bulb should show, from the running program.
 #[derive(Clone, Copy, Default, PartialEq, Debug)]
 pub struct LightTarget(pub LightChange);
-/// What it does show: Overlays' pick, for LightOutput.
+/// What it does show: Overlays' pick, for LightOutput; and which weather
+/// effect, if any, has the light (none: its program does), in which phase.
 #[derive(Clone, Copy, Default, PartialEq, Debug)]
-pub struct OutputTarget(pub LightChange);
+pub struct OutputTarget {
+    pub change: LightChange,
+    pub weather_effect: WeatherEffect,
+    pub pulse_phase: PulsePhase,
+}
+
+impl From<LightChange> for OutputTarget {
+    /// The program's: no weather effect.
+    fn from(change: LightChange) -> Self {
+        OutputTarget { change, ..OutputTarget::default() }
+    }
+}
 
 impl Deref for LightTarget {
     type Target = LightChange;
@@ -315,7 +327,7 @@ impl Deref for LightTarget {
 impl Deref for OutputTarget {
     type Target = LightChange;
     fn deref(&self) -> &LightChange {
-        &self.0
+        &self.change
     }
 }
 

@@ -38,14 +38,11 @@ pub struct Pins {
 /// then the status, redrawn once a second. `flip`: the board upside down.
 /// If the panel won't start, says so and carries on without it.
 pub fn start(pins: Pins, status: StatusSlot, flip: bool) {
-    let started = std::thread::Builder::new()
-        .name("display".into())
-        .stack_size(8 * 1024)
-        .spawn(move || {
-            if let Err(e) = run(pins, status, flip) {
-                log::error!(target: TAG, "LCD failed ({e}); continuing without the display");
-            }
-        });
+    let started = std::thread::Builder::new().name("display".into()).stack_size(8 * 1024).spawn(move || {
+        if let Err(e) = run(pins, status, flip) {
+            log::error!(target: TAG, "LCD failed ({e}); continuing without the display");
+        }
+    });
     if started.is_err() {
         log::error!(target: TAG, "No display task; continuing without the display");
     }
@@ -88,7 +85,7 @@ fn run(pins: Pins, status: StatusSlot, flip: bool) -> Result<(), String> {
 
     let whole = Rectangle::new(Point::zero(), Size::new(WIDTH, HEIGHT));
     let mut frame = Frame::default();
-    let _ = draw_splash(&mut frame);
+    draw_splash(&mut frame);
     panel.fill_contiguous(&whole, frame.pixels.iter().copied()).map_err(|e| failed("draw", e))?;
     let _ = backlight.set_high();
     log::info!(target: TAG, "Status display started");
@@ -98,7 +95,7 @@ fn run(pins: Pins, status: StatusSlot, flip: bool) -> Result<(), String> {
         if let Some(st) = status.get() {
             let screen = Screen::of(&st);
             if shown.as_ref() != Some(&screen) {
-                let _ = screen.draw(&mut frame);
+                screen.draw(&mut frame);
                 panel.fill_contiguous(&whole, frame.pixels.iter().copied()).map_err(|e| failed("draw", e))?;
                 shown = Some(screen);
             }
@@ -106,4 +103,3 @@ fn run(pins: Pins, status: StatusSlot, flip: bool) -> Result<(), String> {
         std::thread::sleep(Duration::from_secs(1));
     }
 }
-

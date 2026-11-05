@@ -4,7 +4,7 @@ A port of everything that doesn't touch ESP-IDF, as a cargo workspace:
 
 | Crate | Mirrors | Holds |
 |---|---|---|
-| `ev` (sunsim-ev) | `components/sunsim_events` | value types, events, the bus, flows, settings, the radio contract, the room |
+| `ev` (sunsim-ev) | `components/sunsim_events` | value types, events, the bus, flows, settings, the radio contract, the room (from `config/installation.json`), runtime installation profiles |
 | `sunsim-core` | `components/sunsim_core` | the registry, modes, programs, overlays, output, send queue, sky and status models, the math |
 | `weather` (sunsim-weather) | `components/sunsim_weather` | the streaming JSON scanner and the Open-Meteo / NWS readers |
 | `platform` (sunsim-platform) | `components/sunsim_platform`, the logic | the platform modules without ESP-IDF, their hardware behind traits: the Clock, the SettingsStore (on a `Storage`: NVS's typed keys), the InternetSync (on an `Internet`: Wi-Fi sessions, SNTP, HTTPS), the saved Wi-Fi networks, the console's commands and the status display's picture (embedded-graphics) |
@@ -15,6 +15,29 @@ A port of everything that doesn't touch ESP-IDF, as a cargo workspace:
     cargo test                 # everything
     cargo test --test sim      # one area
     cargo test ambiguous       # tests whose names match
+
+## The installation
+
+`config/installation.json` is the room: its device groups (`LAYOUT`) and its zones
+(`ZONES`), turned into Rust by `ev/build.rs` at build time and checked by the same
+`const fn topology_of` as before, so a mistake in the document is a build error. That's
+`Installation::built_in()`.
+
+An `Installation` can also come at runtime, from a profile (`ev::parse_profile`, or
+`ProfileBuilder` a step at a time): the same eight lights and button, regrouped into 1-8
+zones with their own daily windows, looks, peaks, button and weather lights (see
+`web/public/profiles/`). The core takes the installation it runs as an
+`Arc<Installation>`. On the board a profile is uploaded over the console (`./sunsim
+profile upload FILE`, chunked through the `profile` command into NVS by
+`platform::ProfileStore`), checked whole, and used from the next boot; `./sunsim profile
+clear` goes back to the built-in one, as does a saved profile that no longer parses. In
+the browser simulator, `?profile=office|studio` (or the page's Setup picker) builds one
+before the office starts.
+
+The status display is the C++ firmware's sky: the sky's colors by the sun's elevation, the
+sun where its bearing and elevation put it, a cloud when it's cloudy or falling, the
+time, sunrise and sunset over it, and a dot per device (`platform::display`,
+`SUNSIM_FRAME=frame.ppm cargo test --test display the_picture` writes one out).
 
 ## How the C++ idioms map
 
@@ -57,9 +80,10 @@ board. The C++ platform is all ported.
 ## The browser simulator (web/)
 
 The Svelte page in `web/` runs the Rust core as wasm: `rust/web` is the simulated office
-(the core on `sim`'s network, the page's clock and location, its JSON state), exported as
-the functions the page calls (`web/wasm.d.ts`), with a small loader
-(`rust/web/js/sunsim_web_simulator.js`) in place of Emscripten's.
+(the core on `sim`'s network, the page's clock and location, its JSON state: the lights
+as commanded, the program flow with each light's day curve, the sky), exported as the
+functions the page calls (`web/wasm.d.ts`, the profile builder's included), with a small
+loader (`rust/web/js/sunsim_web_simulator.js`) in place of Emscripten's.
 
     rust/web/build.sh                 # the wasm and its loader, at the repository's root
     node test/web/wasm_smoke.mjs      # the module as the page uses it

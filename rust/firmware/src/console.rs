@@ -5,13 +5,15 @@
 //! `./sunsim <command>` works as with the C++ firmware.
 
 use std::io::Write;
+use std::sync::Arc;
+use std::time::Duration;
 
 use esp_idf_svc::sys::{
     EspError, esp, esp_restart, usb_serial_jtag_driver_config_t, usb_serial_jtag_driver_install,
     usb_serial_jtag_read_bytes, usb_serial_jtag_vfs_use_driver,
 };
 use ev::*;
-use platform::{Console, ConsoleBoard, StatusSlot, WifiStore};
+use platform::{Console, ConsoleBoard, ProfileStore, StatusSlot, WifiStore};
 
 use crate::{clock, storage};
 
@@ -32,14 +34,21 @@ impl ConsoleBoard for Board {
 
 /// Starts the console on its own task, reading the port's driver (and
 /// writing through it, logs and all, so they don't trip over each other).
-pub fn start(post: Post, status: StatusSlot, wifi: WifiStore<storage::Nvs>, day_seconds: i64) -> Result<(), EspError> {
+pub fn start(
+    post: Post,
+    status: StatusSlot,
+    installation: Arc<Installation>,
+    wifi: WifiStore<storage::Nvs>,
+    profiles: ProfileStore<storage::Nvs>,
+    day_seconds: i64,
+) -> Result<(), EspError> {
     let mut config = usb_serial_jtag_driver_config_t { tx_buffer_size: 1024, rx_buffer_size: 256 };
     // SAFETY: installs the driver once, before anything reads the port.
     unsafe {
         esp!(usb_serial_jtag_driver_install(&mut config))?;
         usb_serial_jtag_vfs_use_driver();
     }
-    let mut console = Console::new(post, status, wifi, Board, day_seconds);
+    let mut console = Console::new(post, status, installation, wifi, profiles, Board, day_seconds);
     std::thread::Builder::new()
         .name("console".into())
         .stack_size(8 * 1024) // commands format replies and copy snapshots
@@ -49,6 +58,12 @@ pub fn start(post: Post, status: StatusSlot, wifi: WifiStore<storage::Nvs>, day_
                 let line = read_line();
                 let reply = console.line(&line);
                 print!("{reply}");
+                if console.restart_pending() {
+                    // The reply out of the port before the reboot, as the C++ console waits.
+                    let _ = std::io::stdout().flush();
+                    std::thread::sleep(Duration::from_millis(300));
+                }
+                console.finish_reply();
             }
         })
         .expect("the console task starts");

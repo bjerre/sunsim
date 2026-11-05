@@ -1,17 +1,21 @@
-//! The room, as data: which device is which, and the zones: what each light
-//! shows, when it may be on, and what chooses its mode. Edit, build, flash.
-//! The words are topology.rs's.
+//! The room: which device is which, and the zones: what each light shows,
+//! when it may be on, and what chooses its mode. The zones come from
+//! config/installation.json (ev/build.rs), checked as they compile; a
+//! runtime profile (profile.rs) can regroup and reschedule the same lights
+//! instead. Either way the app runs on an Installation. The words are
+//! topology.rs's.
 
 use std::ops::{Index, IndexMut};
 
-use crate::setting;
-use crate::time::Duration;
 use crate::topology::*;
 use crate::types::*;
+#[allow(unused_imports)] // what the generated zones use depends on the document
+use crate::{setting, time::Duration};
 
 /// Each device's IEEE (EUI-64) address, from its label: when it joins, it
 /// takes that role. A role left at 0 is claimed with `pair <role>` instead.
-/// (`./sunsim monitor` logs an unknown device's address as it joins.)
+/// (`./sunsim monitor` logs an unknown device's address as it joins.) Kept
+/// here, not in the shareable installation document.
 pub const ADDRESSES: [Address; ROLE_COUNT] = [
     Address { role: "WallA", ext_addr: 0x0000000000000000 },
     Address { role: "WallB", ext_addr: 0x0000000000000000 },
@@ -24,64 +28,81 @@ pub const ADDRESSES: [Address; ROLE_COUNT] = [
     Address { role: "Button", ext_addr: 0x0000000000000000 },
 ];
 
-/// Lights that share a mode and a gate. Every light is in exactly one.
-pub const ZONES: [ZoneSpec; 3] = [
-    ZoneSpec {
-        name: "office",
-        lights: &[Shows::new("Wall", Look::SunCurve), Shows::new("Work", Look::WorkCurve(WorkCurve::SETTINGS)).at(90)],
-        // The active hours (`config hours`, `days`, `fade`).
-        gate: &[Window { hours: setting!(active), days: setting!(active_days), fade: setting!(fade) }.rule()],
-        controls: &[Controls::by("Button")], // single: daylight, double: red alert, hold: off
-        weather: Some(Weather { precip: &["WallC"], alerts: &["WallB", "WallD"] }),
-        ..ZoneSpec::DEFAULT
-    },
-    ZoneSpec {
-        name: "desk-downlight",
-        lights: &[Shows::new("Desk", Look::OnOffOnly)],
-        gate: &[Window::hours(Tunable::Fixed(DaySpan::new(Duration::hours(8), Duration::hours(19)))).rule()],
-        modes: &[Mode::Daylight],
-        ..ZoneSpec::DEFAULT
-    },
-    ZoneSpec {
-        name: "bookcase-grow-light",
-        lights: &[Shows::new("Grow", Look::OnOffOnly)],
-        gate: &[Window::hours(Tunable::Fixed(DaySpan::new(
-            Duration::minutes(3 * 60 + 45),
-            Duration::minutes(8 * 60 + 45),
-        )))
-        .rule()],
-        modes: &[Mode::Daylight],
-        ..ZoneSpec::DEFAULT
-    },
-];
+include!(concat!(env!("OUT_DIR"), "/zones.rs"));
 
-// ---- Derived: the tables above per role and per zone, checked as they compile ----
+// ---- Derived: the tables above per role, checked as they compile ----
 
 pub const ADDRESS_OF: Addresses = addresses_of(&ADDRESSES);
 
+/// The built-in installation's zones per role.
 pub const TOPOLOGY: Topology = topology_of(&ZONES);
-pub const ZONE_OF: PerRole<Option<ZoneId>> = TOPOLOGY.zone_of;
-pub const LOOK_OF: PerRole<Look> = TOPOLOGY.look_of;
-/// Each light's default peak brightness, as the zones give it.
+/// Each light's default peak brightness, as the built-in zones give it.
 pub const DEFAULT_PEAKS: Peaks = TOPOLOGY.peak_of;
-pub const CONTROLS_OF: PerRole<Option<Controls>> = TOPOLOGY.controls_of;
-pub const WEATHER_LIGHTS: WeatherLights = TOPOLOGY.weather;
 
-pub const ZONE_COUNT: usize = ZONES.len();
-const _: () = assert!(ZONE_COUNT >= 1 && ZONE_COUNT <= 255, "1-255 zones");
+/// The most zones an installation has: what a PerZone holds.
+pub const MAX_ZONES: usize = 8;
+const _: () = assert!(!ZONES.is_empty() && ZONES.len() <= MAX_ZONES, "1-8 zones");
 
-pub fn spec_of(zone: ZoneId) -> &'static ZoneSpec {
-    &ZONES[zone.0 as usize]
+// ---- At run time ----------------------------------------------------------
+
+/// A zone, as the app runs it: its name, gate, modes and buttons. (Its
+/// lights, their looks and weather are the topology's, per role.)
+#[derive(Clone, Debug)]
+pub struct Zone {
+    pub name: String,
+    pub gate: Vec<Rule>,
+    pub modes: Vec<Mode>,
+    pub controls: Vec<Controls>,
 }
 
-/// Every zone, in order.
-pub fn zone_ids() -> impl Iterator<Item = ZoneId> {
-    (0..ZONE_COUNT as u8).map(ZoneId)
+impl Zone {
+    pub fn allows(&self, mode: Mode) -> bool {
+        self.modes.contains(&mode)
+    }
 }
 
-/// One T per zone, indexed by the zone.
+/// The zones the app runs, and what they make of each role: the built-in
+/// ones (ZONES) or a profile's.
+#[derive(Clone, Debug)]
+pub struct Installation {
+    pub zones: Vec<Zone>,
+    pub topology: Topology,
+}
+
+impl Default for Installation {
+    fn default() -> Self {
+        Installation::built_in()
+    }
+}
+
+impl Installation {
+    /// The zones the build was made with.
+    pub fn built_in() -> Installation {
+        let zones = ZONES
+            .iter()
+            .map(|z| Zone {
+                name: z.name.to_string(),
+                gate: z.gate.to_vec(),
+                modes: z.modes.to_vec(),
+                controls: z.controls.to_vec(),
+            })
+            .collect();
+        Installation { zones, topology: TOPOLOGY }
+    }
+
+    /// Every zone, in order.
+    pub fn zone_ids(&self) -> impl Iterator<Item = ZoneId> + use<> {
+        (0..self.zones.len() as u8).map(ZoneId)
+    }
+
+    pub fn spec(&self, zone: ZoneId) -> &Zone {
+        &self.zones[zone.0 as usize]
+    }
+}
+
+/// One T per zone, indexed by the zone (room for MAX_ZONES).
 #[derive(Clone, Copy, PartialEq, Debug)]
-pub struct PerZone<T>(pub [T; ZONE_COUNT]);
+pub struct PerZone<T>(pub [T; MAX_ZONES]);
 
 impl<T: Default> Default for PerZone<T> {
     fn default() -> Self {

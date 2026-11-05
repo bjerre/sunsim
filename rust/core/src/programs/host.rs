@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use ev::*;
 
 use super::{Base, DaylightProgram, OffProgram, Program, RedAlertProgram, TuningProgram};
@@ -39,8 +41,8 @@ impl<P: Program> Run for P {
 }
 
 impl Zone {
-    fn new(post: &Post, zone: ZoneId) -> Self {
-        let base = Base::new(post.clone(), zone);
+    fn new(post: &Post, zone: ZoneId, installation: &Arc<Installation>) -> Self {
+        let base = Base::new(post.clone(), zone, installation.clone());
         Zone {
             daylight: DaylightProgram::new(base.clone()),
             off: OffProgram::new(base.clone()),
@@ -89,8 +91,9 @@ pub struct ProgramHost {
 }
 
 impl ProgramHost {
-    pub fn new(post: &Post) -> Self {
-        ProgramHost { zones: zone_ids().map(|z| Zone::new(post, z)).collect(), post: post.clone(), time: None }
+    pub fn new(post: &Post, installation: Arc<Installation>) -> Self {
+        let zones = installation.zone_ids().map(|z| Zone::new(post, z, &installation)).collect();
+        ProgramHost { zones, post: post.clone(), time: None }
     }
 
     fn refresh(&mut self, role: Option<Role>) {

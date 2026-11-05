@@ -1,5 +1,5 @@
 //! The browser simulator's office: what the page sees, as its JSON, through
-//! the same steps as the C++ build's wasm smoke test (test/build2/wasm_smoke.mjs).
+//! the same steps as the wasm smoke test (test/web/wasm_smoke.mjs).
 
 use serde_json::Value;
 use web::Office;
@@ -89,4 +89,48 @@ fn red_alert_beats_in_virtual_time_as_the_page_advances_it() {
     let second = level(&o);
     assert_ne!(first, second, "bright and dim alternate a second apart");
     assert_eq!(state(&o)["modeTone"], "warning");
+}
+
+#[test]
+fn the_program_flow_and_each_lights_day() {
+    let o = Office::new();
+    let s = state(&o);
+    let flow = s["programFlow"].as_array().unwrap();
+    let zones: Vec<&str> = flow.iter().map(|z| z["zone"].as_str().unwrap()).collect();
+    assert_eq!(zones, ["office", "desk-downlight", "bookcase-grow-light"]);
+    assert!(flow[0]["mode"] == "daylight" && flow[0]["gateOpen"] == true && flow[0]["gateApplies"] == true);
+    let red = flow[0]["availableModes"].as_array().unwrap().iter().find(|m| m["mode"] == "RED ALERT").unwrap();
+    assert_eq!(red["buttonPress"], "double");
+    let wall = &flow[0]["members"][0];
+    assert_eq!((wall["role"].as_str(), wall["behavior"].as_str()), (Some("WallA"), Some("sun curve")));
+    let curve = wall["curve"].as_array().unwrap();
+    assert_eq!(curve.len(), 97);
+    assert_eq!((curve[0]["minute"].as_u64(), curve[96]["minute"].as_u64()), (Some(0), Some(1439)));
+    assert!(curve[0]["on"] == false && curve[48]["on"] == true); // dark at midnight, lit at noon
+    assert!(s["sunrise"].as_str().unwrap().starts_with("Rise ") && s["sunset"].as_str().unwrap().starts_with("Set "));
+}
+
+#[test]
+fn weather_lights_say_what_they_show() {
+    let mut o = Office::new();
+    o.set_minute(600);
+    o.weather(2, 90);
+    let s = state(&o);
+    assert_eq!((s["cloudPercent"].as_u64(), s["precipitation"].as_str()), (Some(90), Some("rain")));
+    let wall_c = light(&s, "WallC");
+    assert_eq!(wall_c["weatherEffect"], "rain");
+    let phase = wall_c["pulsePhase"].clone();
+    assert!(phase == "bright" || phase == "dim");
+    o.advance(2); // rain fades over two seconds
+    assert_ne!(light(&state(&o), "WallC")["pulsePhase"], phase);
+    assert_eq!(light(&s, "WallA")["weatherEffect"], "none");
+}
+
+#[test]
+fn a_profile_regroups_the_office() {
+    let studio = ev::parse_profile(include_str!("../../../web/public/profiles/studio.json")).unwrap();
+    let o = Office::with_installation(std::sync::Arc::new(studio));
+    let s = state(&o);
+    let zones: Vec<&str> = s["programFlow"].as_array().unwrap().iter().map(|z| z["zone"].as_str().unwrap()).collect();
+    assert_eq!(zones, ["studio", "plants"]);
 }

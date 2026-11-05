@@ -90,17 +90,12 @@ pub struct GroupSpec {
     pub count: u8,
 }
 
-/// The installation: what each group is and how many it has, in Group
-/// order. A group's members are lettered (WallA, WallB, ...); a group of one
-/// is just its name (Work, Desk, Grow, Button). Wall lights are lettered east
-/// to west: their order along the wall drives the sun-direction dimming.
-pub const LAYOUT: [GroupSpec; 5] = [
-    GroupSpec { group: Group::Wall, name: "Wall", kind: Kind::ColorBulb, count: 5 },
-    GroupSpec { group: Group::Work, name: "Work", kind: Kind::ColorBulb, count: 1 },
-    GroupSpec { group: Group::Desk, name: "Desk", kind: Kind::Plug, count: 1 },
-    GroupSpec { group: Group::Grow, name: "Grow", kind: Kind::Plug, count: 1 },
-    GroupSpec { group: Group::Button, name: "Button", kind: Kind::Button, count: 1 },
-];
+// The installation: what each group is and how many it has, in Group
+// order, from config/installation.json (ev/build.rs). A group's members are
+// lettered (WallA, WallB, ...); a group of one is just its name (Work, Desk,
+// Grow, Button). Wall lights are lettered east to west: their order along
+// the wall drives the sun-direction dimming.
+include!(concat!(env!("OUT_DIR"), "/layout.rs"));
 
 /// One device's job: its group, and which member of it. Assigned at pairing
 /// time (console `pair`, or its address in installation.rs), never by join
@@ -865,12 +860,81 @@ impl TimeReading {
 
 /// Today's daylight as shown by the status display/console: times are after
 /// local midnight, in hours.
-#[derive(Clone, Copy, Default, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub struct DayInfo {
     pub sunrise: f64,
     pub sunset: f64,
     pub day_length: f64,
-    pub next_is_sunrise: bool, // false = next event is today's sunset
-    pub next_event: f64,       // when the next event is
-    pub until_next: f64,       // how long until it
+    pub next_is_sunrise: bool,  // false = next event is today's sunset
+    pub next_event: f64,        // when the next event is
+    pub until_next: f64,        // how long until it
+    pub sun_azimuth_deg: f64,   // now: compass bearing, clockwise from North
+    pub sun_elevation_deg: f64, // now: degrees above the horizon; negative = below
+}
+
+impl Default for DayInfo {
+    /// Nothing known: the sun below the horizon, due south.
+    fn default() -> Self {
+        DayInfo {
+            sunrise: 0.0,
+            sunset: 0.0,
+            day_length: 0.0,
+            next_is_sunrise: true,
+            next_event: 0.0,
+            until_next: 0.0,
+            sun_azimuth_deg: 180.0,
+            sun_elevation_deg: -90.0,
+        }
+    }
+}
+
+/// Which weather effect has a light's output, if any (None: its program
+/// does).
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub enum WeatherEffect {
+    #[default]
+    None,
+    Drizzle,
+    Rain,
+    FreezingRain,
+    Snow,
+    Thunderstorm,
+    Advisory,
+    Watch,
+    Warning,
+}
+
+impl WeatherEffect {
+    pub const fn name(self) -> &'static str {
+        match self {
+            WeatherEffect::None => "none",
+            WeatherEffect::Drizzle => "drizzle",
+            WeatherEffect::Rain => "rain",
+            WeatherEffect::FreezingRain => "freezing rain",
+            WeatherEffect::Snow => "snow",
+            WeatherEffect::Thunderstorm => "thunderstorm",
+            WeatherEffect::Advisory => "advisory",
+            WeatherEffect::Watch => "watch",
+            WeatherEffect::Warning => "warning",
+        }
+    }
+}
+
+/// A weather pulse's half of its beat.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub enum PulsePhase {
+    #[default]
+    None,
+    Bright,
+    Dim,
+}
+
+impl PulsePhase {
+    pub const fn name(self) -> &'static str {
+        match self {
+            PulsePhase::None => "none",
+            PulsePhase::Bright => "bright",
+            PulsePhase::Dim => "dim",
+        }
+    }
 }

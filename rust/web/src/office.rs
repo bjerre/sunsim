@@ -6,13 +6,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use ev::*;
-use platform::presentation::StatusView;
+use platform::presentation::{StatusView, program_flow};
 use sim::{Device, Scheduler, SimNetwork};
-use sunsim_core::{CoreModules, compute_sun_position, wire_core};
-
-/// How long a change gets to reach the bulbs: SendQueue spends a slot every
-/// 25 ms, a few per light.
-const SETTLE: Duration = Duration::secs(2);
+use sunsim_core::{CoreModules, compute_sun_position, daylight_target, wire_core};
 
 // Each device's IEEE address, which the installation's addresses give it,
 // so each takes its role as it joins.
@@ -46,6 +42,7 @@ impl Module for PageClock {
 /// network as on the board (all of them, at noon on a June Tuesday), and
 /// the page's controls as events. Time moves only when the page says.
 pub struct Office {
+    installation: Arc<Installation>,
     bus: EventBus,
     scheduler: Scheduler,
     _core: CoreModules,
@@ -53,6 +50,18 @@ pub struct Office {
     time: Rc<Cell<TimeReading>>,
     config: ProgramConfig,
     status: Rc<RefCell<Option<Arc<StatusSnapshot>>>>,
+    // Each light as last commanded (as in the C++ simulator, what the core
+    // sent, not what the bulb has had time to do), and its weather effect
+    // and pulse phase, from its last output.
+    lights: Rc<RefCell<PerRole<Commanded>>>,
+    effects: Rc<RefCell<PerRole<(WeatherEffect, PulsePhase)>>>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct Commanded {
+    on: bool,
+    level: u8,
+    color: Color,
 }
 
 impl Default for Office {
@@ -62,14 +71,20 @@ impl Default for Office {
 }
 
 impl Office {
+    /// The office with the build's zones.
     pub fn new() -> Office {
+        Office::with_installation(Arc::new(Installation::built_in()))
+    }
+
+    /// The office with `installation`'s zones: a profile's.
+    pub fn with_installation(installation: Arc<Installation>) -> Office {
         let mut bus = EventBus::new();
         let scheduler = Scheduler::new();
         let mut addresses = PerRole::filled(0);
         for role in ROLES {
             addresses[role] = ext_of(role);
         }
-        let core = CoreModules::new(bus.post(), addresses, Vec::new());
+        let core = CoreModules::new(bus.post(), addresses, Vec::new(), installation.clone());
         let network = Rc::new(RefCell::new(SimNetwork::new(scheduler.clone())));
         let time = Rc::new(Cell::new(TimeReading {
             local: LocalDays::ymd(2022, 6, 21) + Duration::hours(12),
@@ -88,10 +103,31 @@ impl Office {
         let status = Rc::new(RefCell::new(None));
         let latest = status.clone();
         bus.on::<StatusChanged>(move |e| *latest.borrow_mut() = Some(e.snapshot.clone()));
+        let lights = Rc::new(RefCell::new(PerRole::filled(Commanded::default())));
+        let sent = lights.clone();
+        bus.on::<SetLight>(move |e| {
+            let light = &mut sent.borrow_mut()[e.role];
+            light.on = e.power.unwrap_or(light.on);
+            light.level = e.level.unwrap_or(light.level);
+            light.color = e.color.unwrap_or(light.color);
+        });
+        let effects = Rc::new(RefCell::new(PerRole::filled((WeatherEffect::None, PulsePhase::None))));
+        let seen = effects.clone();
+        bus.on::<OutputTarget>(move |e| seen.borrow_mut()[e.role] = (e.weather_effect, e.pulse_phase));
 
-        let mut office =
-            Office { bus, scheduler, _core: core, network, time, config: ProgramConfig::default(), status };
-        office.bus.post().send(ConfigChanged { config: office.config, ..ConfigChanged::default() });
+        let mut office = Office {
+            installation,
+            bus,
+            scheduler,
+            _core: core,
+            network,
+            time,
+            config: ProgramConfig::default(),
+            status,
+            lights,
+            effects,
+        };
+        office.configure();
         {
             let mut network = office.network.borrow_mut();
             for role in ROLES {
@@ -114,12 +150,13 @@ impl Office {
         self.scheduler.now()
     }
 
-    // The time, now: programs update at once, and the bulbs follow.
+    // The time, now: programs update at once; the bulbs follow as time
+    // moves (advance).
     fn tick(&mut self) {
         let time = self.time.get();
         self.bus.post().send(Tick { at: self.now(), time });
         self.bus.post().send(ProgramTick { time, transition: Transition::secs(60) });
-        self.run(SETTLE);
+        self.bus.drain();
     }
 
     /// `seconds` of virtual time (0-60), the wall clock standing still: what
@@ -143,7 +180,7 @@ impl Office {
         }
         self.config.latitude_deg = latitude;
         self.config.longitude_deg = longitude;
-        self.bus.post().send(ConfigChanged { config: self.config, ..ConfigChanged::default() });
+        self.configure();
         self.tick();
         true
     }
@@ -188,9 +225,20 @@ impl Office {
         self.tick();
     }
 
+    // The settings: the page's location, the installation's peaks.
+    fn configure(&mut self) {
+        let peaks = self.installation.topology.peak_of;
+        self.bus.post().send(ConfigChanged { config: self.config, peaks, ..ConfigChanged::default() });
+    }
+
     /// The weather now: what's falling (0 none, 1 drizzle, 2 rain, 3
-    /// freezing rain, 4 snow, 5 thunder) and the cloud cover.
+    /// freezing rain, 4 snow, 5 thunder) and the cloud cover. On simulated
+    /// time the core goes by the forecast's cloud, not the live reading
+    /// (fast-day's rule), so the cover is a forecast for the whole day too.
     pub fn weather(&mut self, precip: i32, cloud: i32) {
+        let cloud = cloud.clamp(0, 100) as u8;
+        let forecast = CloudCover { day: Some(self.time.get().day()), percent: [cloud; CloudCover::HOURS] };
+        self.bus.post().send(CloudCoverUpdated { forecast });
         let precip = match precip {
             1 => Precip::Drizzle,
             2 => Precip::Rain,
@@ -199,7 +247,7 @@ impl Office {
             5 => Precip::Thunderstorm,
             _ => Precip::None,
         };
-        let now = Conditions { cloud_percent: cloud.clamp(0, 100) as u8, precip, intensity: Intensity::Moderate };
+        let now = Conditions { cloud_percent: cloud, precip, intensity: Intensity::Moderate };
         self.bus.post().send(ConditionsUpdated { now, at: self.now() });
         self.tick();
     }
@@ -241,7 +289,8 @@ impl Office {
             o,
             "{{\"location\":{{\"latitude\":{},\"longitude\":{}}},\"utcOffsetMinutes\":{},\"time\":{},\"weekday\":{},\
              \"simDate\":{},\"sun\":{{\"azimuthDeg\":{},\"elevationDeg\":{}}},\"dayLength\":{},\"nextEvent\":{},\
-             \"mode\":{},\"modeTone\":{},\"sky\":{},\"skyTone\":{},\"simMinute\":{},\"lights\":[",
+             \"sunrise\":{},\"sunset\":{},\"cloudPercent\":{},\"precipitation\":{},\
+             \"mode\":{},\"modeTone\":{},\"sky\":{},\"skyTone\":{},\"simMinute\":{},\"programFlow\":[",
             number(self.config.latitude_deg),
             number(self.config.longitude_deg),
             t.utc_offset.whole_minutes(),
@@ -252,23 +301,67 @@ impl Office {
             number(sun.elevation_deg),
             string(&view.day_length),
             string(&view.next_event),
+            string(&view.sunrise),
+            string(&view.sunset),
+            view.cloud_percent.map_or("null".to_string(), |c| c.to_string()),
+            string(view.precipitation.name()),
             string(view.mode),
             string(view.mode_tone.name()),
             string(&view.sky),
             string(view.sky_tone.name()),
             t.since_midnight().whole_minutes(),
         );
-        let network = self.network.borrow();
-        for (i, role) in lights().enumerate() {
-            let bulb = network.bulb(ext_of(role)).copied().unwrap_or_default();
+        for (i, zone) in program_flow(&status, &self.installation).iter().enumerate() {
             let _ = write!(
                 o,
-                "{}{{\"role\":{},\"on\":{},\"level\":{},\"color\":{}}}",
+                "{}{{\"zone\":{},\"mode\":{},\"gateOpen\":{},\"gateApplies\":{},\"availableModes\":[",
+                if i > 0 { "," } else { "" },
+                string(&zone.name),
+                string(zone.mode.name()),
+                zone.gate_open,
+                zone.gate_applies
+            );
+            for (j, choice) in zone.available_modes.iter().enumerate() {
+                let press = match choice.button_press {
+                    Some(Press::Single) => string("single"),
+                    Some(Press::Double) => string("double"),
+                    Some(Press::Hold) => string("hold"),
+                    _ => "null".into(),
+                };
+                let _ = write!(
+                    o,
+                    "{}{{\"mode\":{},\"buttonPress\":{press}}}",
+                    if j > 0 { "," } else { "" },
+                    string(choice.mode.name())
+                );
+            }
+            o.push_str("],\"members\":[");
+            for (j, member) in zone.members.iter().enumerate() {
+                let _ = write!(
+                    o,
+                    "{}{{\"role\":{},\"behavior\":{},\"curve\":{}}}",
+                    if j > 0 { "," } else { "" },
+                    string(role_name(member.role)),
+                    string(member.behavior),
+                    self.curve(&status, member.role)
+                );
+            }
+            o.push_str("]}");
+        }
+        o.push_str("],\"lights\":[");
+        for (i, role) in lights().enumerate() {
+            let light = self.lights.borrow()[role];
+            let (effect, phase) = self.effects.borrow()[role];
+            let _ = write!(
+                o,
+                "{}{{\"role\":{},\"on\":{},\"level\":{},\"weatherEffect\":{},\"pulsePhase\":{},\"color\":{}}}",
                 if i > 0 { "," } else { "" },
                 string(role_name(role)),
-                bulb.on,
-                bulb.to,
-                color(bulb.color.unwrap_or_default())
+                light.on,
+                light.level,
+                string(effect.name()),
+                string(phase.name()),
+                color(light.color)
             );
         }
         o.push_str("],\"devices\":[");
@@ -288,6 +381,41 @@ impl Office {
             );
         }
         o.push_str("]}");
+        o
+    }
+}
+
+impl Office {
+    // What the daylight program would have `role` show through the day, every
+    // 15 minutes (and 23:59), as a JSON array; empty with no clock.
+    fn curve(&self, status: &StatusSnapshot, role: Role) -> String {
+        if !status.time.valid {
+            return "[]".into();
+        }
+        let cloud = status.sky.cloud_percent.unwrap_or(0) as f64 / 100.0;
+        let mut o = String::from("[");
+        for i in 0..97 {
+            let minute = (i * 15).min(1439);
+            let time = TimeReading { local: status.time.day() + Duration::minutes(minute), ..status.time };
+            let target = daylight_target(
+                role,
+                &status.config,
+                &status.peaks,
+                &status.min_levels,
+                &time,
+                cloud,
+                &self.installation,
+            );
+            let _ = write!(
+                o,
+                "{}{{\"minute\":{minute},\"on\":{},\"level\":{},\"color\":{}}}",
+                if i > 0 { "," } else { "" },
+                target.on,
+                target.level,
+                color(target.color)
+            );
+        }
+        o.push(']');
         o
     }
 }

@@ -1,9 +1,10 @@
-//! Day length and the next sunrise/sunset, for the status display/console.
+//! Day length, the next sunrise/sunset and where the sun is, for the status
+//! display and console.
 //! Pure, like daylight.rs and solar.rs.
 
 use ev::{DayInfo, TimeReading};
 
-use super::solar::compute_sun_times;
+use super::solar::{compute_sun_position, compute_sun_times};
 
 pub fn compute_day_info(time: &TimeReading, latitude_deg: f64, longitude_deg: f64) -> DayInfo {
     const DAY: f64 = 24.0;
@@ -12,6 +13,7 @@ pub fn compute_day_info(time: &TimeReading, latitude_deg: f64, longitude_deg: f6
     let offset = time.utc_offset.as_hours_f64();
     let day_of_year = time.day_of_year();
     let today = compute_sun_times(latitude_deg, longitude_deg, day_of_year, offset);
+    let sun = compute_sun_position(latitude_deg, longitude_deg, day_of_year, now, offset);
 
     let mut day_length = today.sunset - today.sunrise;
     if day_length < 0.0 {
@@ -25,6 +27,8 @@ pub fn compute_day_info(time: &TimeReading, latitude_deg: f64, longitude_deg: f6
         next_is_sunrise: true,
         next_event: today.sunrise,
         until_next: today.sunrise - now,
+        sun_azimuth_deg: sun.azimuth_deg,
+        sun_elevation_deg: sun.elevation_deg,
     };
 
     if now < today.sunrise {

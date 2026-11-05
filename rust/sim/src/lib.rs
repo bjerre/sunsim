@@ -10,12 +10,13 @@ pub mod sim_network;
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 pub use scheduler::Scheduler;
 pub use sim_clock::SimClock;
 pub use sim_network::{Bulb, Counts, Device, SimNetwork};
 
-use ev::{Addresses, Duration, EventBus, Instant, TimeReading};
+use ev::{Addresses, Duration, EventBus, Installation, Instant, TimeReading};
 use sunsim_core::{CoreModules, LightGroup, wire_core};
 
 /// The core, wired as the firmware wires it, with SimClock and SimNetwork
@@ -31,9 +32,19 @@ pub struct World {
 
 impl World {
     pub fn new(start: TimeReading, addresses: Addresses, groups: Vec<LightGroup>) -> Self {
+        World::with_installation(start, addresses, groups, Arc::new(Installation::built_in()))
+    }
+
+    /// The same, running `installation`'s zones (a profile's).
+    pub fn with_installation(
+        start: TimeReading,
+        addresses: Addresses,
+        groups: Vec<LightGroup>,
+        installation: Arc<Installation>,
+    ) -> Self {
         let mut bus = EventBus::new();
         let scheduler = Scheduler::new();
-        let core = CoreModules::new(bus.post(), addresses, groups);
+        let core = CoreModules::new(bus.post(), addresses, groups, installation);
         let clock = Rc::new(RefCell::new(SimClock::new(bus.post().clone(), scheduler.clone(), start)));
         let network = Rc::new(RefCell::new(SimNetwork::new(scheduler.clone())));
         wire_core(&mut bus, &core);

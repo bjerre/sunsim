@@ -69,8 +69,8 @@ fn the_gate_the_active_hours_fade_at_each_edge_the_first_rule_with_an_answer_dec
 
 #[test]
 fn each_light_shows_its_declared_look_faded_by_the_gate() {
-    assert!(members(Group::Wall).iter().all(|&r| matches!(LOOK_OF[r], Look::SunCurve)));
-    assert!(matches!(LOOK_OF[WORK], Look::WorkCurve(_)));
+    assert!(members(Group::Wall).iter().all(|&r| matches!(TOPOLOGY.look_of[r], Look::SunCurve)));
+    assert!(matches!(TOPOLOGY.look_of[WORK], Look::WorkCurve(_)));
 
     let mut h = Harness::new();
     h.tick(1);

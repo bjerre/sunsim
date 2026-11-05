@@ -12,13 +12,17 @@ mod off;
 mod red_alert;
 mod tuning;
 
-pub use daylight::DaylightProgram;
+pub use daylight::{DaylightProgram, daylight_target};
 pub use host::ProgramHost;
 pub use off::OffProgram;
 pub use red_alert::RedAlertProgram;
 pub use tuning::TuningProgram;
 
-use ev::{Event, LightChange, LightState, LightTarget, Mode, Post, Role, TimeReading, Transition, ZONE_OF, ZoneId};
+use std::sync::Arc;
+
+use ev::{
+    Event, Installation, LightChange, LightState, LightTarget, Mode, Post, Role, TimeReading, Transition, ZoneId,
+};
 
 /// What a program is to ProgramHost. `now` is None until the clock's first
 /// Tick.
@@ -48,11 +52,16 @@ pub trait Program {
 pub struct Base {
     post: Post,
     zone: ZoneId,
+    installation: Arc<Installation>,
 }
 
 impl Base {
-    pub fn new(post: Post, zone: ZoneId) -> Self {
-        Base { post, zone }
+    pub fn new(post: Post, zone: ZoneId, installation: Arc<Installation>) -> Self {
+        Base { post, zone, installation }
+    }
+
+    pub fn installation(&self) -> &Installation {
+        &self.installation
     }
 
     pub fn zone(&self) -> ZoneId {
@@ -61,8 +70,8 @@ impl Base {
 
     /// The lights in the zone, or only `only` if it's given (and one of them).
     pub fn lights(&self, only: Option<Role>) -> impl Iterator<Item = Role> + use<> {
-        let zone = self.zone;
-        ev::lights().filter(move |&r| ZONE_OF[r] == Some(zone) && only.is_none_or(|o| o == r))
+        let (zone, zone_of) = (self.zone, self.installation.topology.zone_of);
+        ev::lights().filter(move |&r| zone_of[r] == Some(zone) && only.is_none_or(|o| o == r))
     }
 
     pub fn target2(&self, role: Role, state: LightState, level: Transition, color: Transition) {

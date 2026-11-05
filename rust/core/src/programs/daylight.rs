@@ -15,7 +15,43 @@ fn position_in_group(role: Role) -> f64 {
     if count < 2.0 { 0.0 } else { 1.0 - 2.0 * role.index as f64 / (count - 1.0) }
 }
 
-/// The normal program: each light shows its look (LOOK_OF: the wall's sun
+/// A brightness (0-1) on the light's own range: its minimum level (the
+/// lowest it visibly shows) up to its peak. So a light stays lit, dimly,
+/// until the curve really ends at sunset.
+fn level_for(role: Role, brightness: f64, peaks: &Peaks, min_levels: &MinLevels) -> u8 {
+    let top = (MAX_LEVEL as f64 * peaks[role] as f64 / 100.0).max(1.0);
+    let floor = (min_levels[role] as f64).min(top);
+    (floor + (top - floor) * brightness.clamp(0.0, 1.0)).round() as u8
+}
+
+/// What the daylight program has `role` show at `time` with `cloud` cover
+/// (0-1): its look, faded by its zone's gate, on its own range. Off with no
+/// clock. Shared with what samples the program's curve (the browser
+/// simulator's program flow), so they see what the lights will.
+pub fn daylight_target(
+    role: Role,
+    config: &ProgramConfig,
+    peaks: &Peaks,
+    min_levels: &MinLevels,
+    time: &TimeReading,
+    cloud: f64,
+    installation: &Installation,
+) -> LightState {
+    let topology = &installation.topology;
+    let Some(zone) = topology.zone_of[role].filter(|_| time.valid) else { return LightState::default() };
+    let open = openness(&installation.spec(zone).gate, time, config);
+    let ctx = LookContext { config, time: *time, position: position_in_group(role), cloud };
+    match show(&topology.look_of[role], &ctx) {
+        Some(glow) if open > 0.0 => LightState {
+            on: true,
+            level: level_for(role, glow.brightness * open, peaks, min_levels),
+            color: glow.color,
+        },
+        _ => LightState::default(),
+    }
+}
+
+/// The normal program: each light shows its look (the installation's: the wall's sun
 /// curve, with the cloud cover live, else forecast; the work light's cool ->
 /// warm day) while its zone's gate (the active hours) lets it, across the
 /// light's range from its minimum level to its peak intensity. Every
@@ -43,33 +79,16 @@ impl DaylightProgram {
         }
     }
 
-    /// A brightness (0-1) on the light's own range: its minimum level (the
-    /// lowest it visibly shows) up to its peak. So a light stays lit, dimly,
-    /// until the curve really ends at sunset.
-    fn level_for(&self, role: Role, brightness: f64) -> u8 {
-        let top = (MAX_LEVEL as f64 * self.peaks[role] as f64 / 100.0).max(1.0);
-        let floor = (self.min_levels[role] as f64).min(top);
-        (floor + (top - floor) * brightness.clamp(0.0, 1.0)).round() as u8
-    }
-
     fn emit(&mut self, role: Role, time: &TimeReading, transition: Transition) {
-        let mut state = LightState::default();
         if time.valid {
             self.clock_warned = false;
-            let open = openness(spec_of(self.base.zone()).gate, time, &self.config);
-            let ctx = LookContext {
-                config: &self.config,
-                time: *time,
-                position: position_in_group(role),
-                cloud: self.cloud_percent as f64 / 100.0,
-            };
-            if let Some(glow) = show(&LOOK_OF[role], &ctx).filter(|_| open > 0.0) {
-                state = LightState { on: true, level: self.level_for(role, glow.brightness * open), color: glow.color };
-            }
         } else if !self.clock_warned {
             self.clock_warned = true;
             log::warn!(target: "PROGRAM", "Clock not set yet (no time sync) - holding lights off");
         }
+        let cloud = self.cloud_percent as f64 / 100.0;
+        let state =
+            daylight_target(role, &self.config, &self.peaks, &self.min_levels, time, cloud, self.base.installation());
         self.base.target(role, state, transition);
     }
 

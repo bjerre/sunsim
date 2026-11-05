@@ -7,6 +7,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use ev::*;
 use sunsim_core::{CoreModules, wire_core};
@@ -66,8 +67,13 @@ impl Harness {
     }
 
     pub fn with_addresses(addresses: Addresses) -> Self {
+        Harness::with_installation(addresses, Installation::built_in())
+    }
+
+    /// The core with `installation`'s zones: a profile's.
+    pub fn with_installation(addresses: Addresses, installation: Installation) -> Self {
         let mut bus = EventBus::new();
-        let core = CoreModules::new(bus.post(), addresses, Vec::new());
+        let core = CoreModules::new(bus.post(), addresses, Vec::new(), Arc::new(installation));
         wire_core(&mut bus, &core);
         // Record everything posted, including platform-bound events.
         let log = Rc::new(RefCell::new(Vec::new()));

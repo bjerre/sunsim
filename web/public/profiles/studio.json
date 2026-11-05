@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "zones": [
+    {
+      "name": "studio",
+      "startMinute": 420,
+      "endMinute": 1380,
+      "buttonRole": "Button",
+      "members": [
+        { "role": "WallA", "look": "sun-curve" },
+        { "role": "WallB", "look": "sun-curve" },
+        { "role": "WallC", "look": "sun-curve" },
+        { "role": "WallD", "look": "sun-curve" },
+        { "role": "WallE", "look": "sun-curve" },
+        { "role": "Work", "look": "work-curve" },
+        { "role": "Desk", "look": "on-off" }
+      ],
+      "weather": {
+        "precipitation": ["WallC"],
+        "alerts": ["WallB", "WallD"]
+      }
+    },
+    {
+      "name": "plants",
+      "startMinute": 360,
+      "endMinute": 540,
+      "members": [{ "role": "Grow", "look": "on-off" }]
+    }
+  ]
+}

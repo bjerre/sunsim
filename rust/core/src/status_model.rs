@@ -11,19 +11,21 @@ use crate::math::day_info::compute_day_info;
 /// published as StatusChanged once a second (after each Tick's DevicesUpdated).
 pub struct StatusModel {
     post: Post,
+    installation: Arc<Installation>,
     snap: StatusSnapshot,
 }
 
 impl StatusModel {
-    pub fn new(post: Post) -> Self {
-        StatusModel { post, snap: StatusSnapshot::default() }
+    pub fn new(post: Post, installation: Arc<Installation>) -> Self {
+        StatusModel { post, installation, snap: StatusSnapshot::default() }
     }
 
     fn publish(&mut self) {
         let t = self.snap.time;
         self.snap.day = compute_day_info(&t, self.snap.config.latitude_deg, self.snap.config.longitude_deg);
-        for zone in zone_ids() {
-            self.snap.zones[zone].gate_open = openness(spec_of(zone).gate, &t, &self.snap.config) > 0.0;
+        for zone in self.installation.zone_ids() {
+            let gate = &self.installation.spec(zone).gate;
+            self.snap.zones[zone].gate_open = openness(gate, &t, &self.snap.config) > 0.0;
         }
         self.post.send(StatusChanged { snapshot: Arc::new(self.snap.clone()) });
     }

@@ -22,7 +22,7 @@ impl Rig {
     fn new(nvs: Nvs) -> Self {
         let mut bus = EventBus::new();
         let defaults = ProgramConfig { latitude_deg: 44.98, ..ProgramConfig::default() };
-        let store = Rc::new(RefCell::new(SettingsStore::new(bus.post().clone(), nvs, defaults)));
+        let store = Rc::new(RefCell::new(SettingsStore::new(bus.post().clone(), nvs, defaults, DEFAULT_PEAKS)));
         bus.attach(&store);
         let log = Rc::new(RefCell::new(Vec::new()));
         let recorder = log.clone();

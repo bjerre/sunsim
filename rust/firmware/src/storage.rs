@@ -37,7 +37,9 @@ impl Storage for Nvs {
         self.0.set_u64(key, value)
     }
     fn get_str(&self, key: &str) -> Result<Option<String>, EspError> {
-        let mut buf = [0u8; 65]; // a Wi-Fi password, the longest, and its terminator
+        // As long as it is (a Wi-Fi password, or a whole installation profile).
+        let Some(len) = self.0.str_len(key)? else { return Ok(None) };
+        let mut buf = vec![0u8; len + 1];
         Ok(self.0.get_str(key, &mut buf)?.map(str::to_string))
     }
     fn set_str(&mut self, key: &str, value: &str) -> Result<(), EspError> {

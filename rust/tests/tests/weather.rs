@@ -327,9 +327,9 @@ fn an_alert_outranks_the_precipitation_on_a_light_thats_both_weather_off_stops_b
     assert_eq!(pulse.shade.hue_deg, 50); // advisory yellow, not snow's blue
 
     // The declared lights: WallC takes precipitation only, WallA nothing.
-    let snow = weather_pulse(WALL_C, true, Mode::Daylight, &on, &sky, &WEATHER_LIGHTS).unwrap();
+    let snow = weather_pulse(WALL_C, true, Mode::Daylight, &on, &sky, &TOPOLOGY.weather).unwrap();
     assert_eq!(snow.shade.hue_deg, 195);
-    assert!(weather_pulse(WALL_A, true, Mode::Daylight, &on, &sky, &WEATHER_LIGHTS).is_none());
+    assert!(weather_pulse(WALL_A, true, Mode::Daylight, &on, &sky, &TOPOLOGY.weather).is_none());
 
     let off = ProgramConfig { weather_enabled: false, ..on };
     assert!(weather_pulse(WALL_C, true, Mode::Daylight, &off, &sky, &both).is_none());

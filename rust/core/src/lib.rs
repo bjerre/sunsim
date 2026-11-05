@@ -14,6 +14,7 @@ pub mod status_model;
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 pub use device_registry::DeviceRegistry;
 pub use gate::openness;
@@ -25,11 +26,12 @@ pub use math::solar::{SunPosition, SunTimes, compute_sun_position, compute_sun_t
 pub use mode_controller::ModeController;
 pub use overlays::{Overlays, Pulse, Shade, weather_pulse};
 pub use programs::ProgramHost;
+pub use programs::daylight_target;
 pub use send_queue::{LightGroup, SendQueue};
 pub use sky_model::SkyModel;
 pub use status_model::StatusModel;
 
-use ev::{Addresses, EventBus, Post};
+use ev::{Addresses, EventBus, Installation, Post};
 
 /// All of the pure application logic, each module shared with the bus it's
 /// attached to (wire_core).
@@ -45,17 +47,18 @@ pub struct CoreModules {
 }
 
 impl CoreModules {
-    /// `groups`: the Zigbee groups the bulbs are in, for SendQueue.
-    pub fn new(post: &Post, addresses: Addresses, groups: Vec<LightGroup>) -> Self {
+    /// `groups`: the Zigbee groups the bulbs are in, for SendQueue;
+    /// `installation`: the zones (Installation::built_in(), or a profile's).
+    pub fn new(post: &Post, addresses: Addresses, groups: Vec<LightGroup>, installation: Arc<Installation>) -> Self {
         CoreModules {
-            mode: Rc::new(RefCell::new(ModeController::new(post.clone()))),
+            mode: Rc::new(RefCell::new(ModeController::new(post.clone(), installation.clone()))),
             registry: Rc::new(RefCell::new(DeviceRegistry::new(post.clone(), addresses))),
             sky: Rc::new(RefCell::new(SkyModel::new(post.clone()))),
-            programs: Rc::new(RefCell::new(ProgramHost::new(post))),
-            overlays: Rc::new(RefCell::new(Overlays::new(post.clone()))),
+            programs: Rc::new(RefCell::new(ProgramHost::new(post, installation.clone()))),
+            overlays: Rc::new(RefCell::new(Overlays::new(post.clone(), installation.clone()))),
             output: Rc::new(RefCell::new(LightOutput::new(post.clone()))),
             sends: Rc::new(RefCell::new(SendQueue::new(post.clone(), groups))),
-            status: Rc::new(RefCell::new(StatusModel::new(post.clone()))),
+            status: Rc::new(RefCell::new(StatusModel::new(post.clone(), installation))),
         }
     }
 }

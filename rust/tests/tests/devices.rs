@@ -269,13 +269,17 @@ fn each_kind_of_light_gets_only_the_commands_it_takes() {
 
 #[test]
 fn zones_every_light_in_one_with_its_look_buttons_control_theirs() {
-    assert!(ZONE_COUNT == 3 && ZONE_OF[WALL_A] == Some(ZoneId(0)) && ZONE_OF[BUTTON] == Some(ZoneId(0)));
-    assert!(ZONE_OF[DESK] == Some(ZoneId(1)) && ZONE_OF[GROW] == Some(ZoneId(2)));
-    assert!(matches!(LOOK_OF[DESK], Look::OnOffOnly) && matches!(LOOK_OF[GROW], Look::OnOffOnly));
+    assert!(
+        Installation::built_in().zones.len() == 3
+            && TOPOLOGY.zone_of[WALL_A] == Some(ZoneId(0))
+            && TOPOLOGY.zone_of[BUTTON] == Some(ZoneId(0))
+    );
+    assert!(TOPOLOGY.zone_of[DESK] == Some(ZoneId(1)) && TOPOLOGY.zone_of[GROW] == Some(ZoneId(2)));
+    assert!(matches!(TOPOLOGY.look_of[DESK], Look::OnOffOnly) && matches!(TOPOLOGY.look_of[GROW], Look::OnOffOnly));
     assert!(DEFAULT_PEAKS[WORK] == 90 && DEFAULT_PEAKS[WALL_A] == 100 && DEFAULT_PEAKS[DESK] == 100);
-    assert!(CONTROLS_OF[BUTTON].is_some() && CONTROLS_OF[WORK].is_none());
-    assert!(WEATHER_LIGHTS.precip.contains(WALL_C) && WEATHER_LIGHTS.alerts.contains(WALL_B));
-    assert!(!WEATHER_LIGHTS.alerts.contains(WALL_C));
+    assert!(TOPOLOGY.controls_of[BUTTON].is_some() && TOPOLOGY.controls_of[WORK].is_none());
+    assert!(TOPOLOGY.weather.precip.contains(WALL_C) && TOPOLOGY.weather.alerts.contains(WALL_B));
+    assert!(!TOPOLOGY.weather.alerts.contains(WALL_C));
 
     // Another room: the wall in one zone; the work light, the plugs and the button in another.
     const ZONES: [ZoneSpec; 2] = [

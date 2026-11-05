@@ -1,5 +1,7 @@
 //! The weather lights: pulses over the program's targets.
 
+use std::sync::Arc;
+
 use ev::*;
 
 /// A saturated color: hue in degrees, saturation 0-254 (Zigbee's).
@@ -15,6 +17,7 @@ pub struct Pulse {
     pub shade: Shade,
     pub fade_seconds: u8, // each fade, bright to dim or back: a cycle is twice this
     pub strength: f64,    // the top of the pulse, as a fraction of the light's peak
+    pub effect: WeatherEffect,
 }
 
 // Quick, for handing a light back to its program.
@@ -28,12 +31,13 @@ const UNLIT_STRENGTH: f64 = 0.35;
 
 // Advisory yellow, watch orange, warning red; faster as it gets worse.
 const fn alert_pulse(level: AlertLevel) -> Pulse {
-    let (hue_deg, fade_seconds) = match level {
-        AlertLevel::Advisory => (50, 3),
-        AlertLevel::Watch => (28, 2),
-        AlertLevel::Warning | AlertLevel::None => (0, 1),
+    let (hue_deg, fade_seconds, effect) = match level {
+        AlertLevel::Advisory => (50, 3, WeatherEffect::Advisory),
+        AlertLevel::Watch => (28, 2, WeatherEffect::Watch),
+        AlertLevel::Warning => (0, 1, WeatherEffect::Warning),
+        AlertLevel::None => (0, 1, WeatherEffect::None),
     };
-    Pulse { shade: Shade { hue_deg, saturation: 254 }, fade_seconds, strength: 1.0 }
+    Pulse { shade: Shade { hue_deg, saturation: 254 }, fade_seconds, strength: 1.0, effect }
 }
 
 // Blues for water, paler and slower for snow; violet for freezing rain,
@@ -44,14 +48,15 @@ const fn precip_pulse(precip: Precip, intensity: Intensity) -> Pulse {
         Intensity::Moderate => 0.8,
         Intensity::Light => 0.6,
     };
-    let (hue_deg, saturation, fade_seconds) = match precip {
-        Precip::Drizzle => (205, 170, 3),
-        Precip::FreezingRain => (280, 230, 2),
-        Precip::Snow => (195, 150, 3),
-        Precip::Thunderstorm => (270, 254, 1),
-        Precip::Rain | Precip::None => (228, 254, 2),
+    let (hue_deg, saturation, fade_seconds, effect) = match precip {
+        Precip::Drizzle => (205, 170, 3, WeatherEffect::Drizzle),
+        Precip::FreezingRain => (280, 230, 2, WeatherEffect::FreezingRain),
+        Precip::Snow => (195, 150, 3, WeatherEffect::Snow),
+        Precip::Thunderstorm => (270, 254, 1, WeatherEffect::Thunderstorm),
+        Precip::Rain => (228, 254, 2, WeatherEffect::Rain),
+        Precip::None => (228, 254, 2, WeatherEffect::None),
     };
-    Pulse { shade: Shade { hue_deg, saturation }, fade_seconds, strength }
+    Pulse { shade: Shade { hue_deg, saturation }, fade_seconds, strength, effect }
 }
 
 const fn zigbee_hue(degrees: u16) -> u8 {
@@ -112,6 +117,7 @@ struct Light {
 /// and every Tick (the mode, the program's lights, the pulse's beat).
 pub struct Overlays {
     post: Post,
+    installation: Arc<Installation>,
     sky: Sky,
     modes: PerZone<Mode>, // each zone's; Daylight to start
     config: ProgramConfig,
@@ -122,9 +128,10 @@ pub struct Overlays {
 }
 
 impl Overlays {
-    pub fn new(post: Post) -> Self {
+    pub fn new(post: Post, installation: Arc<Installation>) -> Self {
         Overlays {
             post,
+            installation,
             sky: Sky::default(),
             modes: PerZone::default(),
             config: ProgramConfig::default(),
@@ -142,7 +149,7 @@ impl Overlays {
         let light = &mut self.lights[e.role];
         light.base = Some(*e);
         if light.pulse.is_none() {
-            self.post.send(OutputTarget(e.0));
+            self.post.send(OutputTarget::from(e.0));
         }
     }
 
@@ -152,8 +159,9 @@ impl Overlays {
         for role in lights() {
             let light = self.lights[role];
             let lit = light.base.is_some_and(|b| b.state.on);
-            let zone = ZONE_OF[role].expect("every light is in a zone");
-            let Some(pulse) = weather_pulse(role, lit, self.modes[zone], &self.config, &self.sky, &WEATHER_LIGHTS)
+            let topology = &self.installation.topology;
+            let Some(zone) = topology.zone_of[role] else { continue };
+            let Some(pulse) = weather_pulse(role, lit, self.modes[zone], &self.config, &self.sky, &topology.weather)
             else {
                 if light.pulse.is_some() {
                     self.release(role);
@@ -178,16 +186,20 @@ impl Overlays {
         let top = min.max(peak.round().max(1.0) as u8);
         let bottom = ((top as f64 * DIM_FRACTION).round() as u8).clamp(min, top);
 
-        self.post.send(OutputTarget(LightChange {
-            role,
-            state: LightState {
-                on: true,
-                level: if bright { top } else { bottom },
-                color: HueSat { hue: zigbee_hue(pulse.shade.hue_deg), saturation: pulse.shade.saturation }.into(),
+        self.post.send(OutputTarget {
+            change: LightChange {
+                role,
+                state: LightState {
+                    on: true,
+                    level: if bright { top } else { bottom },
+                    color: HueSat { hue: zigbee_hue(pulse.shade.hue_deg), saturation: pulse.shade.saturation }.into(),
+                },
+                level_transition: Transition::tenths(pulse.fade_seconds as u16 * 10 - 1), // nearly the whole fade
+                color_transition: COLOR_TRANSITION,
             },
-            level_transition: Transition::tenths(pulse.fade_seconds as u16 * 10 - 1), // nearly the whole fade
-            color_transition: COLOR_TRANSITION,
-        }));
+            weather_effect: pulse.effect,
+            pulse_phase: if bright { PulsePhase::Bright } else { PulsePhase::Dim },
+        });
     }
 
     fn release(&mut self, role: Role) {
@@ -198,7 +210,7 @@ impl Overlays {
         let mut back = light.base.map_or(LightChange { role, ..LightChange::default() }, |b| b.0);
         back.level_transition = RELEASE_TRANSITION;
         back.color_transition = RELEASE_TRANSITION;
-        self.post.send(OutputTarget(back));
+        self.post.send(OutputTarget::from(back));
     }
 }
 

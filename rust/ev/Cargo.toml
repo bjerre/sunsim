@@ -9,3 +9,6 @@ workspace = true
 
 [dependencies]
 log.workspace = true
+
+[build-dependencies]
+serde_json = "1"

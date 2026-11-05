@@ -3,9 +3,11 @@
   import ControlsPane from "./ControlsPane.svelte";
   import DisplayPane from "./DisplayPane.svelte";
   import OfficePane from "./OfficePane.svelte";
+  import ProgramFlowPane from "./ProgramFlowPane.svelte";
   import WindowPane from "./WindowPane.svelte";
   import {
     createSimulatorController,
+    parseRuntimeInstallationProfile,
     type AlertLevel,
     type ButtonPress,
     type LocationCoordinates,
@@ -13,13 +15,14 @@
     type SimulationClock,
     type SimulatorController,
     type SimulatorState,
-  } from "../simulator.js";
+  } from "../simulator.ts";
 
   const savedLocationKey = "sunsim.location.v1";
 
   let simulator = $state<SimulatorController | null>(null);
   let simState = $state<SimulatorState | null>(null);
   let runtimeLabel = $state("Starting WebAssembly…");
+  let profileSelection = $state("default");
   let eventStatus = $state("Waiting for first event…");
   let simulatedDate = $state("");
   let simulatedMinute = $state(720);
@@ -176,6 +179,27 @@
     eventStatus = "Weather alert posted to event bus";
   }
 
+  function changeProfile(event: Event): void {
+    const selected = (event.currentTarget as HTMLSelectElement).value;
+    const url = new URL(window.location.href);
+    if (selected === "default") url.searchParams.delete("profile");
+    else url.searchParams.set("profile", selected);
+    window.location.assign(url);
+  }
+
+  async function loadRequestedProfile() {
+    const name = new URLSearchParams(window.location.search).get("profile");
+    if (!name) return undefined;
+    if (name !== "office" && name !== "studio") {
+      throw new Error(`Unknown setup profile: ${name}`);
+    }
+    profileSelection = name;
+    const profileUrl = new URL(`profiles/${name}.json`, new URL("./", window.location.href));
+    const response = await fetch(profileUrl);
+    if (!response.ok) throw new Error(`Could not load the ${name} setup profile.`);
+    return parseRuntimeInstallationProfile(await response.json());
+  }
+
   onMount(() => {
     let alive = true;
     let unsubscribe: (() => void) | undefined;
@@ -184,7 +208,8 @@
 
     async function start(): Promise<void> {
       try {
-        activeSimulator = await createSimulatorController();
+        const profile = await loadRequestedProfile();
+        activeSimulator = await createSimulatorController(profile);
         if (!alive) {
           activeSimulator.dispose();
           return;
@@ -234,12 +259,25 @@
       <p class="eyebrow">SUNSIM · PORTABLE CORE</p>
       <h1>Office lighting lab</h1>
     </div>
-    <div class="runtime"><span class="live-dot"></span><span>{runtimeLabel}</span></div>
+    <div class="header-tools">
+      <label class="profile-picker">
+        Setup
+        <select value={profileSelection} onchange={changeProfile}>
+          <option value="default">Compiled default</option>
+          <option value="office">Office JSON profile</option>
+          <option value="studio">Studio JSON profile</option>
+        </select>
+      </label>
+      <div class="runtime"><span class="live-dot"></span><span>{runtimeLabel}</span></div>
+    </div>
   </header>
 
   {#if simState}
     <section class="workspace">
-      <OfficePane snapshot={simState} />
+      <div class="main-column">
+        <OfficePane snapshot={simState} />
+        <ProgramFlowPane snapshot={simState} onButtonPress={pressButton} />
+      </div>
       <aside class="side-column">
         <WindowPane snapshot={simState} />
         <DisplayPane snapshot={simState} />
@@ -267,5 +305,5 @@
       <p class="hint">{eventStatus}</p>
     </section>
   {/if}
-  <footer><span>Core logic: C++ → WebAssembly</span><span>{eventStatus}</span></footer>
+  <footer><span>Core logic: Rust → WebAssembly</span><span>{eventStatus}</span></footer>
 </main>

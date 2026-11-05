@@ -3,7 +3,9 @@
 //! NVS (platform::SettingsStore on storage.rs) and the internet sync
 //! (platform::InternetSync on internet.rs), and the serial console
 //! (platform::Console on console.rs) and the status display
-//! (platform::display on display.rs): the C++ platform, all of it.
+//! (platform::display on display.rs): the C++ platform, all of it. The
+//! installation is the build's (config/installation.json), or a profile
+//! uploaded over the console into NVS (platform::ProfileStore).
 
 mod clock;
 mod config;
@@ -15,12 +17,13 @@ mod zigbee;
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::hal::peripherals::Peripherals;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use ev::*;
-use platform::{InternetSync, SettingsStore, StatusSlot, Syncer, WifiStore};
+use platform::{InternetSync, ProfileStore, SettingsStore, StatusSlot, Syncer, WifiStore};
 use sunsim_core::{CoreModules, wire_core};
 use zigbee::{StackLock, ZigbeeAdapter};
 
@@ -35,12 +38,18 @@ fn main() {
     let peripherals = Peripherals::take().expect("the peripherals");
     let sysloop = EspSystemEventLoop::take().expect("the system event loop");
 
+    // The zones: a saved profile's, if there's a valid one; else the build's.
+    let profiles = ProfileStore::new(storage::Nvs::open(nvs.clone()).expect("the profile's NVS namespace"));
+    let installation = Arc::new(profiles.load().unwrap_or_else(Installation::built_in));
+
     // The bus and every module, wired as the firmware wires them: the core,
     // then the platform's.
     let mut bus = EventBus::new();
-    let core = CoreModules::new(bus.post(), ADDRESS_OF, Vec::new());
+    let core = CoreModules::new(bus.post(), ADDRESS_OF, Vec::new(), installation.clone());
     let storage = storage::Nvs::open(nvs.clone()).expect("the settings' NVS namespace");
-    let settings = Rc::new(RefCell::new(SettingsStore::new(bus.post().clone(), storage, config::default_program())));
+    let peaks = installation.topology.peak_of;
+    let settings =
+        Rc::new(RefCell::new(SettingsStore::new(bus.post().clone(), storage, config::default_program(), peaks)));
     let zigbee = Rc::new(RefCell::new(ZigbeeAdapter::new(bus.post().clone()).expect("the Zigbee adapter")));
     let board = clock::Board::start(bus.post()).expect("the clock's timers");
     let clock = Rc::new(RefCell::new(platform::Clock::new(bus.post().clone(), board, config::fast_day())));
@@ -71,7 +80,10 @@ fn main() {
 
     zigbee.borrow().start();
 
-    let wifi = WifiStore::new(storage::Nvs::open(nvs).expect("the Wi-Fi networks' NVS namespace"), Some(config::wifi_fallback()));
+    let wifi = WifiStore::new(
+        storage::Nvs::open(nvs).expect("the Wi-Fi networks' NVS namespace"),
+        Some(config::wifi_fallback()),
+    );
     let day_seconds = config::DEBUG_DAY_SECONDS.parse().expect("SUNSIM_DEBUG_DAY_SECONDS is a number");
     if config::DISPLAY == "y" {
         let p = peripherals.pins;
@@ -86,7 +98,8 @@ fn main() {
         };
         display::start(pins, status.borrow().clone(), config::DISPLAY_FLIP == "y");
     }
-    console::start(bus.post().clone(), status.borrow().clone(), wifi, day_seconds).expect("the console");
+    console::start(bus.post().clone(), status.borrow().clone(), installation, wifi, profiles, day_seconds)
+        .expect("the console");
 
     // The app task (this one): the bus's single consumer. Handlers may call
     // into the Zigbee stack, which needs its lock - and the lock only exists

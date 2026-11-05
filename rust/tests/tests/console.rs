@@ -3,10 +3,11 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use ev::*;
 use platform::console::{clock_text, duration_text, split_words};
-use platform::{Console, ConsoleBoard, StatusSlot, WifiStore};
+use platform::{Console, ConsoleBoard, ProfileStore, StatusSlot, WifiStore};
 use sunsim_tests::*;
 
 struct Board {
@@ -38,8 +39,10 @@ impl Rig {
         let shared = slot.borrow().clone();
         let now = Rc::new(Cell::new(Instant::ZERO));
         let wifi = WifiStore::new(Nvs::default(), None);
-        let console =
-            Console::new(h.bus.post().clone(), shared, wifi, Board { now: now.clone(), restarted: false }, 120);
+        let profiles = ProfileStore::new(Nvs::default());
+        let installation = Arc::new(Installation::built_in());
+        let board = Board { now: now.clone(), restarted: false };
+        let console = Console::new(h.bus.post().clone(), shared, installation, wifi, profiles, board, 120);
         Rig { h, console, now }
     }
 
@@ -55,6 +58,7 @@ impl Rig {
     fn ty(&mut self, line: &str) -> String {
         let reply = self.console.line(line);
         self.h.bus.drain();
+        self.console.finish_reply(); // as the board does, once the reply is out
         reply
     }
 }
