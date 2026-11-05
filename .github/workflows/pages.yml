@@ -1,0 +1,63 @@
+name: Build and deploy browser demo
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # The simulator is the Rust core (rust/web), built for wasm.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Test the Rust core
+        run: cargo test --manifest-path rust/Cargo.toml
+
+      - name: Build WebAssembly simulator
+        run: rust/web/build.sh
+
+      - name: Test WebAssembly simulator
+        run: node test/web/wasm_smoke.mjs
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run check
+
+      - uses: actions/configure-pages@v5
+
+      - name: Build static site
+        run: bun run build
+        env:
+          VITE_BASE_PATH: /sunsim/
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: web/dist
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-24.04
+    needs: build
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

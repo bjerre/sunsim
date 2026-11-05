@@ -8,6 +8,7 @@ A port of everything that doesn't touch ESP-IDF, as a cargo workspace:
 | `sunsim-core` | `components/sunsim_core` | the registry, modes, programs, overlays, output, send queue, sky and status models, the math |
 | `weather` (sunsim-weather) | `components/sunsim_weather` | the streaming JSON scanner and the Open-Meteo / NWS readers |
 | `platform` (sunsim-platform) | `components/sunsim_platform`, the logic | the platform modules without ESP-IDF, their hardware behind traits: the Clock, the SettingsStore (on a `Storage`: NVS's typed keys), the InternetSync (on an `Internet`: Wi-Fi sessions, SNTP, HTTPS), the saved Wi-Fi networks, the console's commands and the status display's picture (embedded-graphics) |
+| `web` (sunsim-web) | `web/simulator.cxx` (feature/browser-simulation) | the browser simulator's office: the core on `sim`'s network, with the page's clock, as wasm |
 | `sim` (sunsim-sim) | `sim/` | virtual time, the simulated clock and Zigbee network, `World` |
 | `tests` (sunsim-tests) | `test/host` | the harness (`src/lib.rs`) and the host tests, one file per area |
 
@@ -52,3 +53,16 @@ names, the raw reads), `bulb.rs` (the ZCL light commands), `mod.rs` (the stack t
 callbacks, `ev::Radio`). esp-zigbee-lib comes through `components/zigbee_shim`, which
 depends on it and gives bindgen its function-like macros as functions. Not yet run on a
 board. The C++ platform is all ported.
+
+## The browser simulator (web/)
+
+The Svelte page in `web/` runs the Rust core as wasm: `rust/web` is the simulated office
+(the core on `sim`'s network, the page's clock and location, its JSON state), exported as
+the functions the page calls (`web/wasm.d.ts`), with a small loader
+(`rust/web/js/sunsim_web_simulator.js`) in place of Emscripten's.
+
+    rust/web/build.sh                 # the wasm and its loader, at the repository's root
+    node test/web/wasm_smoke.mjs      # the module as the page uses it
+    bun install && bun run dev        # the page (or npm)
+
+`cargo test --test web` checks the same steps on the host.

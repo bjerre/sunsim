@@ -14,3 +14,6 @@ rust/target/
 rust/firmware/target/
 rust/firmware/.embuild/
 rust/firmware/backups/
+/sunsim_web_simulator*
+/node_modules/
+/web/dist/
