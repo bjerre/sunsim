@@ -40,10 +40,9 @@ impl EspInternet {
         // no airtime once Zigbee runs: a scan finds no networks at all.
         // SAFETY: Wi-Fi is initialized (EspWifi::new).
         unsafe { esp_idf_svc::sys::esp!(esp_coex_wifi_i154_enable())? };
-        let fallback = WifiNetwork { ssid: config::WIFI_SSID.into(), password: config::WIFI_PASSWORD.into() };
         Ok(EspInternet {
             wifi: BlockingWifi::wrap(wifi, sysloop)?,
-            networks: WifiStore::new(storage::Nvs::open(nvs)?, Some(fallback)),
+            networks: WifiStore::new(storage::Nvs::open(nvs)?, Some(config::wifi_fallback())),
         })
     }
 

@@ -39,3 +39,8 @@ pub fn fast_day() -> Option<ev::Duration> {
     (DEBUG_FAST_DAY == "y")
         .then(|| ev::Duration::secs(DEBUG_DAY_SECONDS.parse().expect("SUNSIM_DEBUG_DAY_SECONDS is a number")))
 }
+
+/// The build's Wi-Fi network, for when none is saved.
+pub fn wifi_fallback() -> platform::WifiNetwork {
+    platform::WifiNetwork { ssid: WIFI_SSID.into(), password: WIFI_PASSWORD.into() }
+}

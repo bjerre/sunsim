@@ -5,6 +5,7 @@
 //! fakes.
 
 pub mod clock;
+pub mod console;
 pub mod internet;
 pub mod settings_store;
 pub mod storage;
@@ -12,6 +13,7 @@ pub mod wifi;
 pub mod zone;
 
 pub use clock::{Clock, ClockHardware, FastDayClock};
+pub use console::{Console, ConsoleBoard, StatusSlot};
 pub use internet::{Internet, InternetSync, Syncer};
 pub use settings_store::SettingsStore;
 pub use storage::Storage;

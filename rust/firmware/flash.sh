@@ -6,7 +6,8 @@
 # C++ firmware back with everything intact. Builds first, and saves NVS to
 # backups/nvs-<time>.bin before writing anything (it won't flash without
 # one; `esptool write-flash 0x9000 <file>` restores it); then the serial
-# monitor (Ctrl+] quits). SUNSIM_PORT as for ../../sunsim.
+# monitor (Ctrl+] quits), or with SUNSIM_NO_MONITOR=1 none. SUNSIM_PORT as
+# for ../../sunsim.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ./build.sh --release
@@ -26,9 +27,12 @@ ELF=target/riscv32imac-esp-espidf/release/sunsim-firmware
 # NVS: 80 KB at 0x9000, as ../../partitions.csv has it.
 mkdir -p backups
 BACKUP=backups/nvs-$(date +%Y%m%d-%H%M%S).bin
-esptool --chip esp32c6 -p "$PORT" read-flash 0x9000 0x14000 "$BACKUP"
+# No reset after: the C6 re-enumerates when it resets, which can take the
+# port away (a fresh device node, without any ACL given to this one).
+esptool --chip esp32c6 -p "$PORT" --after no-reset read-flash 0x9000 0x14000 "$BACKUP"
 [[ $(stat -c %s "$BACKUP") -eq $((0x14000)) ]] || { echo "flash.sh: the NVS backup is incomplete; not flashing" >&2; exit 1; }
 echo "NVS saved to $BACKUP"
 esptool --chip esp32c6 elf2image --flash-size 16MB -o "$ELF.bin" "$ELF"
 esptool --chip esp32c6 -p "$PORT" write-flash 0x20000 "$ELF.bin"
+[[ -n ${SUNSIM_NO_MONITOR:-} ]] && exit 0
 exec python -m esp_idf_monitor -p "$PORT" "$ELF"
