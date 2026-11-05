@@ -17,6 +17,8 @@ pub const WALL_C: Role = Role::new(Group::Wall, 2);
 pub const WALL_D: Role = Role::new(Group::Wall, 3);
 pub const WALL_E: Role = Role::new(Group::Wall, 4); // the west end
 pub const WORK: Role = Role::new(Group::Work, 0);
+pub const DESK: Role = Role::new(Group::Desk, 0); // a plug, on a schedule
+pub const GROW: Role = Role::new(Group::Grow, 0); // likewise
 pub const BUTTON: Role = Role::new(Group::Button, 0);
 
 pub const fn secs(n: i64) -> Duration {

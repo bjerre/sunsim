@@ -39,7 +39,7 @@ fn double_press_red_alert_pulses_single_press_daylight_resumes() {
 }
 
 #[test]
-fn hold_all_off_the_daylight_program_is_paused_until_resumed() {
+fn hold_the_office_off_its_program_paused_until_resumed_the_plugs_on_their_schedules() {
     let mut h = Harness::new();
     h.tick(1);
     h.pair_bulb(WALL_B, 0xC3, 0x0003);
@@ -50,8 +50,10 @@ fn hold_all_off_the_daylight_program_is_paused_until_resumed() {
 
     h.clear_log();
     h.post(ProgramTick { time: noon(), transition: Transition::secs(60) });
-    assert!(h.all::<LightTarget>().is_empty());
-    assert!(h.all::<SetLight>().is_empty());
+    // Only the plugs' zones, whose daylight goes on: the desk's hours, not the grow light's.
+    let targets = h.all::<LightTarget>();
+    assert_eq!(targets.iter().map(|t| (t.role, t.state.on)).collect::<Vec<_>>(), [(DESK, true), (GROW, false)]);
+    assert!(h.all::<SetLight>().is_empty()); // neither is paired here
 }
 
 #[test]
@@ -147,8 +149,9 @@ fn tuning_bulbs_at_their_minimums_tune_sets_levels_save_makes_them_the_minimums(
     h.clear_log();
 
     h.post(ModeRequested { mode: Mode::Tuning, zone: None });
+    // The office tunes; the plugs' zones run daylight alone.
     let start = h.all::<LightTarget>();
-    assert_eq!(start.len(), LIGHT_COUNT);
+    assert_eq!(start.len(), members(Group::Wall).len() + 1);
     for t in &start {
         assert!(t.state.on && xy(Some(t.state.color)).is_some()); // the sunset's amber
         assert_eq!(t.state.level, if t.role == WORK { 12 } else { 1 });

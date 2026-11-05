@@ -184,9 +184,11 @@ fn unpair_all_clears_every_role_and_persists() {
 }
 
 #[test]
-fn the_layout_five_wall_lights_east_to_west_then_work_and_button() {
-    const _: () = assert!(ROLE_COUNT == 7 && LIGHT_COUNT == 6);
-    const _: () = assert!(slot(WORK) == 5 && slot(ROLES[slot(WALL_C)]) == slot(WALL_C));
+fn the_layout_five_wall_bulbs_the_work_light_two_schedule_plugs_and_the_button() {
+    const _: () = assert!(ROLE_COUNT == 9 && LIGHT_COUNT == 8);
+    const _: () = assert!(slot(WORK) == 5 && slot(DESK) == 6 && slot(GROW) == 7 && slot(BUTTON) == 8);
+    const _: () = assert!(slot(ROLES[slot(WALL_C)]) == slot(WALL_C));
+    const _: () = assert!(matches!(kind_of(DESK), Kind::Plug) && matches!(kind_of(GROW), Kind::Plug));
     const _: () = assert!(matches!(parse_role("wallc"), Some(Role { group: Group::Wall, index: 2 })));
     const _: () = assert!(parse_role("WallF").is_none());
     const _: () = assert!(matches!(kind_of(WALL_A), Kind::ColorBulb) && matches!(kind_of(BUTTON), Kind::Button));
@@ -194,7 +196,10 @@ fn the_layout_five_wall_lights_east_to_west_then_work_and_button() {
     assert_eq!(members(Group::Wall).len(), 5);
     assert!(role_name(WALL_A) == "WallA" && role_name(WALL_E) == "WallE");
     assert!(role_name(WORK) == "Work" && role_name(BUTTON) == "Button");
-    assert!(lights().eq(ROLES[..6].iter().copied()));
+    assert!(role_name(DESK) == "Desk" && role_name(GROW) == "Grow");
+    assert!(lights().eq(ROLES[..8].iter().copied()));
+    let desk = parse_selection("desk").unwrap();
+    assert!(selects(desk, DESK) && !selects(desk, GROW));
 
     let wall = parse_selection("wall").unwrap();
     assert!(selects(wall, WALL_E) && !selects(wall, WORK));
@@ -264,22 +269,29 @@ fn each_kind_of_light_gets_only_the_commands_it_takes() {
 
 #[test]
 fn zones_every_light_in_one_with_its_look_buttons_control_theirs() {
-    assert!(ZONE_COUNT == 1 && ZONE_OF[WALL_A] == Some(ZoneId(0)) && ZONE_OF[BUTTON] == Some(ZoneId(0)));
+    assert!(ZONE_COUNT == 3 && ZONE_OF[WALL_A] == Some(ZoneId(0)) && ZONE_OF[BUTTON] == Some(ZoneId(0)));
+    assert!(ZONE_OF[DESK] == Some(ZoneId(1)) && ZONE_OF[GROW] == Some(ZoneId(2)));
+    assert!(matches!(LOOK_OF[DESK], Look::OnOffOnly) && matches!(LOOK_OF[GROW], Look::OnOffOnly));
+    assert!(DEFAULT_PEAKS[WORK] == 90 && DEFAULT_PEAKS[WALL_A] == 100 && DEFAULT_PEAKS[DESK] == 100);
     assert!(CONTROLS_OF[BUTTON].is_some() && CONTROLS_OF[WORK].is_none());
     assert!(WEATHER_LIGHTS.precip.contains(WALL_C) && WEATHER_LIGHTS.alerts.contains(WALL_B));
     assert!(!WEATHER_LIGHTS.alerts.contains(WALL_C));
 
-    // Another room: the wall in one zone, the work light (and the button) in another.
+    // Another room: the wall in one zone; the work light, the plugs and the button in another.
     const ZONES: [ZoneSpec; 2] = [
         ZoneSpec {
             name: "wall",
-            lights: &[Shows { lights: "wall", look: Look::SunCurve }],
+            lights: &[Shows::new("wall", Look::SunCurve)],
             weather: Some(Weather { precip: &["wall"], alerts: &[] }),
             ..ZoneSpec::DEFAULT
         },
         ZoneSpec {
             name: "desk",
-            lights: &[Shows { lights: "WORK", look: Look::WorkCurve(WorkCurve::SETTINGS) }],
+            lights: &[
+                Shows::new("WORK", Look::WorkCurve(WorkCurve::SETTINGS)),
+                Shows::new("Desk", Look::OnOffOnly),
+                Shows::new("Grow", Look::OnOffOnly),
+            ],
             modes: &[Mode::Daylight, Mode::Off],
             controls: &[Controls { twice: None, ..Controls::by("button") }],
             ..ZoneSpec::DEFAULT
@@ -305,11 +317,51 @@ fn zones_every_light_in_one_with_its_look_buttons_control_theirs() {
     const LAYERED: Topology = topology_of(&[ZoneSpec {
         name: "all",
         lights: &[
-            Shows { lights: "wall", look: Look::SunCurve },
-            Shows { lights: "work", look: Look::WorkCurve(WorkCurve::SETTINGS) },
+            Shows::new("wall", Look::SunCurve),
+            Shows::new("work", Look::WorkCurve(WorkCurve::SETTINGS)),
+            Shows::new("Desk", Look::OnOffOnly),
+            Shows::new("Grow", Look::OnOffOnly),
         ],
         gate: &[NINE_TO_FIVE.closes_only(), NINE_TO_FIVE.opens_only(), Rule::ALWAYS],
         ..ZoneSpec::DEFAULT
     }]);
     assert_eq!(LAYERED.zone_of[WORK], Some(ZoneId(0))); // one-way rules first: fine
+}
+
+#[test]
+fn the_desk_and_grow_plugs_follow_their_own_daily_schedules() {
+    let mut h = Harness::new();
+    h.tick(1);
+    let is_on = |h: &mut Harness, role: Role, time: Duration| {
+        h.clear_log();
+        h.post(ProgramTick { time: at(time), transition: Transition::secs(60) });
+        h.all::<LightTarget>().into_iter().find(|t| t.role == role).is_some_and(|t| t.state.on)
+    };
+    assert!(!is_on(&mut h, DESK, hours(7) + mins(59)));
+    assert!(is_on(&mut h, DESK, hours(8)));
+    assert!(is_on(&mut h, DESK, hours(18) + mins(59)));
+    assert!(!is_on(&mut h, DESK, hours(19)));
+    assert!(!is_on(&mut h, GROW, hours(3) + mins(44)));
+    assert!(is_on(&mut h, GROW, hours(3) + mins(45)));
+    assert!(is_on(&mut h, GROW, hours(8) + mins(44)));
+    assert!(!is_on(&mut h, GROW, hours(8) + mins(45)));
+
+    // The button controls the office alone: the plugs keep their schedules
+    // while its program is off.
+    h.post(ButtonPressed { press: Press::Hold, at: h.now, ..ButtonPressed::default() });
+    assert!(is_on(&mut h, DESK, hours(12)));
+}
+
+#[test]
+fn a_plug_gets_on_and_off_alone() {
+    let mut h = Harness::new();
+    h.tick(1);
+    h.pair_bulb(DESK, 0xD1, 0x00D1);
+    let to_desk = h.all::<SetLight>().into_iter().filter(|s| s.role == DESK).collect::<Vec<_>>();
+    assert!(
+        to_desk.len() == 1
+            && to_desk[0].power == Some(true)
+            && to_desk[0].level.is_none()
+            && to_desk[0].color.is_none()
+    );
 }

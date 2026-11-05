@@ -96,7 +96,9 @@ fn status_shows_the_time_the_day_the_mode_and_each_device() {
     assert!(reply.contains("time    Tue 12:00\n"), "{reply}");
     assert!(reply.contains("day     ") && reply.contains("(sunrise "));
     assert!(reply.contains("sky     no forecast yet (clear assumed)"));
-    assert!(reply.contains("mode    daylight - lights may be on (gate open)"));
+    assert!(reply.contains("mode    office: daylight - lights may be on (gate open)\n"), "{reply}");
+    assert!(reply.contains("mode    desk-downlight: daylight - lights may be on (gate open)\n"));
+    assert!(reply.contains("mode    bookcase-grow-light: daylight - lights off (gate shut)\n"));
     assert!(reply.contains("  WallA  *  online, heard 1s ago\n"), "{reply}");
     assert!(reply.contains("  Work   -  not paired\n"));
 }
@@ -113,7 +115,8 @@ fn roles_pair_unpair_and_open_post_the_requests() {
 
     let reply = r.ty("pair lamp");
     assert!(
-        reply.starts_with("unknown role 'lamp'\nroles: WallA WallB WallC WallD WallE Work Button\n") && failed(&reply)
+        reply.starts_with("unknown role 'lamp'\nroles: WallA WallB WallC WallD WallE Work Desk Grow Button\n")
+            && failed(&reply)
     );
 
     r.ty("unpair wall");

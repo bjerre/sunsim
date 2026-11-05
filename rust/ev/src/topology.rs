@@ -141,6 +141,9 @@ pub enum Look {
     /// by the sun's and the sky's settings (sunshift, amber, clouds, ...).
     SunCurve,
     WorkCurve(WorkCurve),
+    /// A binary load has no brightness or color curve; its zone's gate alone
+    /// decides when the plug turns on. Plugs only.
+    OnOffOnly,
 }
 
 /// What a group's lights, or one light, show (in a zone).
@@ -148,6 +151,18 @@ pub enum Look {
 pub struct Shows {
     pub lights: &'static str, // a group ("Wall") or one light ("Work"), any case
     pub look: Look,
+    pub peak: u8, // its default brightness, percent of full output (`intensity` changes it)
+}
+
+impl Shows {
+    /// `lights` show `look`, at full brightness.
+    pub const fn new(lights: &'static str, look: Look) -> Self {
+        Shows { lights, look, peak: 100 }
+    }
+    /// At `peak` percent instead.
+    pub const fn at(self, peak: u8) -> Self {
+        Shows { peak, ..self }
+    }
 }
 
 // ---- Gates: when the lights may be on ---------------------------------------
@@ -290,6 +305,7 @@ pub struct WeatherLights {
 pub struct Topology {
     pub zone_of: PerRole<Option<ZoneId>>, // a light's zone, or the zone a button controls
     pub look_of: PerRole<Look>,           // lights
+    pub peak_of: PerRole<u8>,             // default brightness, percent
     pub controls_of: PerRole<Option<Controls>>, // buttons that control a zone
     pub weather: WeatherLights,
 }
@@ -326,13 +342,15 @@ const fn add_weather(t: &mut Topology, names: &[&str], id: ZoneId, precip: bool)
 /// `zones` per role. Doesn't compile if two zones share a name; a zone has no
 /// lights, no gate, a gate rule after one that always answers
 /// (answers_always), or can't run daylight; a name in it isn't in the layout,
-/// gives a button a look or a light a second one; a light is in no zone; or
+/// gives a button a look or a light a second one, or an on/off-only look to
+/// anything but a plug; a peak isn't 1-100; a light is in no zone; or
 /// a button is named twice, isn't a button, or picks a mode its zone can't run;
 /// or a weather light isn't a color light in its zone.
 pub const fn topology_of(zones: &[ZoneSpec]) -> Topology {
     let mut t = Topology {
         zone_of: PerRole::filled(None),
         look_of: PerRole::filled(Look::SunCurve),
+        peak_of: PerRole::filled(100),
         controls_of: PerRole::filled(None),
         weather: WeatherLights { precip: RoleSet::EMPTY, alerts: RoleSet::EMPTY },
     };
@@ -368,6 +386,9 @@ pub const fn topology_of(zones: &[ZoneSpec]) -> Topology {
         let mut s = 0;
         while s < zone.lights.len() {
             let shows = zone.lights[s];
+            if shows.peak < 1 || shows.peak > 100 {
+                panic!("a light's peak isn't between 1 and 100 percent");
+            }
             let Some(selection) = parse_selection(shows.lights) else {
                 panic!("a zone's lights name something the layout doesn't have");
             };
@@ -378,11 +399,15 @@ pub const fn topology_of(zones: &[ZoneSpec]) -> Topology {
                     if !is_light(role) {
                         panic!("a zone gives a button a look");
                     }
+                    if matches!(shows.look, Look::OnOffOnly) && !matches!(kind_of(role), Kind::Plug) {
+                        panic!("an on/off-only look requires a plug");
+                    }
                     if *shown.get(role) {
                         panic!("a light is in two zones, or shown twice");
                     }
                     *shown.get_mut(role) = true;
                     *t.look_of.get_mut(role) = shows.look;
+                    *t.peak_of.get_mut(role) = shows.peak;
                     *t.zone_of.get_mut(role) = Some(id);
                 }
                 r += 1;

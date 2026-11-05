@@ -26,8 +26,14 @@ fn room_addresses() -> Addresses {
 }
 
 const ROOM_GROUP: u16 = 0x5301;
+// The office's lights, which show the same in red alert (the plugs keep
+// their own schedules).
+fn office() -> impl Iterator<Item = Role> {
+    lights().filter(|&r| ZONE_OF[r] == Some(ZoneId(0)))
+}
+
 fn room_group() -> Vec<LightGroup> {
-    vec![LightGroup { id: ROOM_GROUP, members: lights().collect() }]
+    vec![LightGroup { id: ROOM_GROUP, members: office().collect() }]
 }
 
 const RED: Color = Color::HueSat(HueSat { hue: 0, saturation: 254 });
@@ -75,9 +81,12 @@ fn a_simulated_room_joins_takes_its_roles_and_lights_up_with_the_sun() {
     r.world.run_for(secs(5));
     for light in lights() {
         assert_eq!(r.link(light), DeviceLink::Online);
+    }
+    for light in office() {
         let b = r.bulb(light);
         assert!(b.on && b.to > 0 && b.color.is_some());
     }
+    assert!(r.bulb(DESK).on && !r.bulb(GROW).on); // noon: the desk's hours, not the grow light's
     assert_ne!(r.link(BUTTON), DeviceLink::Unpaired);
     assert_eq!(r.world.network.borrow().counts().lost, 0);
 }
@@ -99,7 +108,7 @@ fn a_double_press_turns_the_room_red_one_group_command_per_step() {
     let after = r.world.network.borrow().counts();
     assert_eq!(after.group_commands - before.group_commands, 2); // the red, then the level
     assert_eq!(after.unicasts - before.unicasts, 0);
-    for light in lights() {
+    for light in office() {
         assert_eq!(r.bulb(light).color, Some(RED));
     }
 

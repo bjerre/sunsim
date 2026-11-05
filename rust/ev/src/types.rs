@@ -49,6 +49,8 @@ pub const EVERY_DAY: Weekdays = Weekdays { bits: 0b1111111 };
 pub enum Group {
     Wall,
     Work,
+    Desk,
+    Grow,
     Button,
 }
 
@@ -90,11 +92,13 @@ pub struct GroupSpec {
 
 /// The installation: what each group is and how many it has, in Group
 /// order. A group's members are lettered (WallA, WallB, ...); a group of one
-/// is just its name (Work, Button). Wall lights are lettered east to west:
-/// their order along the wall drives the sun-direction dimming.
-pub const LAYOUT: [GroupSpec; 3] = [
+/// is just its name (Work, Desk, Grow, Button). Wall lights are lettered east
+/// to west: their order along the wall drives the sun-direction dimming.
+pub const LAYOUT: [GroupSpec; 5] = [
     GroupSpec { group: Group::Wall, name: "Wall", kind: Kind::ColorBulb, count: 5 },
     GroupSpec { group: Group::Work, name: "Work", kind: Kind::ColorBulb, count: 1 },
+    GroupSpec { group: Group::Desk, name: "Desk", kind: Kind::Plug, count: 1 },
+    GroupSpec { group: Group::Grow, name: "Grow", kind: Kind::Plug, count: 1 },
     GroupSpec { group: Group::Button, name: "Button", kind: Kind::Button, count: 1 },
 ];
 
@@ -663,18 +667,8 @@ impl Default for ProgramConfig {
 pub const MAX_AMBER_SWEEP_DEG: u8 = 30;
 
 /// Per-light peak intensity, 1-100 (% of full brightness). Buttons unused.
+/// Their defaults are the zones table's (installation::DEFAULT_PEAKS).
 pub type Peaks = PerRole<u8>;
-pub const DEFAULT_PEAKS: Peaks = {
-    let mut peaks = PerRole::filled(100);
-    let mut i = 0;
-    while i < ROLE_COUNT {
-        if matches!(ROLES[i].group, Group::Work) {
-            peaks.0[i] = 90;
-        }
-        i += 1;
-    }
-    peaks
-};
 
 /// Per-light minimum level, 1-254 (raw Zigbee level): the lowest a light is
 /// sent while on, so it stays visibly lit down to sunset. Bulbs differ in

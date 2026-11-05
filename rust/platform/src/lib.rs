@@ -8,6 +8,7 @@ pub mod clock;
 pub mod console;
 pub mod display;
 pub mod internet;
+pub mod presentation;
 pub mod settings_store;
 pub mod storage;
 pub mod wifi;

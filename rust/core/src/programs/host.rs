@@ -74,8 +74,8 @@ impl Zone {
 
 /// Owns the lighting programs, a set per zone, and runs the one each zone's
 /// Mode selects: it starts it on the zone's ModeChanged, and passes it the
-/// ticks and refreshes. Settings, the weather and the console's tuning go to
-/// every program (see Program). Keeps the latest time, for programs that
+/// ticks and refreshes. Settings and the weather go to every program (see
+/// Program); the console's tuning only to each zone's running one. Keeps the latest time, for programs that
 /// need it when they start or refresh. On `tune save` it posts the levels
 /// tuned in the zones that are tuning as the lights' minimums.
 ///
@@ -136,9 +136,15 @@ impl Module for ProgramHost {
                 }
                 self.refresh(None); // show a change now, not at the next update
             }
-            Event::SkyChanged(_) | Event::TuneLights(_) => {
+            Event::SkyChanged(_) => {
                 for zone in &mut self.zones {
                     zone.broadcast(e);
+                }
+            }
+            // Only where it's tuning: a zone in daylight keeps no tuned levels.
+            Event::TuneLights(_) => {
+                for zone in &mut self.zones {
+                    zone.running().on(e);
                 }
             }
             Event::TuneSave(_) => self.tune_save(),

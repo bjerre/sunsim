@@ -57,6 +57,8 @@ pub fn show(look: &Look, ctx: &LookContext) -> Option<Glow> {
     match look {
         Look::SunCurve => sun_curve(ctx),
         Look::WorkCurve(curve) => work_curve(curve, ctx),
+        // A plug has no dimming or color; the zone's gate alone switches it.
+        Look::OnOffOnly => Some(Glow { brightness: 1.0, color: Color::default() }),
     }
 }
 

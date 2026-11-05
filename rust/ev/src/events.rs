@@ -6,7 +6,7 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
-use crate::installation::PerZone;
+use crate::installation::{DEFAULT_PEAKS, PerZone};
 use crate::time::{Duration, Instant, Transition};
 use crate::topology::ZoneId;
 use crate::types::*;

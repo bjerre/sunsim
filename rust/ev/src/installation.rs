@@ -5,6 +5,7 @@
 use std::ops::{Index, IndexMut};
 
 use crate::setting;
+use crate::time::Duration;
 use crate::topology::*;
 use crate::types::*;
 
@@ -18,22 +19,41 @@ pub const ADDRESSES: [Address; ROLE_COUNT] = [
     Address { role: "WallD", ext_addr: 0x0000000000000000 },
     Address { role: "WallE", ext_addr: 0x0000000000000000 },
     Address { role: "Work", ext_addr: 0x0000000000000000 },
+    Address { role: "Desk", ext_addr: 0x0000000000000000 },
+    Address { role: "Grow", ext_addr: 0x0000000000000000 },
     Address { role: "Button", ext_addr: 0x0000000000000000 },
 ];
 
 /// Lights that share a mode and a gate. Every light is in exactly one.
-pub const ZONES: [ZoneSpec; 1] = [ZoneSpec {
-    name: "office",
-    lights: &[
-        Shows { lights: "Wall", look: Look::SunCurve },
-        Shows { lights: "Work", look: Look::WorkCurve(WorkCurve::SETTINGS) },
-    ],
-    // The active hours (`config hours`, `days`, `fade`).
-    gate: &[Window { hours: setting!(active), days: setting!(active_days), fade: setting!(fade) }.rule()],
-    controls: &[Controls::by("Button")], // single: daylight, double: red alert, hold: off
-    weather: Some(Weather { precip: &["WallC"], alerts: &["WallB", "WallD"] }),
-    ..ZoneSpec::DEFAULT
-}];
+pub const ZONES: [ZoneSpec; 3] = [
+    ZoneSpec {
+        name: "office",
+        lights: &[Shows::new("Wall", Look::SunCurve), Shows::new("Work", Look::WorkCurve(WorkCurve::SETTINGS)).at(90)],
+        // The active hours (`config hours`, `days`, `fade`).
+        gate: &[Window { hours: setting!(active), days: setting!(active_days), fade: setting!(fade) }.rule()],
+        controls: &[Controls::by("Button")], // single: daylight, double: red alert, hold: off
+        weather: Some(Weather { precip: &["WallC"], alerts: &["WallB", "WallD"] }),
+        ..ZoneSpec::DEFAULT
+    },
+    ZoneSpec {
+        name: "desk-downlight",
+        lights: &[Shows::new("Desk", Look::OnOffOnly)],
+        gate: &[Window::hours(Tunable::Fixed(DaySpan::new(Duration::hours(8), Duration::hours(19)))).rule()],
+        modes: &[Mode::Daylight],
+        ..ZoneSpec::DEFAULT
+    },
+    ZoneSpec {
+        name: "bookcase-grow-light",
+        lights: &[Shows::new("Grow", Look::OnOffOnly)],
+        gate: &[Window::hours(Tunable::Fixed(DaySpan::new(
+            Duration::minutes(3 * 60 + 45),
+            Duration::minutes(8 * 60 + 45),
+        )))
+        .rule()],
+        modes: &[Mode::Daylight],
+        ..ZoneSpec::DEFAULT
+    },
+];
 
 // ---- Derived: the tables above per role and per zone, checked as they compile ----
 
@@ -42,6 +62,8 @@ pub const ADDRESS_OF: Addresses = addresses_of(&ADDRESSES);
 pub const TOPOLOGY: Topology = topology_of(&ZONES);
 pub const ZONE_OF: PerRole<Option<ZoneId>> = TOPOLOGY.zone_of;
 pub const LOOK_OF: PerRole<Look> = TOPOLOGY.look_of;
+/// Each light's default peak brightness, as the zones give it.
+pub const DEFAULT_PEAKS: Peaks = TOPOLOGY.peak_of;
 pub const CONTROLS_OF: PerRole<Option<Controls>> = TOPOLOGY.controls_of;
 pub const WEATHER_LIGHTS: WeatherLights = TOPOLOGY.weather;
 

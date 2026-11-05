@@ -1,7 +1,7 @@
 //! The status display's picture: what the 240x135 LCD shows (the time, the
 //! day, the next sunrise or sunset, the mode, the sky, and a dot per
-//! device), from the latest StatusSnapshot - the same data as the `status`
-//! command. Drawn with embedded-graphics onto whatever target it's given:
+//! device), from the latest StatusSnapshot - presentation's StatusView, in
+//! the LCD's colors. Drawn with embedded-graphics onto whatever target it's given:
 //! the firmware's framebuffer for the panel, a Frame in the tests. A port
 //! of the C++ platform's status_display.cppm, minus the panel.
 
@@ -12,7 +12,7 @@ use ev::*;
 use u8g2_fonts::types::{FontColor, HorizontalAlignment, VerticalPosition};
 use u8g2_fonts::{FontRenderer, fonts};
 
-use crate::console::{clock_text, duration_text};
+use crate::presentation::{StatusView, Tone, group_label};
 
 /// The panel: a 1.14" ST7789's 240x135 window, landscape.
 pub const WIDTH: u32 = 240;
@@ -21,9 +21,9 @@ pub const HEIGHT: u32 = 135;
 // The device dots: one row, each group's letter followed by a dot per
 // member in order (the wall's east to west).
 const DOT_SIZE: u32 = 10;
-const DOT_PITCH: i32 = 16; // a dot and the gap after it
+const DOT_PITCH: i32 = 12; // a dot and a compact 2 px gap
 const LABEL_CELL: i32 = 16; // a group letter and the gap after it
-const GROUP_GAP: i32 = 10; // between one group's last dot and the next letter
+const GROUP_GAP: i32 = 4; // between one group's last dot and the next letter
 const DOTS_LEFT: i32 = 8;
 const DOTS_TOP_Y: i32 = 114;
 
@@ -63,18 +63,6 @@ pub fn link_color(link: DeviceLink) -> Rgb565 {
     }
 }
 
-/// A group's letter on the display: D = the daylight wall, W = the work
-/// light, B = the button.
-const fn group_label(group: Group) -> &'static str {
-    match group {
-        Group::Wall => "D",
-        Group::Work => "W",
-        Group::Button => "B",
-    }
-}
-
-const WEEKDAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
 /// What the display shows, as text and colors.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Screen {
@@ -87,50 +75,35 @@ pub struct Screen {
     pub dots: PerRole<Rgb565>,
 }
 
+/// A tone in the LCD's colors.
+pub const fn tone_color(tone: Tone) -> Rgb565 {
+    match tone {
+        Tone::Muted => IDLE,
+        Tone::Daylight => DAYLIGHT,
+        Tone::Tuning => TUNING,
+        Tone::Advisory => ADVISORY,
+        Tone::Watch => WATCH,
+        Tone::Warning => RED,
+        Tone::Sky => SKY,
+    }
+}
+
 impl Screen {
     pub fn of(st: &StatusSnapshot) -> Screen {
-        let (time, weekday, day_length, next_event) = if st.time.valid {
-            let minutes = st.time.since_midnight().whole_minutes();
-            let day = &st.day;
-            (
-                format!("{:02}:{:02}", minutes / 60, minutes % 60),
-                format!("{}{}", if st.time.simulated { "sim " } else { "" }, WEEKDAYS[st.time.weekday().0 as usize]),
-                format!("Day {}", duration_text(day.day_length)),
-                format!(
-                    "{} {}  {}",
-                    if day.next_is_sunrise { "Rise" } else { "Set" },
-                    duration_text(day.until_next),
-                    clock_text(day.next_event)
-                ),
-            )
-        } else {
-            ("--:--".into(), String::new(), "Waiting for".into(), "time sync...".into())
-        };
-
-        // The first zone's mode: the main one.
-        let zone = st.zones[ZoneId(0)];
-        let mode = match zone.mode {
-            Mode::Daylight if zone.gate_open => ("daylight", DAYLIGHT),
-            Mode::Daylight => ("idle", IDLE),
-            Mode::Off => ("off", IDLE),
-            Mode::RedAlert => ("RED ALERT", RED),
-            Mode::Tuning => ("tuning", TUNING),
-        };
-
-        // The sky: the worst alert in its color, else what's falling, else cloud.
-        let sky = match (st.sky.alert(), st.sky.conditions) {
-            (AlertLevel::Warning, _) => (AlertLevel::Warning.name().into(), RED),
-            (AlertLevel::Watch, _) => (AlertLevel::Watch.name().into(), WATCH),
-            (AlertLevel::Advisory, _) => (AlertLevel::Advisory.name().into(), ADVISORY),
-            (AlertLevel::None, Some(c)) if c.precip != Precip::None => (c.precip.name().into(), SKY),
-            (AlertLevel::None, _) => (st.sky.cloud_percent.map_or(String::new(), |c| format!("cloud {c}%")), SKY),
-        };
-
+        let v = StatusView::of(st);
         let mut dots = PerRole::filled(UNPAIRED);
         for role in ROLES {
-            dots[role] = link_color(st.devices[role].link);
+            dots[role] = link_color(v.links[role]);
         }
-        Screen { time, weekday, mode, day_length, next_event, sky, dots }
+        Screen {
+            time: v.time,
+            weekday: v.weekday,
+            mode: (v.mode, tone_color(v.mode_tone)),
+            day_length: v.day_length,
+            next_event: v.next_event,
+            sky: (v.sky, tone_color(v.sky_tone)),
+            dots,
+        }
     }
 
     /// Draws it all, from a black background.
