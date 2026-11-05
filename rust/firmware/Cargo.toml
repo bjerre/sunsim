@@ -1,0 +1,47 @@
+# The firmware on the board, in Rust: a spike. Its own crate, outside the
+# host workspace (../Cargo.toml), for its own toolchain and target: the C6's
+# riscv32imac-esp-espidf, std on ESP-IDF through esp-idf-svc. Build with
+# `cargo build --release` from here, with ESP-IDF's environment loaded (see
+# build.sh).
+[package]
+name = "sunsim-firmware"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "sunsim-firmware"
+harness = false # no test harness on the board
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+
+[profile.dev]
+debug = true
+opt-level = "z"
+
+[dependencies]
+log = "0.4"
+esp-idf-svc = "0.53"
+ev = { path = "../ev", package = "sunsim-ev" }
+sunsim-core = { path = "../core" }
+platform = { path = "../platform", package = "sunsim-platform" }
+embedded-graphics = "0.8.2"
+mipidsi = "0.10.0"
+
+[build-dependencies]
+embuild = "0.33"
+
+[package.metadata.esp-idf-sys]
+# The IDF the C++ firmware builds with: whatever's activated (eim's v6.1).
+esp_idf_tools_install_dir = "fromenv"
+
+# esp-zigbee-lib, through a small C component that depends on it (as the C++
+# firmware does, 2.0.4) and fills in what bindgen can't see; with Rust
+# bindings for both: esp_idf_svc::sys::zigbee.
+[[package.metadata.esp-idf-sys.extra_components]]
+component_dirs = ["components/zigbee_shim"]
+bindings_header = "components/zigbee_shim/zigbee_shim.h"
+bindings_module = "zigbee"

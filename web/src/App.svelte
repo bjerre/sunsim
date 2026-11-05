@@ -110,6 +110,27 @@
     applyClock(date);
   }
 
+  // The simulator at `coordinates`, in this browser's time zone, saved for
+  // next time; false if they aren't a place.
+  function useLocation(coordinates: LocationCoordinates, source: string): boolean {
+    if (!isLocationCoordinates(coordinates) || !simulator?.setLocation(coordinates.latitude, coordinates.longitude)) {
+      return false;
+    }
+    usesBrowserTimezone = true;
+    hasCoordinates = true;
+    const saved = saveLocation(coordinates);
+    locationInfo = saved
+      ? `Using ${source}. Saved in this browser only.`
+      : `Using ${source}. Could not save them in this browser.`;
+    eventStatus = "Location updated the daylight calculation";
+    applyClock(new Date());
+    return true;
+  }
+
+  function setLocationFromControls(latitude: number, longitude: number): boolean {
+    return useLocation({ latitude, longitude }, "the coordinates you entered");
+  }
+
   function requestLocation(): void {
     if (!navigator.geolocation) {
       locationInfo = hasCoordinates
@@ -123,18 +144,9 @@
       ({ coords }) => {
         locationPending = false;
         const coordinates = { latitude: coords.latitude, longitude: coords.longitude };
-        if (!simulator?.setLocation(coordinates.latitude, coordinates.longitude)) {
+        if (!useLocation(coordinates, `browser coordinates (±${Math.round(coords.accuracy)} m)`)) {
           locationInfo = "The browser returned coordinates outside the valid range.";
-          return;
         }
-        usesBrowserTimezone = true;
-        hasCoordinates = true;
-        const saved = saveLocation(coordinates);
-        locationInfo = saved
-          ? `Using browser coordinates (±${Math.round(coords.accuracy)} m). Saved in this browser only.`
-          : `Using browser coordinates (±${Math.round(coords.accuracy)} m). Could not save them in this browser.`;
-        eventStatus = "Location updated the daylight calculation";
-        applyClock(new Date());
       },
       (error) => {
         locationPending = false;
@@ -279,6 +291,7 @@
           {locationPending}
           onClockChange={setClockFromControls}
           onRequestLocation={requestLocation}
+          onSetLocation={setLocationFromControls}
           onButtonPress={pressButton}
           onWeatherChange={updateWeather}
           onAlertChange={updateAlert}
@@ -292,5 +305,5 @@
       <p class="hint">{eventStatus}</p>
     </section>
   {/if}
-  <footer><span>Core logic: C++ → WebAssembly</span><span>{eventStatus}</span></footer>
+  <footer><span>Core logic: Rust → WebAssembly</span><span>{eventStatus}</span></footer>
 </main>

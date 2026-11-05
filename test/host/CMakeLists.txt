@@ -1,4 +1,5 @@
-# Host tests for the pure layers (sunsim_events, sunsim_core, sunsim_weather): plain CMake,
+# Host tests for the pure layers (sunsim_events, sunsim_core, sunsim_weather) and
+# the simulator (sim/): plain CMake,
 # no ESP-IDF. Built with the firmware's C++ settings (no exceptions, no RTTI).
 # C++ modules need the Ninja generator (ESP-IDF's export.sh puts one on PATH).
 # The test framework, boost-ext/ut, comes from vcpkg (vcpkg.json), found
@@ -55,6 +56,16 @@ target_sources(sunsim_presentation PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${PRESE
                                           FILES ${PRESENTATION_MODULES})
 target_link_libraries(sunsim_presentation PUBLIC sunsim_events)
 
+# sunsim on simulated hardware (sunsim.sim): virtual time, clock and Zigbee
+# network, for whole-app scenarios.
+set(SIM ${ROOT}/sim/src)
+file(GLOB SIM_MODULES CONFIGURE_DEPENDS ${SIM}/*.cppm)
+add_library(sunsim_sim STATIC)
+target_sources(sunsim_sim PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${SIM} FILES ${SIM_MODULES})
+# SimClock's definitions are in a module implementation unit (sim_clock.cppm says why).
+target_sources(sunsim_sim PRIVATE ${SIM}/sim_clock.cpp)
+target_link_libraries(sunsim_sim PUBLIC sunsim_core)
+
 # boost-ext/ut's module, boost.ut. vcpkg installs ut.cppm beside ut.hpp but
 # doesn't build it; built here against the same std module as the rest.
 # (Copied into the build tree for clangd, as import_std.cmake does; ut.cppm
@@ -70,12 +81,13 @@ target_sources(boost_ut PUBLIC FILE_SET CXX_MODULES BASE_DIRS ${CMAKE_CURRENT_BI
 target_link_libraries(boost_ut PUBLIC sunsim_events)
 
 find_package(Threads REQUIRED)
-# One file per area (devices, modes, daylight, weather, events), sharing the
+# One file per area (devices, modes, daylight, weather, events, sends, sim), sharing the
 # module sunsim.test (harness.cppm).
 add_executable(sunsim_tests main.cpp devices_tests.cpp modes_tests.cpp daylight_tests.cpp weather_tests.cpp
-                            events_tests.cpp presentation_tests.cpp)
+                            events_tests.cpp presentation_tests.cpp sends_tests.cpp sim_tests.cpp)
 target_sources(sunsim_tests PRIVATE FILE_SET CXX_MODULES FILES harness.cppm)
-target_link_libraries(sunsim_tests PRIVATE sunsim_core sunsim_weather sunsim_presentation boost_ut Threads::Threads)
+target_link_libraries(sunsim_tests PRIVATE sunsim_core sunsim_sim sunsim_weather sunsim_presentation boost_ut
+                                           Threads::Threads)
 
 # A CTest test per ut test, named as it is: after each build,
 # discover_tests.cmake asks sunsim_tests for the names and writes the CTest

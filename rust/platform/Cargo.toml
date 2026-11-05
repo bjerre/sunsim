@@ -1,0 +1,15 @@
+[package]
+name = "sunsim-platform"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ev.workspace = true
+log.workspace = true
+weather.workspace = true
+embedded-graphics = "0.8.2"
+u8g2-fonts = { version = "0.8.0", features = ["embedded_graphics_textstyle"] }

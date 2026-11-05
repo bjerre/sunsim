@@ -14,6 +14,7 @@ set(modules "src/ev.cppm"
             "src/installation_profile.cppm"
             "src/layout.cppm"
             "src/log.cppm"
+            "src/radio.cppm"
             "src/settings.cppm"
             "src/topology.cppm"
             "src/types.cppm")

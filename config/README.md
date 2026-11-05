@@ -2,10 +2,15 @@
 
 `installation.json` is the source for the logical device groups and zone
 behavior compiled into the firmware and WebAssembly core. It is deliberately
-data-only: `look.type` and gate types name behaviors the portable C++ core
-already implements; the document cannot run scripts.
+data-only: `look.type` and gate types name behaviors the core already
+implements; the document cannot run scripts.
 
-After editing the document, regenerate the C++ tables:
+The Rust build (`rust/`) reads it on every build: `rust/ev/build.rs` turns it
+into Rust tables, nothing generated to commit, and they pass through the
+compile-time `topology_of` checks, so an invalid document fails the build.
+
+The C++ build uses generated tables. After editing the document, regenerate
+them:
 
 ```sh
 ./sunsim definition generate

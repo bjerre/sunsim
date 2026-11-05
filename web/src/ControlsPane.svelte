@@ -16,6 +16,7 @@
     locationPending: boolean;
     onClockChange: (date: string, minute: number) => void;
     onRequestLocation: () => void;
+    onSetLocation: (latitude: number, longitude: number) => boolean;
     onButtonPress: (kind: ButtonPress) => void;
     onWeatherChange: (precipitation: Precipitation, cloudPercent: number) => void;
     onAlertChange: (level: AlertLevel) => void;
@@ -31,6 +32,7 @@
     locationPending,
     onClockChange,
     onRequestLocation,
+    onSetLocation,
     onButtonPress,
     onWeatherChange,
     onAlertChange,
@@ -39,6 +41,17 @@
   let precipitation = $state<Precipitation>(0);
   let cloudPercent = $state(0);
   let alertLevel = $state<AlertLevel>(0);
+
+  // A number input binds a number, or null while it's empty.
+  let latitude = $state<number | null>(null);
+  let longitude = $state<number | null>(null);
+  let coordinatesError = $state("");
+
+  function setCoordinates(event: SubmitEvent): void {
+    event.preventDefault();
+    const valid = latitude != null && longitude != null && onSetLocation(latitude, longitude);
+    coordinatesError = valid ? "" : "Latitude is -90 to 90 and longitude -180 to 180, in decimal degrees (west is negative).";
+  }
 
   function updateWeather(): void {
     onWeatherChange(precipitation, cloudPercent);
@@ -78,6 +91,14 @@
     <button class="location-button" type="button" disabled={locationPending} onclick={onRequestLocation}>
       {locationPending ? "Finding location…" : "Use / refresh my location"}
     </button>
+    <form class="coordinates" onsubmit={setCoordinates}>
+      <label for="latitude-input"><span>Latitude</span></label>
+      <input id="latitude-input" type="number" step="any" min="-90" max="90" placeholder="42.99" bind:value={latitude} />
+      <label for="longitude-input"><span>Longitude</span></label>
+      <input id="longitude-input" type="number" step="any" min="-180" max="180" placeholder="-89.53" bind:value={longitude} />
+      <button class="location-button" type="submit">Set</button>
+    </form>
+    {#if coordinatesError}<p class="hint error" role="alert">{coordinatesError}</p>{/if}
     <p class="hint">{locationInfo}</p>
   </div>
   <div class="control-group">

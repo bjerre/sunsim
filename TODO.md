@@ -108,13 +108,65 @@ Every command goes out the moment it's posted, so a ProgramTick, red alert
 or a weather pulse sends every light's commands in the same few
 milliseconds: fine at 6 lights, past the stack's buffers at 25 (GitHub #14).
 
-- [ ] One pending `SetLight` per light in `ZigbeeAdapter`, a newer one
-      merged over it; sent round-robin at a fixed rate (~25 ms apart).
-- [ ] Log the queue's high-water mark with the send-failure report.
+- [x] One pending `SetLight` per light, a newer one merged over it; sent
+      round-robin, a command per `SendSlot` (core `SendQueue`; the
+      ZigbeeAdapter gives a slot every 25 ms while any are waiting).
+- [x] Log the queue's high-water mark with the send-failure report.
+- [ ] Build the firmware (the platform side hasn't been compiled yet).
 - [ ] Try it on the board with every light paired, in red alert and
       `weather simulate warning`.
 
 Needs the board.
+
+## Zigbee groups for the lights that show the same
+
+`SendQueue` already sends one command to a group when every light in it
+waits for exactly that command (host tests: red alert, a weather alert on
+two wall lights, a light out of reach, the broadcast budget). Nothing
+gives it groups yet, so every command still goes out unicast.
+
+- [ ] Derive the candidate groups from `kTopology` at compile time: every
+      light, each zone and layout group, each zone's alert and precip
+      lights, and each of those without the alert lights, the precip
+      lights or both. Drop duplicates and any of fewer than two lights;
+      fixed ids from a base. `static_assert` a cap on groups per light.
+- [ ] Provisioning: on discovery, Groups cluster *Add Group* for each of a
+      bulb's groups; *Remove All Groups* first when the table's hash in
+      NVS has changed. Check the bulb's group capacity.
+- [ ] `SendQueue` uses only a group whose members all confirmed joining
+      (a `GroupJoined` event), not the groups it's given.
+- [ ] Check on the board that `EZB_ADDR_MODE_GROUP` sends reach the bulbs
+      together.
+
+Needs the board.
+
+## The simulator
+
+`sunsim.sim` (`sim/`) runs the core on virtual time with a simulated Zigbee
+network (`SimNetwork`, an `ev::Radio` like the `ZigbeeAdapter`), and the
+host tests run whole scenarios on it (suite `sim`).
+
+- [ ] A `sunsim-sim` program: a scenario from a file (devices, presses,
+      weather, dropouts, time to run), printing the bulbs as they change.
+- [ ] Simulated settings (`SettingsStore`) and weather (`InternetSync`
+      from saved JSON, through `sunsim.weather`'s readers).
+- [ ] The stack's frame buffers in `SimNetwork`, so #14's overrun shows.
+- [ ] Group provisioning in `SimNetwork` (Groups cluster *Add Group*, a
+      capacity per bulb) once sunsim sends it.
+- [ ] Split the ZigbeeAdapter: the frame decoding (presses, acks) into a
+      portable part the simulator can run too.
+
+## build2
+
+Packages for the portable parts (`sunsim.ev`, `sunsim.core`,
+`sunsim.weather`, `sunsim.sim`) and their tests; the firmware stays on
+ESP-IDF's CMake, compiling the same sources.
+
+- [ ] Prove `import std` / `std.compat` with GCC 15 under build2 (0.18.1):
+      build2 builds the std modules itself only for Clang and MSVC, so
+      GCC's `bits/std.cc` would be built as a module of its own, as
+      `cmake/import_std.cmake` does.
+- [ ] Then the packages, and the CMake host build retires.
 
 ## Rename `Mode::Daylight` to `Mode::Auto`
 

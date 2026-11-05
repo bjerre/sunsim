@@ -28,7 +28,9 @@ export namespace sunsim::platform {
 // forms/rejoins sunsim's network, and translates in both directions:
 //   stack -> events : NetworkUp, DeviceAnnounced, EndpointFound, BindResult,
 //                     PingResult, AckReceived, ButtonPressed
-//   events -> stack : SetLight, Discover, Bind, Ping, OpenNetwork, FactoryReset
+//   events -> stack : SendLight, Discover, Bind, Ping, OpenNetwork, FactoryReset
+// and paces the bulb commands: while core::SendQueue has some waiting
+// (SendsWaiting), it posts a SendSlot every kSendGap for the next one.
 // The on() handlers run on the app task, which holds the stack's lock
 // (StackLock) while processing events; the stack callbacks only post.
 class ZigbeeAdapter {
@@ -50,7 +52,8 @@ public:
         void unlock();
     };
 
-    void on(const ev::SetLight &e);
+    void on(const ev::SendsWaiting &);
+    void on(const ev::SendLight &e);
     void on(const ev::Discover &e);
     void on(const ev::Bind &e);
     void on(const ev::Ping &e);
@@ -76,6 +79,7 @@ private:
     static void zclTrampoline(ezb_zcl_core_action_callback_id_t callback_id, void *message);
     static bool apsTrampoline(const ezb_apsde_data_ind_t *ind);
     static void retryTrampoline(void *arg);
+    static void sendSlotTrampoline(void *arg);
     static void onMatchDescResult(const ezb_zdo_match_desc_req_result_t *result, void *user_ctx);
     static void onBindResult(const ezb_zdp_bind_req_result_t *result, void *user_ctx);
     static void onPingResult(const ezb_zdo_active_ep_req_result_t *result, void *user_ctx);
@@ -84,15 +88,19 @@ private:
     EventGroupHandle_t       ready_               = nullptr;
     esp_timer_handle_t       retry_timer_         = nullptr;
     ezb_bdb_comm_mode_mask_t pending_retry_mode_  = 0;
+    esp_timer_handle_t       send_timer_          = nullptr; // the next SendSlot
 
     // The button's short address (0xFFFF = none), read by the APS hook on the
     // Zigbee task to decide synchronously whether to consume a frame.
     std::atomic<uint16_t> button_short_{0xFFFF};
 
     // Bulb commands the stack refused to queue (e.g. out of buffers),
-    // summarised every kSendReport so silent drops show up in the log.
+    // summarised every kSendReport so silent drops show up in the log, with
+    // the most lights that had commands waiting meanwhile.
     uint32_t    sends_           = 0;
     uint32_t    send_failures_   = 0;
+    uint32_t    group_sends_     = 0;
+    uint8_t     backlog_peak_    = 0;
     ezb_err_t   last_send_error_ = EZB_ERR_NONE;
     ev::Instant report_start_{};
 
@@ -100,6 +108,8 @@ private:
     // pointer (its ZDO requests do: user_ctx carries the role).
     static ZigbeeAdapter *s_self;
 };
+
+static_assert(ev::Radio<ZigbeeAdapter>);
 
 } // namespace sunsim::platform
 
@@ -111,6 +121,12 @@ constexpr const char *kTag = "ZIGBEE";
 constexpr EventBits_t kReadyBit = BIT0;
 
 constexpr auto kSendReport = std::chrono::seconds{10};
+
+// Between bulb commands: what the stack's buffers keep up with, and long
+// enough that what a moment's events ask of every light (the program's
+// targets and the weather's, a bus pass or two apart) is all waiting by the
+// first slot, so the lights showing the same can share a group command.
+constexpr auto kSendGap = std::chrono::milliseconds{25};
 
 // Endpoint on which sunsim issues On/Off, Level and Color Control client
 // commands to the bulbs.
@@ -520,28 +536,39 @@ void ZigbeeAdapter::onPingResult(const ezb_zdo_active_ep_req_result_t *result, v
 
 // ---- Events -> stack (app task; it holds the lock) ------------------------------
 
-void ZigbeeAdapter::on(const ev::SetLight &e)
+void ZigbeeAdapter::on(const ev::SendsWaiting &)
 {
-    const BulbEndpoint bulb{e.short_addr, e.endpoint, kLightCtrlEp};
+    if (!send_timer_) {
+        const esp_timer_create_args_t args{
+            .callback              = &ZigbeeAdapter::sendSlotTrampoline,
+            .arg                   = this,
+            .dispatch_method       = ESP_TIMER_TASK,
+            .name                  = "zb_send",
+            .skip_unhandled_events = false,
+        };
+        ESP_ERROR_CHECK(esp_timer_create(&args, &send_timer_));
+    }
+    if (!esp_timer_is_active(send_timer_)) {
+        esp_timer_start_once(send_timer_, static_cast<uint64_t>(std::chrono::microseconds{kSendGap}.count()));
+    }
+}
 
-    // A saturated color goes before the level, whites after it.
-    const auto *hue_sat = e.color ? std::get_if<ev::HueSat>(&*e.color) : nullptr;
-    if (e.power && *e.power) {
-        countSend(bulb.turnOn());
-    }
-    if (hue_sat) {
-        countSend(bulb.setHueSaturation(hue_sat->hue, hue_sat->saturation, e.color_transition));
-    }
-    if (e.level) {
-        countSend(bulb.setLevel(*e.level, e.level_transition));
-    }
-    if (const auto *xy = e.color ? std::get_if<ev::Xy>(&*e.color) : nullptr) {
-        countSend(bulb.setColorXY(xy->x, xy->y, e.color_transition));
+void ZigbeeAdapter::on(const ev::SendLight &e)
+{
+    const BulbEndpoint bulb = e.to.group ? BulbEndpoint::group(e.to.address, kLightCtrlEp)
+                                         : BulbEndpoint{e.to.address, e.to.endpoint, kLightCtrlEp};
+    backlog_peak_           = std::max(backlog_peak_, e.backlog);
+    group_sends_ += e.to.group ? 1 : 0;
+    if (e.power) {
+        countSend(*e.power ? bulb.turnOn() : bulb.turnOff());
+    } else if (e.level) {
+        countSend(bulb.setLevel(*e.level, e.transition));
+    } else if (const auto *hue_sat = e.color ? std::get_if<ev::HueSat>(&*e.color) : nullptr) {
+        countSend(bulb.setHueSaturation(hue_sat->hue, hue_sat->saturation, e.transition));
+    } else if (const auto *xy = e.color ? std::get_if<ev::Xy>(&*e.color) : nullptr) {
+        countSend(bulb.setColorXY(xy->x, xy->y, e.transition));
     } else if (const auto *mireds = e.color ? std::get_if<ev::Mireds>(&*e.color) : nullptr) {
-        countSend(bulb.setColorTemperature(mireds->value, e.color_transition));
-    }
-    if (e.power && !*e.power) {
-        countSend(bulb.turnOff());
+        countSend(bulb.setColorTemperature(mireds->value, e.transition));
     }
 }
 
@@ -555,15 +582,17 @@ void ZigbeeAdapter::countSend(ezb_err_t err)
     const ev::Instant now = ev::BootClock::now();
     if (now - report_start_ >= kSendReport) {
         if (send_failures_ > 0) {
-            ev::log::warn(kTag, "{} of {} bulb commands not queued in the last {}s (last err 0x{:x})",
+            ev::log::warn(kTag, "{} of {} bulb commands not queued in the last {}s (last err 0x{:x}; up to {} lights waiting)",
                           send_failures_, sends_,
-                          secondsOf(now - report_start_), last_send_error_);
+                          secondsOf(now - report_start_), last_send_error_, backlog_peak_);
         } else {
-            ev::log::debug(kTag, "{} bulb commands sent in the last {}s", sends_,
-                           secondsOf(now - report_start_));
+            ev::log::debug(kTag, "{} bulb commands sent in the last {}s, {} to groups; up to {} lights waiting", sends_,
+                           secondsOf(now - report_start_), group_sends_, backlog_peak_);
         }
         sends_           = 0;
         send_failures_   = 0;
+        group_sends_     = 0;
+        backlog_peak_    = 0;
         report_start_    = now;
     }
 }
@@ -683,6 +712,11 @@ bool ZigbeeAdapter::apsTrampoline(const ezb_apsde_data_ind_t *ind)
 void ZigbeeAdapter::retryTrampoline(void *arg)
 {
     static_cast<ZigbeeAdapter *>(arg)->retryCommissioning();
+}
+
+void ZigbeeAdapter::sendSlotTrampoline(void *arg)
+{
+    static_cast<ZigbeeAdapter *>(arg)->post_(ev::SendSlot{.at = ev::BootClock::now()});
 }
 
 } // namespace sunsim::platform

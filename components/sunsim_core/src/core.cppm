@@ -19,6 +19,7 @@ export import :overlays;
 export import :program;
 export import :program_host;
 export import :red_alert_program;
+export import :send_queue;
 export import :solar;
 export import :sky;
 export import :sky_model;
@@ -30,10 +31,12 @@ export namespace sunsim::core {
 // All of the pure application logic. Platform code (radio, storage, clock,
 // console, display) talks to it only through events on the bus.
 struct CoreModules {
+    // `groups`: the Zigbee groups the bulbs are in, for SendQueue.
     CoreModules(const ev::Post &post, ev::Addresses addresses,
-                ev::Installation profile = ev::kDefaultInstallation)
+                ev::Installation profile = ev::kDefaultInstallation, std::vector<LightGroup> groups = {})
         : installation(std::move(profile)), mode(post, installation), registry(post, addresses), sky(post),
-          programs(post, installation), overlays(post, installation), output(post), status(post, installation)
+          programs(post, installation), overlays(post, installation), output(post),
+          sends(post, std::move(groups)), status(post, installation)
     {
     }
 
@@ -44,6 +47,7 @@ struct CoreModules {
     ProgramHost     programs;
     Overlays        overlays;
     LightOutput     output;
+    SendQueue       sends;
     StatusModel     status;
 };
 
@@ -82,7 +86,7 @@ namespace sunsim::core {
 
 void wireCore(ev::EventBus &bus, CoreModules &m)
 {
-    bus.attach(m.mode, m.registry, m.sky, m.programs, m.overlays, m.output, m.status);
+    bus.attach(m.mode, m.registry, m.sky, m.programs, m.overlays, m.output, m.sends, m.status);
 }
 
 } // namespace sunsim::core

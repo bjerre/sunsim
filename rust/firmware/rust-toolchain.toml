@@ -1,0 +1,5 @@
+# Pinned: nightly-2026-10-29's std doesn't build for ESP-IDF (its espidf
+# fs.rs reads stat's st_atime, which its libc now calls st_atim).
+[toolchain]
+channel = "nightly-2026-09-14"
+components = ["rust-src", "clippy"]

@@ -1,0 +1,92 @@
+# sunsim in Rust: the pure layers
+
+A port of everything that doesn't touch ESP-IDF, as a cargo workspace:
+
+| Crate | Mirrors | Holds |
+|---|---|---|
+| `ev` (sunsim-ev) | `components/sunsim_events` | value types, events, the bus, flows, settings, the radio contract, the room (from `config/installation.json`), runtime installation profiles |
+| `sunsim-core` | `components/sunsim_core` | the registry, modes, programs, overlays, output, send queue, sky and status models, the math |
+| `weather` (sunsim-weather) | `components/sunsim_weather` | the streaming JSON scanner and the Open-Meteo / NWS readers |
+| `platform` (sunsim-platform) | `components/sunsim_platform`, the logic | the platform modules without ESP-IDF, their hardware behind traits: the Clock, the SettingsStore (on a `Storage`: NVS's typed keys), the InternetSync (on an `Internet`: Wi-Fi sessions, SNTP, HTTPS), the saved Wi-Fi networks, the console's commands and the status display's picture (embedded-graphics) |
+| `web` (sunsim-web) | `web/simulator.cxx` (feature/browser-simulation) | the browser simulator's office: the core on `sim`'s network, with the page's clock, as wasm |
+| `sim` (sunsim-sim) | `sim/` | virtual time, the simulated clock and Zigbee network, `World` |
+| `tests` (sunsim-tests) | `test/host` | the harness (`src/lib.rs`) and the host tests, one file per area |
+
+    cargo test                 # everything
+    cargo test --test sim      # one area
+    cargo test ambiguous       # tests whose names match
+
+## The installation
+
+`config/installation.json` is the room: its device groups (`LAYOUT`) and its zones
+(`ZONES`), turned into Rust by `ev/build.rs` at build time and checked by the same
+`const fn topology_of` as before, so a mistake in the document is a build error. That's
+`Installation::built_in()`.
+
+An `Installation` can also come at runtime, from a profile (`ev::parse_profile`, or
+`ProfileBuilder` a step at a time): the same eight lights and button, regrouped into 1-8
+zones with their own daily windows, looks, peaks, button and weather lights (see
+`web/public/profiles/`). The core takes the installation it runs as an
+`Arc<Installation>`. On the board a profile is uploaded over the console (`./sunsim
+profile upload FILE`, chunked through the `profile` command into NVS by
+`platform::ProfileStore`), checked whole, and used from the next boot; `./sunsim profile
+clear` goes back to the built-in one, as does a saved profile that no longer parses. In
+the browser simulator, `?profile=office|studio` (or the page's Setup picker) builds one
+before the office starts.
+
+The status display is the C++ firmware's sky: the sky's colors by the sun's elevation, the
+sun where its bearing and elevation put it, a cloud when it's cloudy or falling, the
+time, sunrise and sunset over it, and a dot per device (`platform::display`,
+`SUNSIM_FRAME=frame.ppm cargo test --test display the_picture` writes one out).
+
+## How the C++ idioms map
+
+- **`EventBus::attach` finding `on(const T &)` overloads** → `Module::on(&mut self, &Event)` with
+  a `match`; anything else is ignored. A module is attached as `Rc<RefCell<M>>`.
+- **`ev::Radio` (a concept)** → the `Radio` trait: a method per request, so a radio that misses
+  one doesn't compile; `radio::requests()` routes the events to them.
+- **Coroutine flows** (`Flow`, `Timer`, `Inbox`) → async blocks, resumed inline by the Timer or
+  Inbox they wait on (no executor). Dropping a `Flow` cancels it. A flow can't borrow its module,
+  so each module with flows splits into the module (handlers, flow slots) and an `Rc<Shared>`
+  (post, timer, inboxes, and a `RefCell<State>` never held across an `.await`).
+- **`consteval` room checks** (`topology_of`, `addresses_of`, the settings keys) → `const fn`s
+  evaluated into `const` items: a `panic!` there is a compile error with its message.
+- **Pointers to `ProgramConfig` members** (`Tunable`, the settings table) → `Field<T>`, a getter
+  and setter pair made by `field!(name)`; `setting!(name)` is a `Tunable::Setting`.
+- **`std::chrono`** → `ev::time`: a signed microsecond `Duration` and boot `Instant`, local
+  `LocalSeconds`/`LocalDays`, UTC `SysSeconds`, Zigbee `Transition` (tenths).
+- **Logging** → the `log` crate, with the C++ tags as targets (esp-idf-svc's logger takes it
+  on the board).
+
+## The firmware (firmware/)
+
+The board's side, in progress: its own crate, outside the workspace, for the C6's
+`riscv32imac-esp-espidf` target (std on ESP-IDF through esp-idf-svc, the eim-installed
+IDF v6.1, a pinned nightly). `firmware/build.sh --release` builds it with IDF's
+environment loaded; `firmware/flash.sh` flashes the app alone (ota_0), keeping the bootloader, partition table and NVS.
+
+So far: the core, the Clock (`platform::Clock` on `src/clock.rs`'s timers and time zone)
+the SettingsStore (`platform::SettingsStore` on `src/storage.rs`'s NVS, the C++
+firmware's keys and widths), the InternetSync (`platform::InternetSync` on
+`src/internet.rs`: esp-idf-svc's Wi-Fi, SNTP and HTTP client) and the Zigbee adapter on
+the app task, as `main/main.cpp` runs them. Menuconfig's
+settings come from the build's environment instead (`src/config.rs`:
+`SUNSIM_TZ=... ./build.sh --release`). `src/zigbee/` is the C++ `ZigbeeAdapter` ported: `ffi.rs` (the C
+names, the raw reads), `bulb.rs` (the ZCL light commands), `mod.rs` (the stack task, its
+callbacks, `ev::Radio`). esp-zigbee-lib comes through `components/zigbee_shim`, which
+depends on it and gives bindgen its function-like macros as functions. Not yet run on a
+board. The C++ platform is all ported.
+
+## The browser simulator (web/)
+
+The Svelte page in `web/` runs the Rust core as wasm: `rust/web` is the simulated office
+(the core on `sim`'s network, the page's clock and location, its JSON state: the lights
+as commanded, the program flow with each light's day curve, the sky), exported as the
+functions the page calls (`web/wasm.d.ts`, the profile builder's included), with a small
+loader (`rust/web/js/sunsim_web_simulator.js`) in place of Emscripten's.
+
+    rust/web/build.sh                 # the wasm and its loader, at the repository's root
+    node test/web/wasm_smoke.mjs      # the module as the page uses it
+    bun install && bun run dev        # the page (or npm)
+
+`cargo test --test web` checks the same steps on the host.

@@ -1,0 +1,5 @@
+# On top of the C++ firmware's (../../sdkconfig.defaults): what Rust's std needs.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
+# Zigbee as the C++ firmware has it: a coordinator, on the C6's own radio.
+CONFIG_ZB_ZCZR=y
+CONFIG_ZB_RADIO_NATIVE=y

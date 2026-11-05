@@ -23,3 +23,7 @@ __pycache__/
 /web/dist/
 /web/app.js
 /web/simulator.js
+rust/target/
+rust/firmware/target/
+rust/firmware/.embuild/
+rust/firmware/backups/
