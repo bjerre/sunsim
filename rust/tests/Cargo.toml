@@ -1,0 +1,15 @@
+[package]
+name = "sunsim-tests"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ev.workspace = true
+sunsim-core.workspace = true
+weather.workspace = true
+sim.workspace = true
+platform.workspace = true

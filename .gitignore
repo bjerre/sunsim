@@ -10,3 +10,7 @@ sdkconfig.old
 .claude/
 build-host/
 .cache/
+rust/target/
+rust/firmware/target/
+rust/firmware/.embuild/
+rust/firmware/backups/

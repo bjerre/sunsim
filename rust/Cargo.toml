@@ -1,0 +1,27 @@
+# sunsim's pure layers in Rust: the event vocabulary (ev), the application
+# logic (sunsim-core), the weather replies' readers (weather), the
+# platform's logic that needs no ESP-IDF (platform) and the simulator (sim), with the host tests (tests/). No ESP-IDF here, as in the
+# C++ components they mirror; `cargo test` runs everything.
+[workspace]
+resolver = "3"
+members = ["ev", "core", "weather", "platform", "sim", "tests"]
+exclude = ["firmware"] # its own target and toolchain
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+publish = false
+
+[workspace.dependencies]
+log = "0.4"
+ev = { path = "ev", package = "sunsim-ev" }
+sunsim-core = { path = "core" }
+weather = { path = "weather", package = "sunsim-weather" }
+sim = { path = "sim", package = "sunsim-sim" }
+platform = { path = "platform", package = "sunsim-platform" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+await_holding_refcell_ref = "deny"

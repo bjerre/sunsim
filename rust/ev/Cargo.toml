@@ -1,0 +1,11 @@
+[package]
+name = "sunsim-ev"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+log.workspace = true

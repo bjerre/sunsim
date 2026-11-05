@@ -1,0 +1,15 @@
+[build]
+target = "riscv32imac-esp-espidf"
+
+[target.riscv32imac-esp-espidf]
+linker = "ldproxy"
+# Not `espflash flash`: it writes its own bootloader and partition table,
+# which can move NVS. ./flash.sh writes the app alone.
+runner = "./flash.sh"
+rustflags = ["--cfg", "espidf_time64"]
+
+[unstable]
+build-std = ["std", "panic_abort"]
+
+[env]
+MCU = "esp32c6"
